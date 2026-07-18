@@ -2,19 +2,10 @@
 
 Local-first CLI knowledge base for indexing and querying personal documents with RAG. Single SQLite database, modular architecture, provider-agnostic LLM and embedding interfaces.
 
-## Status
+## Documentation
 
-| Subplan | Area | State |
-|---------|------|-------|
-| 01 — Foundation | CLI skeleton, config loading, `tbuk init` | ✅ done |
-| 02 — Storage | SQLite schema, migrations, typed repositories, FTS5 | ✅ done |
-| 03 — Preprocessing | Text extraction (Markdown, plain text, PDF, HTML), chunking, SHA256 | ✅ done |
-| 04 — Embeddings | Embedding provider interface + adapters (llama.cpp, Ollama, OpenAI) | ✅ done |
-| 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | ✅ done |
-| 06 — Ingestion | SHA256 dedup, chunking, store pipeline | ✅ done |
-| 07 — Search | Vector search, FTS5 keyword search, hybrid | ✅ done |
-| 08 — RAG | Retrieval pipeline, prompt templates, streaming | ✅ done |
-| 09 — Management | `tbuk stats`, `tbuk delete`, `tbuk update` | ✅ done |
+See [User Guide](docs/user-guide.md) for a full walkthrough — what RAG is,
+how to index your documents, and how to query your knowledge base.
 
 ## Requirements
 
@@ -113,6 +104,18 @@ chunks_fts  — FTS5 virtual table over chunks.text (auto-synced via triggers)
 ```
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `tbuk` command not found after install | Go bin dir not in PATH | Add `export PATH="$PATH:$(go env GOPATH)/bin"` to shell profile and restart terminal |
+| `tbuk doctor` shows LLM or embedding unreachable | llama.cpp not running, or wrong port | Start llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` |
+| `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
+| `tbuk ask` returns irrelevant or vague answers | Low retrieval quality or document not ingested | Run `tbuk search <query>` to inspect retrieved chunks; run `tbuk update <path>` if the file changed |
+| `tbuk ask` is very slow | Large `--top` value, slow model, or large chunks | Reduce `--top`; use a faster LLM model; reduce `chunking.size` in config |
+| Database error on start | DB file missing or corrupted | Check `database.path` in config; run `tbuk init` to recreate missing dirs (does not overwrite existing DB) |
+| Embedding dimension mismatch error | Model changed since last ingest | Set `embedding.dimension` in config to match the new model; re-ingest all documents with `--force` |
 
 ## License
 
