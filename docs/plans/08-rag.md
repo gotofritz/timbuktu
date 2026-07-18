@@ -180,3 +180,15 @@ No new packages (stdlib `text/template`, `gopkg.in/yaml.v3` already present).
 ## PR Scope
 
 One PR. Depends on Subplan 05 (LLM), Subplan 07 (search).
+
+## Doctor
+
+Add to `tbuk doctor` output:
+
+```
+Prompts
+  dir:         ~/.tbuk/prompts/
+  templates:   qa, explain   (one line per discovered template)
+```
+
+Walk `~/.tbuk/prompts/` and list templates that have a valid `manifest.yaml`.

@@ -137,3 +137,17 @@ No new packages beyond stdlib (`bufio`, `net/http`, `encoding/json`).
 ## PR Scope
 
 One PR. Depends on Subplan 01 (config). No storage, no embeddings.
+
+## Doctor
+
+Expand the `LLM` section in `tbuk doctor`:
+
+```
+LLM (llama)
+  url:         http://localhost:8080
+  status:      ✓ healthy (HTTP 200)
+  model:       (from /v1/models or config)
+  max_tokens:  4096
+```
+
+Attempt a `/v1/models` probe and report the active model name if discoverable.

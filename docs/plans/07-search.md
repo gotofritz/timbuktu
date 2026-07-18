@@ -159,3 +159,17 @@ No new packages (stdlib `math` for cosine, `database/sql` already present).
 ## PR Scope
 
 One PR. Depends on Subplan 02 (storage) and Subplan 04 (embeddings).
+
+## Doctor
+
+Add to `tbuk doctor` output:
+
+```
+Search
+  fts5:        ✓ available
+  vector:      ✓ available (cosine, in-process)
+  hybrid:      ✓ available (RRF)
+```
+
+Run a trivial FTS5 query against `chunks_fts` to confirm the index is intact.
+Report which search modes are compiled in.
