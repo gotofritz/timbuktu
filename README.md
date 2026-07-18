@@ -12,7 +12,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 | 04 — Embeddings | Embedding provider interface + adapters (llama.cpp, Ollama, OpenAI) | ✅ done |
 | 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | ✅ done |
 | 06 — Ingestion | SHA256 dedup, chunking, store pipeline | ✅ done |
-| 07 — Search | Vector search, FTS5 keyword search, hybrid | planned |
+| 07 — Search | Vector search, FTS5 keyword search, hybrid | ✅ done |
 | 08 — RAG | Retrieval pipeline, prompt templates, streaming | planned |
 | 09 — Management | `tbuk stats`, `tbuk delete`, `tbuk update` | planned |
 
@@ -30,6 +30,8 @@ tbuk version
 tbuk doctor              # check config, database, LLM connectivity, and extractors
 tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extracted/ (--dry-run, --output-dir)
 tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose)
+tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
+tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -86,9 +88,9 @@ internal/
   embeddings/       Embedder interface; llama.cpp, Ollama, OpenAI adapters
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline
   llm/              LLM interface; Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
-  retrieval/        (planned) vector + FTS5 + hybrid search
+  search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
+  retrieval/        (planned) retrieval pipeline
   prompts/          (planned) template loader and renderer
-  search/           (planned) search command handler
   metadata/         (planned) metadata command handler
 ```
 
