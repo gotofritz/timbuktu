@@ -30,17 +30,17 @@ Update `docs/initial-context.md` before merging changes affecting:
 
 ## Workflow
 
-Use TDD (`red → green → refactor`).
+**MANDATORY TDD — no exceptions. A PreToolUse hook enforces this.**
 
-Reference: `.claude/skills/tdd.md`
-
-Required flow:
-
-1. Write failing test
-2. Confirm correct failure
-3. Implement minimal fix
+1. Write `_test.go` with failing tests FIRST
+2. Run `go test` — confirm it fails with the expected error
+3. Write minimal implementation to make tests pass
 4. Refactor with tests green
 5. Run `make check-ci` before PR
+
+**Never write a `.go` implementation file before the corresponding `_test.go` exists in the same directory. The hook will block you.**
+
+Reference: `.claude/skills/tdd.md`
 
 ## Decision Order
 
