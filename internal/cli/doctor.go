@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -54,6 +55,8 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 	printCheck("url", cfg.LLM.BaseURL, "")
 	msg, ok = CheckHTTP(cfg.LLM.BaseURL+"/health", client)
 	printCheck("status", msg, boolToStatus(ok))
+	printCheck("model", CheckLLMModel(cfg.LLM.BaseURL, cfg.LLM.Model, client), "")
+	printCheck("max_tokens", fmt.Sprintf("%d", cfg.LLM.MaxTokens), "")
 
 	printSection("Embedding (" + cfg.Embedding.Provider + ")")
 	printCheck("url", cfg.Embedding.BaseURL, "")
@@ -68,6 +71,31 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 	printCheck("extractors", "markdown, text, html, pdf", "✓")
 
 	return nil
+}
+
+// CheckLLMModel tries GET {baseURL}/v1/models and returns the first model ID.
+// Falls back to the model name from config if the probe fails or returns no models.
+func CheckLLMModel(baseURL, cfgModel string, client *http.Client) string {
+	resp, err := client.Get(baseURL + "/v1/models") //nolint:noctx
+	if err != nil {
+		return cfgModel
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return cfgModel
+	}
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return cfgModel
+	}
+	if len(body.Data) == 0 {
+		return cfgModel
+	}
+	return body.Data[0].ID
 }
 
 // CheckConfig verifies the config file exists and contains valid YAML.

@@ -14,7 +14,7 @@ Module: `github.com/gotofritz/timbuktu`
 | 02 | Storage — SQLite schema, migrations, typed repos, FTS5 | ✅ done |
 | 03 | Preprocessing — text extraction, chunking, SHA256 | ✅ done |
 | 04 | Embeddings — `Embedder` interface, llama/ollama/openai adapters | ✅ done |
-| 05 | LLM Providers — `LLM` interface, provider adapters | stub |
+| 05 | LLM Providers — `LLM` interface, provider adapters | ✅ done |
 | 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | stub |
 | 07 | Search — vector, FTS5 keyword, hybrid | stub |
 | 08 | RAG — retrieval pipeline, prompt templates, streaming | stub |
@@ -34,7 +34,7 @@ internal/
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
   embeddings/       Embedder interface + factory; llama, ollama, openai adapters
-  llm/              STUB — LLM interface (not yet implemented)
+  llm/              LLM interface + factory; claude, openai, ollama adapters (SSE + JSON-lines streaming)
   ingest/           STUB
   prompts/          STUB
   retrieval/        STUB
@@ -147,6 +147,42 @@ func NewEmbedder(cfg config.EmbeddingConfig) (Embedder, error)
 
 `base_url` defaults to `http://localhost:8080` (llama/ollama) or `https://api.openai.com` (openai).
 `dimension` is read from config — no auto-detection round-trip.
+
+---
+
+## LLM
+
+```go
+type Role string
+const (
+    RoleSystem    Role = "system"
+    RoleUser      Role = "user"
+    RoleAssistant Role = "assistant"
+)
+
+type Message struct { Role Role; Content string }
+type Token   struct { Text string; Done bool; Error error }
+type CallOptions struct { Model string; Temperature float64; MaxTokens int }
+
+type LLM interface {
+    Chat(ctx context.Context, messages []Message, opts ...CallOptions) (<-chan Token, error)
+}
+
+type LLMError struct { Provider string; StatusCode int; Message string }
+func AsLLMError(err error, target **LLMError) bool
+
+func NewLLM(cfg *config.LLMConfig) (LLM, error)
+```
+
+| Provider | Key | Endpoint | Notes |
+|----------|-----|----------|-------|
+| `claude` | `ANTHROPIC_API_KEY` env | `POST {base_url}/v1/messages` | SSE, `content_block_delta` events, `x-api-key` header |
+| `openai` | `OPENAI_API_KEY` env | `POST {base_url}/v1/chat/completions` | SSE, `[DONE]` sentinel, Bearer auth |
+| `ollama` | — | `POST {base_url}/api/chat` | JSON-lines streaming, `"done":true` sentinel |
+
+`base_url` defaults to `https://api.anthropic.com` (claude), `https://api.openai.com` (openai), `http://localhost:11434` (ollama).
+
+Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
 
 ---
 
