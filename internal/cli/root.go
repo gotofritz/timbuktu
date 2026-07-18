@@ -41,6 +41,8 @@ func New() *cobra.Command {
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newPreprocessCmd())
 	root.AddCommand(newIngestCmd())
+	root.AddCommand(newSearchCmd())
+	root.AddCommand(newFindCmd())
 
 	return root
 }

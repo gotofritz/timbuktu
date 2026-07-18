@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gotofritz/timbuktu/internal/config"
+	"github.com/gotofritz/timbuktu/internal/search"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
@@ -82,6 +83,20 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 
 	printSection("Preprocessing")
 	printCheck("extractors", "markdown, text, html, pdf", "✓")
+
+	printSection("Search")
+	ftsStatus := "✓"
+	if ok {
+		if db2, err2 := storage.Open(cfg.Database.Path); err2 == nil {
+			if err3 := search.CheckFTS5(db2.DB()); err3 != nil {
+				ftsStatus = "✗"
+			}
+			_ = db2.Close()
+		}
+	}
+	printCheck("fts5", "available", ftsStatus)
+	printCheck("vector", "available (cosine, in-process)", "✓")
+	printCheck("hybrid", "available (RRF)", "✓")
 
 	return nil
 }
