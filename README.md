@@ -14,7 +14,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 | 06 — Ingestion | SHA256 dedup, chunking, store pipeline | ✅ done |
 | 07 — Search | Vector search, FTS5 keyword search, hybrid | ✅ done |
 | 08 — RAG | Retrieval pipeline, prompt templates, streaming | ✅ done |
-| 09 — Management | `tbuk stats`, `tbuk delete`, `tbuk update` | planned |
+| 09 — Management | `tbuk stats`, `tbuk delete`, `tbuk update` | ✅ done |
 
 ## Requirements
 
@@ -36,6 +36,9 @@ tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template
 tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR
+tbuk delete <path>       # remove a document and all its chunks (--yes skips prompt)
+tbuk update <path>       # re-ingest if SHA256 changed, skip otherwise (--force)
+tbuk stats               # knowledge base summary: doc/chunk counts, size (--format text|json)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -95,7 +98,7 @@ internal/
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
-  metadata/         (planned) metadata command handler
+  metadata/         stub (not yet active)
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces defined in `internal/llm` and `internal/embeddings`.
