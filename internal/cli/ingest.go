@@ -48,6 +48,7 @@ func newIngestCmd() *cobra.Command {
 					Overlap: cfg.Chunking.Overlap,
 				},
 				emb,
+				cfg.Preprocess.OutputDir,
 				os.Stdout,
 			)
 

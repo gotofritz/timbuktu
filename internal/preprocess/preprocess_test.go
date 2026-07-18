@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -183,6 +184,109 @@ func TestHashFile_known_file(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// ── Extract ───────────────────────────────────────────────────────────────────
+
+func TestExtract_markdown(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("# Title\n\nHello world.")
+	_ = f.Close()
+
+	text, mime, sha, err := preprocess.Extract(context.Background(), f.Name())
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if mime != "text/markdown" {
+		t.Errorf("mime = %q, want text/markdown", mime)
+	}
+	if sha == "" {
+		t.Error("sha empty")
+	}
+	if !strings.Contains(text, "Hello world.") {
+		t.Errorf("text missing content; got %q", text)
+	}
+}
+
+func TestExtract_unknownMIME(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "*.xyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	_, _, _, err = preprocess.Extract(context.Background(), f.Name())
+	if err == nil {
+		t.Error("expected error for unknown MIME type")
+	}
+}
+
+// ── ExtractToFile ─────────────────────────────────────────────────────────────
+
+func TestExtractToFile_savesText(t *testing.T) {
+	src, err := os.CreateTemp(t.TempDir(), "*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = src.WriteString("plain text content here")
+	_ = src.Close()
+
+	outDir := t.TempDir()
+	savedPath, err := preprocess.ExtractToFile(context.Background(), src.Name(), outDir)
+	if err != nil {
+		t.Fatalf("ExtractToFile: %v", err)
+	}
+	data, err := os.ReadFile(savedPath)
+	if err != nil {
+		t.Fatalf("read saved file: %v", err)
+	}
+	if !strings.Contains(string(data), "plain text content here") {
+		t.Errorf("saved file missing content; got %q", string(data))
+	}
+}
+
+func TestExtractToFile_filenameIsSHA256(t *testing.T) {
+	src, err := os.CreateTemp(t.TempDir(), "*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "deterministic content"
+	_, _ = src.WriteString(content)
+	_ = src.Close()
+
+	h := sha256.Sum256([]byte(content))
+	wantSHA := fmt.Sprintf("%x", h)
+
+	outDir := t.TempDir()
+	savedPath, err := preprocess.ExtractToFile(context.Background(), src.Name(), outDir)
+	if err != nil {
+		t.Fatalf("ExtractToFile: %v", err)
+	}
+	base := filepath.Base(savedPath)
+	if base != wantSHA+".txt" {
+		t.Errorf("filename = %q, want %q", base, wantSHA+".txt")
+	}
+}
+
+func TestExtractToFile_createsOutputDir(t *testing.T) {
+	src, err := os.CreateTemp(t.TempDir(), "*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = src.WriteString("some content")
+	_ = src.Close()
+
+	outDir := filepath.Join(t.TempDir(), "nested", "extracted")
+	_, err = preprocess.ExtractToFile(context.Background(), src.Name(), outDir)
+	if err != nil {
+		t.Fatalf("ExtractToFile: %v", err)
+	}
+	if _, err := os.Stat(outDir); os.IsNotExist(err) {
+		t.Error("output dir not created")
 	}
 }
 

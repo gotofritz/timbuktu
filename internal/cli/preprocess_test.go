@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,12 +10,12 @@ import (
 	"github.com/gotofritz/timbuktu/internal/cli"
 )
 
-func TestRunPreprocess_text_output(t *testing.T) {
+func TestPreviewExtracted_containsText(t *testing.T) {
 	path := writeTempFile(t, "hello.md", "# Title\n\nSome content here.")
 
 	var buf bytes.Buffer
-	if err := cli.RunPreprocess(path, "text", &buf); err != nil {
-		t.Fatalf("RunPreprocess: %v", err)
+	if err := cli.PreviewExtracted(path, &buf); err != nil {
+		t.Fatalf("PreviewExtracted: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "MIME:") {
@@ -25,57 +24,78 @@ func TestRunPreprocess_text_output(t *testing.T) {
 	if !strings.Contains(out, "SHA256:") {
 		t.Errorf("output missing SHA256 line; got %q", out)
 	}
-	if !strings.Contains(out, "Chunks:") {
-		t.Errorf("output missing Chunks line; got %q", out)
-	}
 }
 
-func TestRunPreprocess_json_output(t *testing.T) {
-	path := writeTempFile(t, "hello.txt", "Plain text content.")
-
+func TestPreviewExtracted_missingFile(t *testing.T) {
 	var buf bytes.Buffer
-	if err := cli.RunPreprocess(path, "json", &buf); err != nil {
-		t.Fatalf("RunPreprocess: %v", err)
-	}
-
-	var result struct {
-		Path   string `json:"path"`
-		MIME   string `json:"mime"`
-		SHA256 string `json:"sha256"`
-		Chunks []struct {
-			Index  int    `json:"index"`
-			Tokens int    `json:"tokens"`
-			Text   string `json:"text"`
-		} `json:"chunks"`
-	}
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("json decode: %v", err)
-	}
-	if result.MIME != "text/plain" {
-		t.Errorf("MIME = %q, want %q", result.MIME, "text/plain")
-	}
-	if result.SHA256 == "" {
-		t.Error("SHA256 empty")
-	}
-	if len(result.Chunks) == 0 {
-		t.Error("expected at least one chunk")
-	}
-}
-
-func TestRunPreprocess_missing_file(t *testing.T) {
-	var buf bytes.Buffer
-	err := cli.RunPreprocess("/no/such/file.txt", "text", &buf)
+	err := cli.PreviewExtracted("/no/such/file.txt", &buf)
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
 }
 
-func TestRunPreprocess_unknown_mime(t *testing.T) {
+func TestPreviewExtracted_unknownMIME(t *testing.T) {
 	path := writeTempFile(t, "doc.xyz", "content")
 	var buf bytes.Buffer
-	err := cli.RunPreprocess(path, "text", &buf)
+	err := cli.PreviewExtracted(path, &buf)
 	if err == nil {
 		t.Error("expected error for unknown MIME type")
+	}
+}
+
+func TestSaveExtracted_savesToDir(t *testing.T) {
+	path := writeTempFile(t, "hello.txt", "plain text content here")
+	outDir := t.TempDir()
+
+	savedPath, err := cli.SaveExtracted(path, outDir)
+	if err != nil {
+		t.Fatalf("SaveExtracted: %v", err)
+	}
+	if _, err := os.Stat(savedPath); err != nil {
+		t.Errorf("saved file not found: %v", err)
+	}
+	data, _ := os.ReadFile(savedPath)
+	if !strings.Contains(string(data), "plain text content here") {
+		t.Errorf("saved file missing content; got %q", string(data))
+	}
+}
+
+func TestPreprocessCommand_savesFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+	if err := runCLI("--config", cfgPath, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	srcFile := writeTempFile(t, "doc.txt", "some text content to preprocess")
+	outDir := t.TempDir()
+
+	err := runCLI("--config", cfgPath, "preprocess", srcFile, "--output-dir", outDir)
+	if err != nil {
+		t.Fatalf("preprocess: %v", err)
+	}
+	entries, _ := os.ReadDir(outDir)
+	if len(entries) != 1 {
+		t.Errorf("expected 1 file in outDir, got %d", len(entries))
+	}
+}
+
+func TestPreprocessCommand_dryRun(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+	if err := runCLI("--config", cfgPath, "init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	srcFile := writeTempFile(t, "doc.txt", "dry run content here")
+	outDir := t.TempDir()
+
+	err := runCLI("--config", cfgPath, "preprocess", srcFile, "--dry-run", "--output-dir", outDir)
+	if err != nil {
+		t.Fatalf("preprocess --dry-run: %v", err)
+	}
+	// dry-run must not write to outDir
+	entries, _ := os.ReadDir(outDir)
+	if len(entries) != 0 {
+		t.Errorf("dry-run wrote files to outDir: %d files", len(entries))
 	}
 }
 

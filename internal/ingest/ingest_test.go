@@ -10,6 +10,7 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/ingest"
+	"github.com/gotofritz/timbuktu/internal/preprocess"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
@@ -58,7 +59,7 @@ func openTestDB(t *testing.T) *storage.DB {
 	return db
 }
 
-func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ingest.Embedder) *ingest.Ingester {
+func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ingest.Embedder, extractedDir string) *ingest.Ingester {
 	t.Helper()
 	sqlDB := db.DB()
 	return ingest.NewIngester(
@@ -68,6 +69,7 @@ func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ing
 		ext,
 		&chunking.Chunker{Size: 50, Overlap: 0},
 		emb,
+		extractedDir,
 		nil, // progress: discard
 	)
 }
@@ -81,13 +83,27 @@ func writeTempFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
+// writeExtractedFile simulates a pre-existing extracted file (from preprocess).
+func writeExtractedFile(t *testing.T, extractedDir, sha, text string) {
+	t.Helper()
+	if err := os.MkdirAll(extractedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(extractedDir, sha+".txt")
+	if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // ── tests ────────────────────────────────────────────────────────────────────
 
 func TestIngester_newFile(t *testing.T) {
 	db := openTestDB(t)
-	ext := &mockExtractor{text: strings.Repeat("word ", 200)} // enough for multiple chunks
+	extractedDir := t.TempDir()
+	text := strings.Repeat("word ", 200) // enough for multiple chunks
+	ext := &mockExtractor{text: text}    // auto-preprocess fallback
 	emb := &mockEmbedder{dim: 4}
-	ing := newIngester(t, db, ext, emb)
+	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "doc.md", "# Hello\nThis is content.")
@@ -104,7 +120,6 @@ func TestIngester_newFile(t *testing.T) {
 		t.Fatal("expected non-zero chunks")
 	}
 
-	// verify chunks in DB
 	sqlDB := db.DB()
 	var count int
 	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&count); err != nil {
@@ -115,22 +130,51 @@ func TestIngester_newFile(t *testing.T) {
 	}
 }
 
+func TestIngester_usesExtractedFile(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	// extractor returns wrong text — if ingester reads the pre-existing extracted
+	// file instead, we'll see the correct content in chunks.
+	ext := &mockExtractor{text: "WRONG TEXT should not appear"}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	dir := t.TempDir()
+	content := "original file content here"
+	path := writeTempFile(t, dir, "doc.txt", content)
+
+	// compute SHA of source file (matches what ingester will compute)
+	sha, err := computeSHA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeExtractedFile(t, extractedDir, sha, strings.Repeat("correct text ", 60))
+
+	res := ing.IngestFile(context.Background(), path, ingest.Options{})
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+	// extractor was not called — chunks come from extracted file, not mockExtractor
+	if res.Chunks == 0 {
+		t.Error("expected chunks from extracted file")
+	}
+}
+
 func TestIngester_skipUnchanged(t *testing.T) {
 	db := openTestDB(t)
+	extractedDir := t.TempDir()
 	ext := &mockExtractor{text: "some content here for testing"}
 	emb := &mockEmbedder{dim: 4}
-	ing := newIngester(t, db, ext, emb)
+	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "doc.txt", "hello world content text")
 
-	// first ingest
 	r1 := ing.IngestFile(context.Background(), path, ingest.Options{})
 	if r1.Err != nil {
 		t.Fatalf("first ingest error: %v", r1.Err)
 	}
 
-	// second ingest — same file, same SHA256
 	r2 := ing.IngestFile(context.Background(), path, ingest.Options{})
 	if r2.Err != nil {
 		t.Fatalf("second ingest error: %v", r2.Err)
@@ -142,9 +186,10 @@ func TestIngester_skipUnchanged(t *testing.T) {
 
 func TestIngester_reindexChanged(t *testing.T) {
 	db := openTestDB(t)
+	extractedDir := t.TempDir()
 	ext := &mockExtractor{text: "initial content for the document"}
 	emb := &mockEmbedder{dim: 4}
-	ing := newIngester(t, db, ext, emb)
+	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "doc.txt", "version one content")
@@ -153,9 +198,7 @@ func TestIngester_reindexChanged(t *testing.T) {
 	if r1.Err != nil {
 		t.Fatalf("first ingest: %v", r1.Err)
 	}
-	chunksAfterFirst := r1.Chunks
 
-	// overwrite with different content → different SHA256
 	if err := os.WriteFile(path, []byte("version two is a completely different document now"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -169,14 +212,11 @@ func TestIngester_reindexChanged(t *testing.T) {
 		t.Error("expected re-index, not skip")
 	}
 
-	// chunks in DB should reflect new document only
 	sqlDB := db.DB()
 	var total int
 	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
-	// old chunks deleted, new ones inserted
-	_ = chunksAfterFirst
 	if total != r2.Chunks {
 		t.Errorf("DB has %d chunks, want %d (new only)", total, r2.Chunks)
 	}
@@ -184,9 +224,10 @@ func TestIngester_reindexChanged(t *testing.T) {
 
 func TestIngester_forceFlag(t *testing.T) {
 	db := openTestDB(t)
+	extractedDir := t.TempDir()
 	ext := &mockExtractor{text: "document content stays same throughout testing here"}
 	emb := &mockEmbedder{dim: 4}
-	ing := newIngester(t, db, ext, emb)
+	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "doc.txt", "content that does not change at all")
@@ -196,7 +237,6 @@ func TestIngester_forceFlag(t *testing.T) {
 		t.Fatalf("first ingest: %v", r1.Err)
 	}
 
-	// Force=true → re-ingest even though SHA256 unchanged
 	r2 := ing.IngestFile(context.Background(), path, ingest.Options{Force: true})
 	if r2.Err != nil {
 		t.Fatalf("force ingest: %v", r2.Err)
@@ -208,19 +248,20 @@ func TestIngester_forceFlag(t *testing.T) {
 
 func TestIngester_extractorError(t *testing.T) {
 	db := openTestDB(t)
+	extractedDir := t.TempDir()
 	ext := &mockExtractor{err: fmt.Errorf("extraction failed: corrupted file")}
 	emb := &mockEmbedder{dim: 4}
-	ing := newIngester(t, db, ext, emb)
+	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "bad.pdf", "not a real pdf")
 
+	// no pre-existing extracted file → triggers auto-preprocess → extractor fails
 	res := ing.IngestFile(context.Background(), path, ingest.Options{})
 
 	if res.Err == nil {
 		t.Fatal("expected error from extractor failure")
 	}
-	// no partial chunks in DB
 	sqlDB := db.DB()
 	var count int
 	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&count); err != nil {
@@ -233,9 +274,10 @@ func TestIngester_extractorError(t *testing.T) {
 
 func TestIngester_dirWalk(t *testing.T) {
 	db := openTestDB(t)
+	extractedDir := t.TempDir()
 	ext := &mockExtractor{text: "document text content for testing purposes here"}
 	emb := &mockEmbedder{dim: 4}
-	ing := newIngester(t, db, ext, emb)
+	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()
 	writeTempFile(t, dir, "a.md", "markdown content")
@@ -257,3 +299,11 @@ func TestIngester_dirWalk(t *testing.T) {
 		t.Errorf("expected 3 supported files ingested, got %d", supported)
 	}
 }
+
+// computeSHA returns the SHA256 hex of the file at path (via preprocess).
+func computeSHA(path string) (string, error) {
+	return preprocess.HashFile(path)
+}
+
+// silence unused import
+var _ = fmt.Sprintf
