@@ -8,7 +8,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 |---------|------|-------|
 | 01 — Foundation | CLI skeleton, config loading, `tbuk init` | ✅ done |
 | 02 — Storage | SQLite schema, migrations, typed repositories, FTS5 | ✅ done |
-| 03 — Preprocessing | Text extraction (Markdown, plain text, PDF, HTML) | planned |
+| 03 — Preprocessing | Text extraction (Markdown, plain text, PDF, HTML), chunking, SHA256 | ✅ done |
 | 04 — Embeddings | Embedding provider interface + adapters | planned |
 | 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | planned |
 | 06 — Ingestion | SHA256 dedup, chunking, store pipeline | planned |
@@ -27,6 +27,8 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin
 tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
+tbuk doctor              # check config, database, LLM connectivity, and extractors
+tbuk preprocess <path>   # extract and chunk text from a document (--format text|json)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -78,8 +80,8 @@ internal/
   cli/              cobra root + subcommands
   config/           Config struct, Load(), Defaults()
   storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo
-  preprocess/       (planned) text extraction
-  chunking/         (planned) token-based chunking with overlap
+  preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
+  chunking/         Chunker.Split — greedy sentence accumulation, configurable size/overlap
   embeddings/       (planned) Embedder interface + provider adapters
   ingest/           (planned) ingestion pipeline
   llm/              (planned) LLM interface + provider adapters
