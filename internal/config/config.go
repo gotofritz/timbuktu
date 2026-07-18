@@ -10,10 +10,16 @@ import (
 
 // Config holds all application settings.
 type Config struct {
-	Database  DatabaseConfig  `yaml:"database"`
-	LLM       LLMConfig       `yaml:"llm"`
-	Embedding EmbeddingConfig `yaml:"embedding"`
-	Chunking  ChunkingConfig  `yaml:"chunking"`
+	Database   DatabaseConfig   `yaml:"database"`
+	LLM        LLMConfig        `yaml:"llm"`
+	Embedding  EmbeddingConfig  `yaml:"embedding"`
+	Chunking   ChunkingConfig   `yaml:"chunking"`
+	Preprocess PreprocessConfig `yaml:"preprocess"`
+}
+
+// PreprocessConfig controls where extracted text files are stored.
+type PreprocessConfig struct {
+	OutputDir string `yaml:"output_dir"`
 }
 
 type DatabaseConfig struct {
@@ -72,6 +78,9 @@ func Defaults() Config {
 			Size:    800,
 			Overlap: 100,
 		},
+		Preprocess: PreprocessConfig{
+			OutputDir: filepath.Join(home, ".tbuk", "extracted"),
+		},
 	}
 }
 
@@ -116,5 +125,8 @@ embedding:
 chunking:
   size: 800
   overlap: 100
+
+preprocess:
+  output_dir: ` + filepath.Join(home, ".tbuk", "extracted") + `
 `
 }

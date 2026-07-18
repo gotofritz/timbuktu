@@ -50,6 +50,19 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 	printCheck("path", cfg.Database.Path, "")
 	msg, ok = CheckDB(cfg.Database.Path)
 	printCheck("status", msg, boolToStatus(ok))
+	if ok {
+		db, err := storage.Open(cfg.Database.Path)
+		if err == nil {
+			sqlDB := db.DB()
+			if n, err := CountDocuments(sqlDB); err == nil {
+				printCheck("documents", fmt.Sprintf("%d", n), "")
+			}
+			if n, err := CountChunks(sqlDB); err == nil {
+				printCheck("chunks", fmt.Sprintf("%d", n), "")
+			}
+			_ = db.Close()
+		}
+	}
 
 	printSection("LLM (" + cfg.LLM.Provider + ")")
 	printCheck("url", cfg.LLM.BaseURL, "")

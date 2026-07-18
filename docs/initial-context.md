@@ -15,7 +15,7 @@ Module: `github.com/gotofritz/timbuktu`
 | 03 | Preprocessing — text extraction, chunking, SHA256 | ✅ done |
 | 04 | Embeddings — `Embedder` interface, llama/ollama/openai adapters | ✅ done |
 | 05 | LLM Providers — `LLM` interface, provider adapters | ✅ done |
-| 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | stub |
+| 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | ✅ done |
 | 07 | Search — vector, FTS5 keyword, hybrid | stub |
 | 08 | RAG — retrieval pipeline, prompt templates, streaming | stub |
 | 09 | Management — `tbuk stats`, delete, update | stub |
@@ -29,13 +29,13 @@ cmd/tbuk/           cobra entry point
 
 internal/
   config/           Config struct, Load(), Defaults(), DefaultYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess)
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
   embeddings/       Embedder interface + factory; llama, ollama, openai adapters
   llm/              LLM interface + factory; claude, openai, ollama adapters (SSE + JSON-lines streaming)
-  ingest/           STUB
+  ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          STUB
   retrieval/        STUB
   search/           STUB
@@ -108,7 +108,7 @@ type Extractor interface {
 
 Backends: markdownExtractor (strips fences/headings), htmlExtractor (golang.org/x/net), plainTextExtractor, pdfExtractor (ledongthuc/pdf).
 
-SHA256: `preprocess.SHA256File(path)` and `SHA256Reader(r)`.
+SHA256: `preprocess.HashFile(path)` and `HashReader(r)`.
 
 ---
 
@@ -186,13 +186,64 @@ Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. System me
 
 ---
 
+## Preprocessing
+
+```go
+// Extract opens path, detects MIME, extracts plain text, returns (text, mime, sha256, err).
+func Extract(ctx context.Context, path string) (text, mime, sha string, err error)
+
+// ExtractToFile saves extracted text to outputDir/<sha256>.txt. Creates dir if needed.
+func ExtractToFile(ctx context.Context, srcPath, outputDir string) (savedPath string, err error)
+```
+
+Extracted files named `<sha256-of-source>.txt` — staleness-safe (changed source = different name).
+Default store: `~/.tbuk/extracted/` (configurable via `preprocess.output_dir` in config).
+
+---
+
+## Ingestion
+
+Two-stage pipeline:
+
+1. **`tbuk preprocess`** — extract + normalize → save to `~/.tbuk/extracted/<sha256>.txt`
+2. **`tbuk ingest`** — read extracted text → chunk → embed → store in DB
+
+```go
+type FileExtractor interface {
+    ExtractFile(ctx context.Context, path string) (string, error)
+}
+
+type Options struct { Force bool }
+
+type Result struct {
+    Path    string
+    Skipped bool   // SHA256 unchanged and Force=false
+    Chunks  int
+    Err     error
+}
+
+func NewIngester(docs, chunks, meta repos, ext FileExtractor, chunker, emb, extractedDir, progress) *Ingester
+func (ing *Ingester) IngestFile(ctx, path, opts) Result
+func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
+```
+
+Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc + chunks.
+Changed SHA256 → old chunks deleted before re-index.
+
+Supported extensions for `IngestDir`: `.md`, `.txt`, `.pdf`, `.html`, `.htm`.
+
+Doctor shows document/chunk counts from the live DB.
+
+---
+
 ## CLI Commands (implemented)
 
 ```
-tbuk init         create ~/.tbuk/, write default config.yaml and prompts/
-tbuk version      print version string
-tbuk doctor       probe config, DB, LLM/embedding connectivity
-tbuk preprocess   extract + chunk text from file/dir (--format text|json)
+tbuk init              create ~/.tbuk/, write default config.yaml and prompts/
+tbuk version           print version string
+tbuk doctor            probe config, DB (with doc/chunk counts), LLM/embedding connectivity
+tbuk preprocess <path> extract text → save to extracted store (--dry-run, --output-dir)
+tbuk ingest <path>     read extracted text → chunk → embed → store (--force, --verbose)
 ```
 
 ---
