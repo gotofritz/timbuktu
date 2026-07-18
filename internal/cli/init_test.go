@@ -94,3 +94,64 @@ func TestInitCommand_writesQATemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestVersionCommand(t *testing.T) {
+	if err := runCLI("version"); err != nil {
+		t.Fatalf("version command failed: %v", err)
+	}
+}
+
+func TestRootCommand_badConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(cfgPath, []byte("not: valid: yaml: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runCLI("--config", cfgPath, "version")
+	if err == nil {
+		t.Fatal("expected error with malformed config file")
+	}
+}
+
+func TestInitCommand_customConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "custom.yaml")
+	if err := os.WriteFile(cfgPath, []byte("chunking:\n  size: 400\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("--config", cfgPath, "init"); err != nil {
+		t.Fatalf("init with custom config failed: %v", err)
+	}
+}
+
+func TestInitCommand_templateIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatal(err)
+	}
+
+	systemPath := filepath.Join(home, ".tbuk", "prompts", "qa", "system.tmpl")
+	sentinel := "# custom system prompt\n"
+	if err := os.WriteFile(systemPath, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("init"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(systemPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != sentinel {
+		t.Error("second init overwrote existing template file")
+	}
+}

@@ -63,6 +63,14 @@ func TestLoad_partialYAML(t *testing.T) {
 	}
 }
 
+func TestLoad_directoryPath(t *testing.T) {
+	dir := t.TempDir()
+	_, err := config.Load(dir) // passing a directory, not a file
+	if err == nil {
+		t.Fatal("expected error when path is a directory")
+	}
+}
+
 func TestLoad_badYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -75,6 +83,36 @@ func TestLoad_badYAML(t *testing.T) {
 	_, err = config.Load(path)
 	if err == nil {
 		t.Fatal("expected error for malformed YAML")
+	}
+}
+
+func TestDefaultPath_containsTbuk(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := config.DefaultPath()
+	if filepath.Base(path) != "config.yaml" {
+		t.Errorf("want config.yaml basename, got %s", filepath.Base(path))
+	}
+	if filepath.Dir(filepath.Dir(path)) != home {
+		t.Errorf("want path inside HOME/.tbuk/, got %s", path)
+	}
+}
+
+func TestDefaultYAML_isValidYAML(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(config.DefaultYAML()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("DefaultYAML not valid YAML: %v", err)
+	}
+	if cfg.Chunking.Size != 800 {
+		t.Errorf("want default size 800, got %d", cfg.Chunking.Size)
 	}
 }
 

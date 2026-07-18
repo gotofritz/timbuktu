@@ -9,7 +9,7 @@
 ## Project Rules
 
 - Use `gh` for all GitHub operations
-- Use `task` for workflow discovery
+- Use `make` for workflow (`make check-ci`, `make test`, `make lint`)
 - Run commands from project root
 
 ## Plans
@@ -40,7 +40,7 @@ Required flow:
 2. Confirm correct failure
 3. Implement minimal fix
 4. Refactor with tests green
-5. Run `task qa` before PR
+5. Run `make check-ci` before PR
 
 ## Decision Order
 
@@ -86,43 +86,55 @@ If an open PR exists that covers the same area, commit directly to its branch in
 
 ## Code Standards
 
-- Concise docstrings for public/non-obvious modules
-- Root-relative imports
-- Imports at file top
-- Minimize lint/type suppressions
-- Document suppressions
+- Concise doc comments for exported, non-obvious identifiers only
+- Module-path imports (`github.com/gotofritz/timbuktu/internal/...`)
+- Imports grouped: stdlib, external, internal (gofmt enforces order)
+- Minimize `//nolint` and `//noinspection`; document every suppression
 
-## Python
+## Go
 
 ### Tooling
 
-- `uv`
-- `ruff`
-- `ty`
-- `pytest`
-
-### Libraries
-
-- CLI: `click`
-- Models: `pydantic`
+- `go` (1.24+)
+- `gofmt` / `goimports`
+- `golangci-lint`
+- `go test`
 
 ### Rules
 
-- Type hints required
-- Prefer native types
-- Use named args for multi-parameter functions
+- Type parameters preferred over `interface{}` where meaningful
+- Use named return values only when they aid clarity (e.g. multiple returns)
+- Prefer table-driven tests
+- Error wrapping: `fmt.Errorf("context: %w", err)`
+- No `init()` functions
+- No global mutable state
 
 ### Testing
 
-- Use `pytest`
-- Allowed: `faker`, `polyfactory`, `pytest-data`
-- Use either function-based or class-based tests, never both
-- Shared fixtures/mocks in `conftest.py`
+- Use `go test` with `testing` stdlib
+- Table-driven tests preferred
+- Shared test helpers in `_test.go` files; no `testutil` packages unless reused across ≥3 packages
+- In-memory SQLite (`:memory:`) for storage tests
+- Mock HTTP with `net/http/httptest`
+- Coverage target ≥ 85% per package
+
+### QA
+
+Run before every PR:
+
+```bash
+make check-ci
+```
+
+Which runs: `golangci-lint`, `go build ./...`, tests with coverage ≥ 85%.
 
 ## Environment
 
+No virtualenv. Standard Go toolchain.
+
 ```bash
-source .venv/bin/activate
+go build ./...
+go test ./...
 ```
 
 ## Failure Policy
