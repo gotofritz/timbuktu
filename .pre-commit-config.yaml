@@ -1,0 +1,66 @@
+# https://pre-commit.com
+default_install_hook_types: [commit-msg, pre-commit]
+default_stages: [pre-commit, manual]
+fail_fast: true
+repos:
+  # --- Generic (all languages) ---
+  - repo: meta
+    hooks:
+      - id: check-useless-excludes
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      - id: rst-backticks
+      - id: rst-directive-colons
+      - id: rst-inline-touching-normal
+      - id: text-unicode-replacement-char
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+        exclude: .*
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-vcs-permalinks
+      - id: check-xml
+      - id: check-yaml
+      - id: destroyed-symlinks
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: https://github.com/pappasam/toml-sort
+    rev: v0.24.2
+    hooks:
+      - id: toml-sort-fix
+  - repo: local
+    hooks:
+      - id: commitizen
+        name: commitizen
+        entry: cz check
+        args: [--commit-msg-file]
+        require_serial: true
+        language: system
+        stages: [commit-msg]
+
+  # --- Go ---
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+      - id: go-vet
+      - id: go-imports
+      - id: golangci-lint
+  - repo: local
+    hooks:
+      - id: go-test
+        name: go test
+        entry: go test ./...
+        language: system
+        pass_filenames: false
+        types: [go]
