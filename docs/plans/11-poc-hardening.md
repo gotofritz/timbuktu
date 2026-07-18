@@ -18,6 +18,10 @@ Findings are ordered by severity. Each phase is one reviewable PR.
 
 ### 1. Foreign-key cascade is broken across pooled connections (proven)
 
+> **DONE (PR 1).** Archived to
+> `docs/archive/2026-07-18-2242-f41a86c-11-p0-1-fk-cascade.md`. Repair
+> migration 002 dropped — the app was never used, so no damaged DBs exist.
+
 `storage.Open` runs `PRAGMA foreign_keys=ON` (and `journal_mode=WAL`) via
 `db.Exec`. Both pragmas are **per-connection** in SQLite, but `database/sql`
 maintains a pool: the pragma applies only to the one connection that happened
@@ -300,7 +304,7 @@ aspirational.
 
 | PR | Contents | Depends on |
 |----|----------|-----------|
-| 1 | P0-1 pragma DSN + migration 002 + regression tests | — |
+| 1 | P0-1 pragma DSN + regression test ✅ done (migration dropped — app unused) | — |
 | 2 | P0-2 llama LLM provider + docs alignment (P1-13) | — |
 | 3 | P0-3 automatic metadata + `tbuk meta` commands | — |
 | 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest | — |
