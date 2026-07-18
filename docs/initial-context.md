@@ -16,7 +16,7 @@ Module: `github.com/gotofritz/timbuktu`
 | 04 | Embeddings — `Embedder` interface, llama/ollama/openai adapters | ✅ done |
 | 05 | LLM Providers — `LLM` interface, provider adapters | ✅ done |
 | 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | ✅ done |
-| 07 | Search — vector, FTS5 keyword, hybrid | stub |
+| 07 | Search — vector, FTS5 keyword, hybrid | ✅ done |
 | 08 | RAG — retrieval pipeline, prompt templates, streaming | stub |
 | 09 | Management — `tbuk stats`, delete, update | stub |
 
@@ -29,7 +29,7 @@ cmd/tbuk/           cobra entry point
 
 internal/
   config/           Config struct, Load(), Defaults(), DefaultYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest)
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
@@ -38,7 +38,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          STUB
   retrieval/        STUB
-  search/           STUB
+  search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
   metadata/         STUB
 ```
 
@@ -236,14 +236,51 @@ Doctor shows document/chunk counts from the live DB.
 
 ---
 
+## Search
+
+```go
+type SearchResult struct {
+    ChunkID    int64
+    DocumentID int64
+    Path       string
+    Title      string
+    ChunkIndex int
+    Text       string
+    Score      float64 // higher is better (0-1 for vector/hybrid; negated BM25 for keyword)
+    Source     string  // "vector" | "keyword" | "hybrid" | "metadata"
+}
+
+type Options struct {
+    TopK     int               // default 5
+    MinScore float64           // skip results below threshold
+    Metadata map[string]string // AND-combined pre-filter (unused by Vector/Keyword)
+}
+
+type Searcher struct { /* db, embedder */ }
+
+func New(db *sql.DB, emb embeddings.Embedder) *Searcher
+func (s *Searcher) Vector(ctx, query, opts)   ([]SearchResult, error) // cosine, full table scan
+func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25
+func (s *Searcher) Metadata(ctx, filters)     ([]SearchResult, error) // AND-joined metadata keys
+func (s *Searcher) Hybrid(ctx, query, opts)   ([]SearchResult, error) // RRF k=60 over vector+keyword
+func CheckFTS5(db *sql.DB) error                                       // probes chunks_fts index
+```
+
+Vector: full table scan acceptable for < 100k chunks; swap sqlite-vec later without interface change.
+Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK then fuses.
+
+---
+
 ## CLI Commands (implemented)
 
 ```
-tbuk init              create ~/.tbuk/, write default config.yaml and prompts/
-tbuk version           print version string
-tbuk doctor            probe config, DB (with doc/chunk counts), LLM/embedding connectivity
-tbuk preprocess <path> extract text → save to extracted store (--dry-run, --output-dir)
-tbuk ingest <path>     read extracted text → chunk → embed → store (--force, --verbose)
+tbuk init                      create ~/.tbuk/, write default config.yaml and prompts/
+tbuk version                   print version string
+tbuk doctor                    probe config, DB (with doc/chunk counts), LLM/embedding/search
+tbuk preprocess <path>         extract text → save to extracted store (--dry-run, --output-dir)
+tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
+tbuk search <query>            search chunks (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
+tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 ```
 
 ---
