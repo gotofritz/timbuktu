@@ -28,8 +28,8 @@ make install             # installs to $(go env GOPATH)/bin — defaults to ~/go
 tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
 tbuk doctor              # check config, database, LLM connectivity, and extractors
-tbuk preprocess <path>   # extract and chunk text from a document (--format text|json)
-tbuk ingest <path>       # ingest a file or directory into the knowledge base (--force, --verbose)
+tbuk preprocess <path>   # dry-run: print extracted text and chunks to stdout (--format text|json)
+tbuk ingest <path>       # index a file or directory: extract → chunk → embed → store in DB (--force, --verbose)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
