@@ -44,6 +44,30 @@ func (r *MetadataRepo) Get(ctx context.Context, documentID int64, key string) (s
 	return value, nil
 }
 
+// List returns all metadata entries for documentID, ordered by key.
+func (r *MetadataRepo) List(ctx context.Context, documentID int64) ([]Metadata, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT document_id,key,value FROM metadata WHERE document_id=? ORDER BY key`,
+		documentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("MetadataRepo.List: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Metadata
+	for rows.Next() {
+		var m Metadata
+		if err := rows.Scan(&m.DocumentID, &m.Key, &m.Value); err != nil {
+			return nil, fmt.Errorf("MetadataRepo.List scan: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("MetadataRepo.List: %w", err)
+	}
+	return out, nil
+}
+
 // Delete removes the entry for (documentID, key).
 func (r *MetadataRepo) Delete(ctx context.Context, documentID int64, key string) error {
 	_, err := r.db.ExecContext(ctx,

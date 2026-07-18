@@ -88,6 +88,12 @@ factory's accepted providers.
 
 ### 3. Metadata is never written — `tbuk find` always returns nothing
 
+> **DONE (PR 3).** Archived to
+> `docs/archive/2026-07-18-2315-9ed8d2f-11-p0-3-metadata.md`. Ingest writes
+> automatic `filename`/`extension`/`mime`/`dir` metadata (refreshed on
+> re-ingest, user keys preserved); added `tbuk meta set` / `tbuk meta list`
+> backed by `MetadataRepo.List`.
+
 `Ingester` receives a `MetadataRepo` but never calls it. No code path writes
 metadata rows, so `tbuk find key=value` (a headline POC feature:
 `tbuk find tag=design`, `tbuk find filename=README.md`) can never match.
@@ -311,7 +317,7 @@ aspirational.
 |----|----------|-----------|
 | 1 | P0-1 pragma DSN + regression test ✅ done (migration dropped — app unused) | — |
 | 2 | P0-2 llama LLM provider + docs alignment (P1-13) ✅ done | — |
-| 3 | P0-3 automatic metadata + `tbuk meta` commands | — |
+| 3 | P0-3 automatic metadata + `tbuk meta` commands ✅ done | — |
 | 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest | — |
 | 5 | P0-6 hybrid MinScore + FTS5 query sanitizing | — |
 | 6 | P1-7 UTF-8 chunking + P1-11 path normalization | 1 |

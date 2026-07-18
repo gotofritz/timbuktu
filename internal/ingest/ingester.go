@@ -141,15 +141,14 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	mime := preprocess.DetectMIME(path)
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 
+	var docID int64
 	if existing != nil {
 		existing.SHA256 = sha
 		existing.MimeType = mime
 		if err := ing.docs.Update(ctx, existing); err != nil {
 			return Result{Path: path, Err: fmt.Errorf("ingest: update doc: %w", err)}
 		}
-		for _, c := range storageChunks {
-			c.DocumentID = existing.ID
-		}
+		docID = existing.ID
 	} else {
 		doc := &storage.Document{
 			Path:     path,
@@ -160,9 +159,10 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		if err := ing.docs.Create(ctx, doc); err != nil {
 			return Result{Path: path, Err: fmt.Errorf("ingest: create doc: %w", err)}
 		}
-		for _, c := range storageChunks {
-			c.DocumentID = doc.ID
-		}
+		docID = doc.ID
+	}
+	for _, c := range storageChunks {
+		c.DocumentID = docID
 	}
 
 	if len(storageChunks) > 0 {
@@ -171,8 +171,29 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		}
 	}
 
+	if err := ing.writeAutoMetadata(ctx, docID, path, mime); err != nil {
+		return Result{Path: path, Err: err}
+	}
+
 	_, _ = fmt.Fprintf(ing.progress, "%s → %d chunks embedded\n", path, len(storageChunks))
 	return Result{Path: path, Chunks: len(storageChunks)}
+}
+
+// writeAutoMetadata (re)writes the automatic per-document metadata keys.
+// User-set keys are left untouched (Set upserts by key).
+func (ing *Ingester) writeAutoMetadata(ctx context.Context, docID int64, path, mime string) error {
+	auto := map[string]string{
+		"filename":  filepath.Base(path),
+		"extension": strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+		"mime":      mime,
+		"dir":       filepath.Dir(path),
+	}
+	for k, v := range auto {
+		if err := ing.meta.Set(ctx, docID, k, v); err != nil {
+			return fmt.Errorf("ingest: write metadata %s: %w", k, err)
+		}
+	}
+	return nil
 }
 
 // readOrExtract returns extracted text from extractedDir/<sha>.txt.

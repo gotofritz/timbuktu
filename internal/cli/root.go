@@ -43,6 +43,7 @@ func New() *cobra.Command {
 	root.AddCommand(newIngestCmd())
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newFindCmd())
+	root.AddCommand(newMetaCmd())
 	root.AddCommand(newAskCmd())
 	root.AddCommand(newTemplateCmd())
 	root.AddCommand(newDeleteCmd())

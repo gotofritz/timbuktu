@@ -23,6 +23,8 @@ tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extrac
 tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose)
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
+tbuk meta set <path> k=v # attach metadata to a document (repeatable key=value pairs)
+tbuk meta list <path>    # list all metadata for a document
 tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
 tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
@@ -104,6 +106,15 @@ chunks_fts  — FTS5 virtual table over chunks.text (auto-synced via triggers)
 ```
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
+
+### Metadata
+
+Ingestion writes automatic metadata for every document: `filename`,
+`extension` (lowercased, no leading dot), `mime`, and `dir`. These refresh on
+re-ingest, so `tbuk find filename=README.md` or `tbuk find extension=md` work
+after a plain `tbuk ingest`. Attach your own tags with
+`tbuk meta set <path> tag=design` (user-set keys survive re-ingest) and inspect
+them with `tbuk meta list <path>`.
 
 ## Troubleshooting
 

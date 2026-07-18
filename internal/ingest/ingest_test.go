@@ -300,6 +300,95 @@ func TestIngester_dirWalk(t *testing.T) {
 	}
 }
 
+func TestIngester_writesAutomaticMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 200)}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "README.md", "# Hello")
+
+	res := ing.IngestFile(ctx, path, ingest.Options{})
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+
+	sqlDB := db.DB()
+	docRepo := storage.NewDocumentRepo(sqlDB)
+	metaRepo := storage.NewMetadataRepo(sqlDB)
+	doc, err := docRepo.GetByPath(ctx, path)
+	if err != nil {
+		t.Fatalf("GetByPath: %v", err)
+	}
+
+	got := map[string]string{}
+	entries, err := metaRepo.List(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, m := range entries {
+		got[m.Key] = m.Value
+	}
+
+	want := map[string]string{
+		"filename":  "README.md",
+		"extension": "md",
+		"mime":      "text/markdown",
+		"dir":       dir,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("metadata %s: want %q got %q", k, v, got[k])
+		}
+	}
+}
+
+func TestIngester_refreshesMetadataOnReingest(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 200)}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "note.txt", "first")
+
+	if res := ing.IngestFile(ctx, path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("first ingest: %v", res.Err)
+	}
+
+	sqlDB := db.DB()
+	docRepo := storage.NewDocumentRepo(sqlDB)
+	metaRepo := storage.NewMetadataRepo(sqlDB)
+	doc, err := docRepo.GetByPath(ctx, path)
+	if err != nil {
+		t.Fatalf("GetByPath: %v", err)
+	}
+	// user-set tag should survive re-ingest (only automatic keys refresh)
+	if err := metaRepo.Set(ctx, doc.ID, "tag", "design"); err != nil {
+		t.Fatalf("Set tag: %v", err)
+	}
+
+	// change content so re-ingest is not skipped
+	if err := os.WriteFile(path, []byte("second body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := ing.IngestFile(ctx, path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("re-ingest: %v", res.Err)
+	}
+
+	if v, err := metaRepo.Get(ctx, doc.ID, "filename"); err != nil || v != "note.txt" {
+		t.Errorf("filename after re-ingest: got %q err %v", v, err)
+	}
+	if v, err := metaRepo.Get(ctx, doc.ID, "tag"); err != nil || v != "design" {
+		t.Errorf("user tag lost on re-ingest: got %q err %v", v, err)
+	}
+}
+
 // computeSHA returns the SHA256 hex of the file at path (via preprocess).
 func computeSHA(path string) (string, error) {
 	return preprocess.HashFile(path)

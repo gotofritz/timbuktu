@@ -29,7 +29,7 @@ cmd/tbuk/           cobra entry point
 
 internal/
   config/           Config struct, Load(), Defaults(), DefaultYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find)
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
@@ -228,8 +228,10 @@ func (ing *Ingester) IngestFile(ctx, path, opts) Result
 func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
 ```
 
-Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc + chunks.
+Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc + chunks → write automatic metadata.
 Changed SHA256 → old chunks deleted before re-index.
+
+Automatic metadata written per document: `filename`, `extension` (lowercased, no leading dot), `mime`, `dir`. Refreshed on every ingest via `MetadataRepo.Set` upsert; user-set keys are left intact. Makes `tbuk find filename=README.md` work after plain ingest.
 
 Supported extensions for `IngestDir`: `.md`, `.txt`, `.pdf`, `.html`, `.htm`.
 
@@ -332,6 +334,8 @@ tbuk preprocess <path>         extract text → save to extracted store (--dry-r
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
 tbuk search <query>            search chunks (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
+tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
+tbuk meta list <path>          list all metadata for a document
 tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream)
 tbuk template list             list prompt templates in ~/.tbuk/prompts/
 tbuk template show <name>      print manifest + template files to stdout
