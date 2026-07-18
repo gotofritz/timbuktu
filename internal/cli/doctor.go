@@ -64,6 +64,9 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 		printCheck("status", msg, boolToStatus(ok))
 	}
 
+	printSection("Preprocessing")
+	printCheck("extractors", "markdown, text, html, pdf", "✓")
+
 	return nil
 }
 

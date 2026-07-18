@@ -39,6 +39,7 @@ func New() *cobra.Command {
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newDoctorCmd())
+	root.AddCommand(newPreprocessCmd())
 
 	return root
 }
