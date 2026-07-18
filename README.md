@@ -48,11 +48,11 @@ database:
   path: ~/.tbuk/tbuk.sqlite
 
 llm:
-  provider: ollama   # ollama | claude | openai | llama
+  provider: llama    # llama | ollama | claude | openai
   model: ""          # provider default when empty
 
 embedding:
-  provider: ollama   # ollama | openai | voyage
+  provider: llama    # llama | ollama | openai | voyage
   model: ""
   dimension: 768
 
