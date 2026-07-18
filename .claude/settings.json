@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bash .claude/hooks/caveman-activate.sh" },
+          { "type": "command", "command": "echo 'IMPORTANT: Before any work, ask the user which git branch to work on. Do not use the session-start branch. Wait for the answer, then checkout that branch.'" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bash .claude/hooks/caveman-mode-tracker.sh" }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash .claude/hooks/caveman-statusline.sh"
+  }
+}
