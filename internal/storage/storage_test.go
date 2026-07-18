@@ -595,6 +595,62 @@ func TestMetadataRepo_Delete_ClosedDB(t *testing.T) {
 	}
 }
 
+func TestMetadataRepo_List(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	docRepo := storage.NewDocumentRepo(db.DB())
+	metaRepo := storage.NewMetadataRepo(db.DB())
+
+	doc := seedDocument(t, ctx, docRepo)
+	want := map[string]string{"author": "Alice", "tag": "go", "year": "2026"}
+	for k, v := range want {
+		if err := metaRepo.Set(ctx, doc.ID, k, v); err != nil {
+			t.Fatalf("Set %s: %v", k, err)
+		}
+	}
+
+	got, err := metaRepo.List(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("want %d entries, got %d", len(want), len(got))
+	}
+	// entries ordered by key
+	if got[0].Key != "author" || got[1].Key != "tag" || got[2].Key != "year" {
+		t.Errorf("expected key order [author tag year], got %v", []string{got[0].Key, got[1].Key, got[2].Key})
+	}
+	for _, m := range got {
+		if want[m.Key] != m.Value {
+			t.Errorf("key %s: want %q got %q", m.Key, want[m.Key], m.Value)
+		}
+	}
+}
+
+func TestMetadataRepo_List_Empty(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	docRepo := storage.NewDocumentRepo(db.DB())
+	metaRepo := storage.NewMetadataRepo(db.DB())
+
+	doc := seedDocument(t, ctx, docRepo)
+	got, err := metaRepo.List(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no entries, got %d", len(got))
+	}
+}
+
+func TestMetadataRepo_List_ClosedDB(t *testing.T) {
+	ctx := context.Background()
+	repo := storage.NewMetadataRepo(closedDB(t).DB())
+	if _, err := repo.List(ctx, 1); err == nil {
+		t.Fatal("expected error on closed DB")
+	}
+}
+
 // ── time helpers ──────────────────────────────────────────────────────────────
 
 func TestDocumentRepo_TimestampsSet(t *testing.T) {
