@@ -65,6 +65,11 @@ INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');
 
 ### 2. Default config cannot run `tbuk ask` — no `llama` LLM provider
 
+> **DONE (PR 2).** Archived to
+> `docs/archive/2026-07-18-2257-aab6dfa-11-p0-2-llama-provider.md`. `llama` is backed by the
+> existing OpenAI adapter (optional bearer token); README/`initial-context.md`
+> docs aligned (P1-13, `voyage` dropped).
+
 `config.Defaults()` sets `llm.provider: llama`, but `llm.NewLLM` only accepts
 `claude | openai | ollama`. Out of the box, `tbuk ask` fails with
 `llm: unknown provider "llama"`. The original POC plan explicitly required a
@@ -305,7 +310,7 @@ aspirational.
 | PR | Contents | Depends on |
 |----|----------|-----------|
 | 1 | P0-1 pragma DSN + regression test ✅ done (migration dropped — app unused) | — |
-| 2 | P0-2 llama LLM provider + docs alignment (P1-13) | — |
+| 2 | P0-2 llama LLM provider + docs alignment (P1-13) ✅ done | — |
 | 3 | P0-3 automatic metadata + `tbuk meta` commands | — |
 | 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest | — |
 | 5 | P0-6 hybrid MinScore + FTS5 query sanitizing | — |
