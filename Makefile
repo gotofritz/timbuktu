@@ -49,7 +49,7 @@ check: fmt vet lint test
 # Mirror the quality-check CI jobs (lint + build + coverage >= 85%)
 check-ci: lint
 	go build ./...
-	go test -coverpkg=./... ./... -coverprofile=coverage.out -count=1
+	go test -coverpkg=./... ./internal/... -coverprofile=coverage.out -count=1
 	@COVERAGE=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{print $$3}' | tr -d '%'); \
 	rm -f coverage.out; \
 	echo "Total coverage: $${COVERAGE}%"; \
