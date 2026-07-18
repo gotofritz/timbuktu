@@ -24,9 +24,9 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 ## Quick start
 
 ```bash
-go build -o bin/tbuk ./cmd/tbuk
-./bin/tbuk init          # create ~/.tbuk/ with default config and prompt dirs
-./bin/tbuk version
+make install             # installs tbuk to $GOPATH/bin (must be on $PATH)
+tbuk init                # create ~/.tbuk/ with default config and prompt dirs
+tbuk version
 ```
 
 ## Development

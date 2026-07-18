@@ -1,8 +1,12 @@
-.PHONY: build test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release
+.PHONY: build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release
 
 # Build the binary
 build:
 	mkdir -p bin && go build -o bin/tbuk ./cmd/tbuk
+
+# Install to $GOPATH/bin (adds tbuk to PATH if GOPATH/bin is on PATH)
+install:
+	go install ./cmd/tbuk
 
 # Run all tests
 test:
