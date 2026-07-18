@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -97,6 +98,19 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 	printCheck("fts5", "available", ftsStatus)
 	printCheck("vector", "available (cosine, in-process)", "✓")
 	printCheck("hybrid", "available (RRF)", "✓")
+
+	printSection("Prompts")
+	printCheck("dir", promptsRoot(), "")
+	manifests, listErr := promptsDir().List()
+	if listErr != nil || len(manifests) == 0 {
+		printCheck("templates", "none", "")
+	} else {
+		names := make([]string, len(manifests))
+		for i, m := range manifests {
+			names[i] = m.Name
+		}
+		printCheck("templates", strings.Join(names, ", "), "✓")
+	}
 
 	return nil
 }
