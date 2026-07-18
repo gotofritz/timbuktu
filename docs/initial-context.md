@@ -17,7 +17,7 @@ Module: `github.com/gotofritz/timbuktu`
 | 05 | LLM Providers — `LLM` interface, provider adapters | ✅ done |
 | 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | ✅ done |
 | 07 | Search — vector, FTS5 keyword, hybrid | ✅ done |
-| 08 | RAG — retrieval pipeline, prompt templates, streaming | stub |
+| 08 | RAG — retrieval pipeline, prompt templates, streaming | ✅ done |
 | 09 | Management — `tbuk stats`, delete, update | stub |
 
 ---
@@ -36,8 +36,8 @@ internal/
   embeddings/       Embedder interface + factory; llama, ollama, openai adapters
   llm/              LLM interface + factory; claude, openai, ollama adapters (SSE + JSON-lines streaming)
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
-  prompts/          STUB
-  retrieval/        STUB
+  prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
+  retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
   metadata/         STUB
 ```
@@ -271,6 +271,56 @@ Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK
 
 ---
 
+## RAG
+
+### Retrieval
+
+```go
+type RetrievedChunk struct {
+    ChunkID, DocumentID int64
+    Path, Title         string
+    ChunkIndex          int
+    Text                string
+    Score               float64
+    Citation            string // "path §chunkIndex"
+}
+
+type HybridSearcher interface {
+    Hybrid(ctx context.Context, query string, opts search.Options) ([]search.SearchResult, error)
+}
+
+type Retriever struct { /* searcher HybridSearcher */ }
+
+func New(s HybridSearcher) *Retriever
+func (r *Retriever) Retrieve(ctx context.Context, query string, topK int, meta map[string]string) ([]RetrievedChunk, error)
+```
+
+### Prompt Templates
+
+Disk layout: `~/.tbuk/prompts/<name>/{manifest.yaml, system.tmpl, user.tmpl}`
+
+```go
+type TemplateData struct {
+    Question  string
+    Chunks    []retrieval.RetrievedChunk
+    Variables map[string]string
+}
+
+type TemplateDir struct { Root string }
+
+func NewTemplateDir(dir string) *TemplateDir
+func (td *TemplateDir) Load(name string) (*Template, error)
+func (td *TemplateDir) List() ([]Manifest, error)
+func (t *Template) Render(data TemplateData) (system, user string, err error)
+func (t *Template) Manifest() Manifest
+```
+
+Built-in `qa` template installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `variables` come from `manifest.yaml`.
+
+`tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
+
+---
+
 ## CLI Commands (implemented)
 
 ```
@@ -281,6 +331,10 @@ tbuk preprocess <path>         extract text → save to extracted store (--dry-r
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
 tbuk search <query>            search chunks (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
+tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream)
+tbuk template list             list prompt templates in ~/.tbuk/prompts/
+tbuk template show <name>      print manifest + template files to stdout
+tbuk template edit <name>      open manifest in $EDITOR
 ```
 
 ---
