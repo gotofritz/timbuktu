@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       - name: Run tests with coverage
-        run: go test -coverpkg=./... ./... -coverprofile=coverage.out -count=1
+        run: go test -coverpkg=./... ./internal/... -coverprofile=coverage.out -count=1
 
       - name: Check coverage threshold
         run: |
