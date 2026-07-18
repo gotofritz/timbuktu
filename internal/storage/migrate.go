@@ -11,6 +11,7 @@ var migrations = []struct {
 	sql     string
 }{
 	{1, migration001},
+	{2, migration002},
 }
 
 const migration001 = `
@@ -64,6 +65,16 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
     INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
     INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
 END;
+`
+
+// migration002 repairs databases damaged by the pre-DSN pragma bug, where
+// cascade deletes silently failed on pooled connections with foreign_keys=0.
+// It removes orphan chunks and metadata and rebuilds the FTS index so deleted
+// documents stop appearing in keyword/hybrid search.
+const migration002 = `
+DELETE FROM chunks   WHERE document_id NOT IN (SELECT id FROM documents);
+DELETE FROM metadata WHERE document_id NOT IN (SELECT id FROM documents);
+INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');
 `
 
 // RunMigrations applies any pending schema migrations.

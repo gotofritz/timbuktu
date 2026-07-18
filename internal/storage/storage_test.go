@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"testing"
 	"time"
@@ -31,6 +32,159 @@ func TestMigrations_idempotent(t *testing.T) {
 	// Run migrations a second time via a fresh Open on the same *sql.DB handle.
 	if err := storage.RunMigrations(db.DB()); err != nil {
 		t.Fatalf("second RunMigrations: %v", err)
+	}
+}
+
+// ── foreign-key cascade across a connection pool (P0-1) ───────────────────────
+
+// TestForeignKeyCascade_AcrossPooledConnections proves the PRAGMA foreign_keys
+// setting reaches every pooled connection, not just the one that ran it during
+// Open. Deleting a document must cascade to its chunks (and the FTS delete
+// trigger must fire) even when the DELETE lands on a fresh pooled connection.
+func TestForeignKeyCascade_AcrossPooledConnections(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := storage.Open(dir + "/fk.sqlite")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sqldb := db.DB()
+	sqldb.SetMaxOpenConns(4)
+
+	docRepo := storage.NewDocumentRepo(sqldb)
+	chunkRepo := storage.NewChunkRepo(sqldb)
+
+	doc := makeDoc(dir + "/a.txt")
+	if err := docRepo.Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	chunks := []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "orphanme alpha", TokenCount: 2},
+		{DocumentID: doc.ID, ChunkIndex: 1, Text: "orphanme beta", TokenCount: 2},
+	}
+	if err := chunkRepo.BulkInsert(ctx, chunks); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	// Occupy other pooled connections so the DELETE is served by one that never
+	// ran the pragma via db.Exec during Open.
+	held := make([]*sql.Conn, 0, 3)
+	for i := 0; i < 3; i++ {
+		c, err := sqldb.Conn(ctx)
+		if err != nil {
+			t.Fatalf("Conn: %v", err)
+		}
+		if err := c.PingContext(ctx); err != nil {
+			t.Fatalf("Ping: %v", err)
+		}
+		held = append(held, c)
+	}
+
+	if err := docRepo.Delete(ctx, doc.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	for _, c := range held {
+		_ = c.Close()
+	}
+
+	var orphans int
+	if err := sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunks WHERE document_id NOT IN (SELECT id FROM documents)`).
+		Scan(&orphans); err != nil {
+		t.Fatalf("count orphans: %v", err)
+	}
+	if orphans != 0 {
+		t.Fatalf("expected 0 orphan chunks after cascade delete, got %d", orphans)
+	}
+
+	var stale int
+	if err := sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, "orphanme").
+		Scan(&stale); err != nil {
+		t.Fatalf("count stale fts: %v", err)
+	}
+	if stale != 0 {
+		t.Fatalf("expected 0 stale FTS rows after cascade delete, got %d", stale)
+	}
+}
+
+// TestMigration002_RepairsOrphans verifies migration 002 removes orphan chunks
+// and metadata left by a previously broken database and rebuilds the FTS index.
+func TestMigration002_RepairsOrphans(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := storage.Open(dir + "/repair.sqlite")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	sqldb := db.DB()
+	// Pin to one connection so our PRAGMA foreign_keys=OFF sticks for the seed.
+	sqldb.SetMaxOpenConns(1)
+
+	docRepo := storage.NewDocumentRepo(sqldb)
+	chunkRepo := storage.NewChunkRepo(sqldb)
+
+	doc := makeDoc(dir + "/b.txt")
+	if err := docRepo.Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	chunks := []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "leftover alpha", TokenCount: 2},
+	}
+	if err := chunkRepo.BulkInsert(ctx, chunks); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	// Simulate a legacy database: FK off, so deleting the document leaves the
+	// chunk (and its stale chunks_fts row) and orphan metadata behind.
+	if _, err := sqldb.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatalf("disable fk: %v", err)
+	}
+	if _, err := sqldb.ExecContext(ctx, `DELETE FROM documents WHERE id=?`, doc.ID); err != nil {
+		t.Fatalf("orphan chunks: %v", err)
+	}
+	if _, err := sqldb.ExecContext(ctx,
+		`INSERT INTO metadata(document_id,key,value) VALUES(9999,'tag','stale')`); err != nil {
+		t.Fatalf("orphan metadata: %v", err)
+	}
+
+	// Sanity: the orphans and stale FTS rows exist before repair.
+	var before int
+	_ = sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunks WHERE document_id NOT IN (SELECT id FROM documents)`).Scan(&before)
+	if before == 0 {
+		t.Fatal("test setup failed: expected orphan chunks before repair")
+	}
+
+	// Re-run migrations with version 2 unrecorded so migration 002 re-applies.
+	if _, err := sqldb.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version=2`); err != nil {
+		t.Fatalf("reset migration record: %v", err)
+	}
+	if err := storage.RunMigrations(sqldb); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	var orphanChunks, orphanMeta, staleFTS int
+	_ = sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunks WHERE document_id NOT IN (SELECT id FROM documents)`).Scan(&orphanChunks)
+	_ = sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM metadata WHERE document_id NOT IN (SELECT id FROM documents)`).Scan(&orphanMeta)
+	_ = sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, "leftover").Scan(&staleFTS)
+
+	if orphanChunks != 0 {
+		t.Errorf("expected 0 orphan chunks after migration 002, got %d", orphanChunks)
+	}
+	if orphanMeta != 0 {
+		t.Errorf("expected 0 orphan metadata after migration 002, got %d", orphanMeta)
+	}
+	if staleFTS != 0 {
+		t.Errorf("expected 0 stale FTS rows after migration 002, got %d", staleFTS)
 	}
 }
 
