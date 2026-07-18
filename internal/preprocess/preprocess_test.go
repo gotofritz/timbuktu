@@ -170,7 +170,9 @@ func TestHashFile_known_file(t *testing.T) {
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	h := sha256.Sum256([]byte(content))
 	want := fmt.Sprintf("%x", h)
