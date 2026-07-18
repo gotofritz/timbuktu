@@ -10,7 +10,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 | 02 — Storage | SQLite schema, migrations, typed repositories, FTS5 | ✅ done |
 | 03 — Preprocessing | Text extraction (Markdown, plain text, PDF, HTML), chunking, SHA256 | ✅ done |
 | 04 — Embeddings | Embedding provider interface + adapters (llama.cpp, Ollama, OpenAI) | ✅ done |
-| 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | planned |
+| 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | ✅ done |
 | 06 — Ingestion | SHA256 dedup, chunking, store pipeline | planned |
 | 07 — Search | Vector search, FTS5 keyword search, hybrid | planned |
 | 08 — RAG | Retrieval pipeline, prompt templates, streaming | planned |
@@ -84,7 +84,7 @@ internal/
   chunking/         Chunker.Split — greedy sentence accumulation, configurable size/overlap
   embeddings/       Embedder interface; llama.cpp, Ollama, OpenAI adapters
   ingest/           (planned) ingestion pipeline
-  llm/              (planned) LLM interface + provider adapters
+  llm/              LLM interface; Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
   retrieval/        (planned) vector + FTS5 + hybrid search
   prompts/          (planned) template loader and renderer
   search/           (planned) search command handler
