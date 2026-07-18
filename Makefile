@@ -2,7 +2,7 @@
 
 # Build the binary
 build:
-	mkdir -p bin && go build -o bin/podcast .
+	mkdir -p bin && go build -o bin/tbuk ./cmd/tbuk
 
 # Run all tests
 test:
