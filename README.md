@@ -24,9 +24,15 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 ## Quick start
 
 ```bash
-make install             # installs tbuk to $GOPATH/bin (must be on $PATH)
+make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin
 tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
+```
+
+If `tbuk` is not found after install, add Go's bin dir to your shell profile:
+
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
 ## Development
