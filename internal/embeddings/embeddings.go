@@ -33,6 +33,8 @@ func AsEmbedError(err error, target **EmbedError) bool {
 // NewEmbedder returns an Embedder selected by cfg.Provider.
 func NewEmbedder(cfg config.EmbeddingConfig) (Embedder, error) {
 	switch cfg.Provider {
+	case "llama":
+		return newLlamaEmbedder(cfg), nil
 	case "ollama":
 		return newOllamaEmbedder(cfg), nil
 	case "openai":

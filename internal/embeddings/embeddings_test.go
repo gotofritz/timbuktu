@@ -57,6 +57,133 @@ func openAIHandler(t *testing.T, vecs [][]float32) http.HandlerFunc {
 	}
 }
 
+// --- llama.cpp handler ---
+
+func llamaHandler(t *testing.T, vecs [][]float32) http.HandlerFunc {
+	t.Helper()
+	call := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("llama decode body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if call >= len(vecs) {
+			t.Errorf("unexpected llama call %d", call)
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+			return
+		}
+		resp := map[string]any{"embedding": vecs[call]}
+		call++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}
+}
+
+// --- llama.cpp tests ---
+
+func TestLlamaEmbedder_success(t *testing.T) {
+	vecs := [][]float32{{0.1, 0.2, 0.3}, {0.4, 0.5, 0.6}}
+	srv := httptest.NewServer(llamaHandler(t, vecs))
+	defer srv.Close()
+
+	cfg := config.EmbeddingConfig{
+		Provider:  "llama",
+		BaseURL:   srv.URL,
+		Dimension: 3,
+	}
+	emb, err := embeddings.NewEmbedder(cfg)
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+
+	got, err := emb.Embed(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 results, got %d", len(got))
+	}
+	for i, row := range got {
+		if len(row) != 3 {
+			t.Errorf("row %d: want len 3, got %d", i, len(row))
+		}
+	}
+	if emb.Dimension() != 3 {
+		t.Errorf("Dimension: want 3, got %d", emb.Dimension())
+	}
+}
+
+func TestLlamaEmbedder_serverError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := config.EmbeddingConfig{
+		Provider:  "llama",
+		BaseURL:   srv.URL,
+		Dimension: 768,
+	}
+	emb, err := embeddings.NewEmbedder(cfg)
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+
+	_, err = emb.Embed(context.Background(), []string{"hello"})
+	if err == nil {
+		t.Fatal("expected error from 500 response")
+	}
+	var embedErr *embeddings.EmbedError
+	if !embeddings.AsEmbedError(err, &embedErr) {
+		t.Fatalf("want *EmbedError, got %T: %v", err, err)
+	}
+	if embedErr.StatusCode != 500 {
+		t.Errorf("StatusCode: want 500, got %d", embedErr.StatusCode)
+	}
+}
+
+func TestLlamaEmbedder_perTextRequests(t *testing.T) {
+	// llama.cpp /embedding is single-text; 3 texts → 3 HTTP calls
+	vecs := [][]float32{{0.1}, {0.2}, {0.3}}
+	var callCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var req struct {
+			Content string `json:"content"`
+		}
+		json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
+		resp := map[string]any{"embedding": vecs[callCount-1]}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	cfg := config.EmbeddingConfig{
+		Provider:  "llama",
+		BaseURL:   srv.URL,
+		Dimension: 1,
+	}
+	emb, err := embeddings.NewEmbedder(cfg)
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+
+	got, err := emb.Embed(context.Background(), []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 results, got %d", len(got))
+	}
+	if callCount != 3 {
+		t.Errorf("want 3 HTTP calls (one per text), got %d", callCount)
+	}
+}
+
 // --- Ollama tests ---
 
 func TestOllamaEmbedder_success(t *testing.T) {
