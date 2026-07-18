@@ -36,6 +36,21 @@ func TestCheckConfig_missing(t *testing.T) {
 	}
 }
 
+func TestCheckConfig_invalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(path, []byte(":\tinvalid:\n[\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg, ok := cli.CheckConfig(path)
+	if ok {
+		t.Error("expected ok=false for invalid YAML")
+	}
+	if msg == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
 // ── checkDB ───────────────────────────────────────────────────────────────────
 
 func TestCheckDB_opens(t *testing.T) {

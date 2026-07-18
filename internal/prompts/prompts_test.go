@@ -240,3 +240,48 @@ func TestTemplateList_nonexistentDir(t *testing.T) {
 		t.Errorf("want 0 manifests, got %d", len(manifests))
 	}
 }
+
+// TestTemplateRender_systemError — system template execution error propagates.
+func TestTemplateRender_systemError(t *testing.T) {
+	dir := t.TempDir()
+	// Template references an undefined sub-template, causing execution error.
+	writeTemplate(t, dir, "bad", map[string]string{
+		"manifest.yaml": qaManifest,
+		"system.tmpl":   `{{ template "undefined_subtmpl" . }}`,
+		"user.tmpl":     `Q: {{ .Question }}`,
+	})
+
+	td := prompts.NewTemplateDir(dir)
+	tmpl, err := td.Load("bad")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	data := prompts.TemplateData{Question: "hi", Variables: map[string]string{}}
+	_, _, err = tmpl.Render(data)
+	if err == nil {
+		t.Fatal("expected error from system template execution, got nil")
+	}
+}
+
+// TestTemplateRender_userError — user template execution error propagates.
+func TestTemplateRender_userError(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "bad2", map[string]string{
+		"manifest.yaml": qaManifest,
+		"system.tmpl":   `ok`,
+		"user.tmpl":     `{{ template "undefined_subtmpl" . }}`,
+	})
+
+	td := prompts.NewTemplateDir(dir)
+	tmpl, err := td.Load("bad2")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	data := prompts.TemplateData{Question: "hi", Variables: map[string]string{}}
+	_, _, err = tmpl.Render(data)
+	if err == nil {
+		t.Fatal("expected error from user template execution, got nil")
+	}
+}
