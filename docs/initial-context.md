@@ -34,7 +34,7 @@ internal/
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
   embeddings/       Embedder interface + factory; llama, ollama, openai adapters
-  llm/              LLM interface + factory; claude, openai, ollama adapters (SSE + JSON-lines streaming)
+  llm/              LLM interface + factory; claude, openai, llama, ollama adapters (SSE + JSON-lines streaming)
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
@@ -178,9 +178,10 @@ func NewLLM(cfg *config.LLMConfig) (LLM, error)
 |----------|-----|----------|-------|
 | `claude` | `ANTHROPIC_API_KEY` env | `POST {base_url}/v1/messages` | SSE, `content_block_delta` events, `x-api-key` header |
 | `openai` | `OPENAI_API_KEY` env | `POST {base_url}/v1/chat/completions` | SSE, `[DONE]` sentinel, Bearer auth |
+| `llama`  | — | `POST {base_url}/v1/chat/completions` | OpenAI-compatible SSE, no auth header; shares the `openai` adapter |
 | `ollama` | — | `POST {base_url}/api/chat` | JSON-lines streaming, `"done":true` sentinel |
 
-`base_url` defaults to `https://api.anthropic.com` (claude), `https://api.openai.com` (openai), `http://localhost:11434` (ollama).
+`base_url` defaults to `https://api.anthropic.com` (claude), `https://api.openai.com` (openai), `http://localhost:8080` (llama), `http://localhost:11434` (ollama).
 
 Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
 

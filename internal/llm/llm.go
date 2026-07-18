@@ -65,6 +65,8 @@ func NewLLM(cfg *config.LLMConfig) (LLM, error) {
 	switch cfg.Provider {
 	case "claude":
 		return newClaudeProvider(cfg)
+	case "llama":
+		return newLlamaProvider(cfg), nil
 	case "openai":
 		return newOpenAIProvider(cfg)
 	case "ollama":

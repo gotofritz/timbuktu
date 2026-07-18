@@ -61,7 +61,7 @@ llm:
   model: ""          # provider default when empty
 
 embedding:
-  provider: llama    # llama | ollama | openai | voyage
+  provider: llama    # llama | ollama | openai
   model: ""
   dimension: 768
 

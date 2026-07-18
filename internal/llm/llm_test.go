@@ -310,6 +310,120 @@ func TestOllamaProvider_stream(t *testing.T) {
 	}
 }
 
+// --- Llama tests ---
+
+func TestFactory_llamaNoAuth(t *testing.T) {
+	// llama.cpp requires no API key — factory should succeed without env vars.
+	t.Setenv("OPENAI_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider:  "llama",
+		Model:     "",
+		MaxTokens: 100,
+		BaseURL:   "http://localhost:8080",
+	}
+	_, err := llm.NewLLM(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error for llama: %v", err)
+	}
+}
+
+func TestFactory_llamaDefaultBaseURL(t *testing.T) {
+	// No BaseURL → provider uses default localhost:8080.
+	t.Setenv("OPENAI_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider: "llama",
+		Model:    "",
+	}
+	_, err := llm.NewLLM(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error for llama without BaseURL: %v", err)
+	}
+}
+
+func TestLlamaProvider_stream(t *testing.T) {
+	events := []string{
+		"data: {\"choices\":[{\"delta\":{\"content\":\"Lo\"}}]}\n\n",
+		"data: {\"choices\":[{\"delta\":{\"content\":\"cal\"}}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	// llama.cpp needs no Authorization header.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("llama must not send Authorization header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, e := range events {
+			fmt.Fprint(w, e) //nolint:errcheck
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider:  "llama",
+		Model:     "local-model",
+		MaxTokens: 100,
+		BaseURL:   srv.URL,
+	}
+	provider, err := llm.NewLLM(cfg)
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+
+	ch, err := provider.Chat(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Content: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	tokens := collectTokens(ch)
+	if len(tokens) != 3 {
+		t.Fatalf("want 3 tokens, got %d", len(tokens))
+	}
+	if tokens[0].Text != "Lo" {
+		t.Errorf("token 0: want %q, got %q", "Lo", tokens[0].Text)
+	}
+	if tokens[1].Text != "cal" {
+		t.Errorf("token 1: want %q, got %q", "cal", tokens[1].Text)
+	}
+	if !tokens[2].Done {
+		t.Errorf("last token: want Done=true")
+	}
+}
+
+func TestLlamaProvider_serverError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider:  "llama",
+		Model:     "local-model",
+		MaxTokens: 100,
+		BaseURL:   srv.URL,
+	}
+	provider, err := llm.NewLLM(cfg)
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Content: "hi"},
+	})
+	if err == nil {
+		t.Fatal("expected error from 500 response")
+	}
+	var llmErr *llm.LLMError
+	if !llm.AsLLMError(err, &llmErr) {
+		t.Fatalf("want *LLMError, got %T: %v", err, err)
+	}
+	if llmErr.Provider != "llama" {
+		t.Errorf("provider: want llama, got %q", llmErr.Provider)
+	}
+}
+
 // --- Factory tests ---
 
 func TestFactory_unknownProvider(t *testing.T) {

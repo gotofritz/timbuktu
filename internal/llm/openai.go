@@ -11,11 +11,15 @@ import (
 	"github.com/gotofritz/timbuktu/internal/config"
 )
 
+// openAIProvider speaks the OpenAI-compatible /v1/chat/completions protocol.
+// It backs both the hosted OpenAI provider (bearer token required) and the
+// local llama.cpp provider (name "llama", no token).
 type openAIProvider struct {
+	name      string
 	baseURL   string
 	model     string
 	maxTokens int
-	apiKey    string
+	apiKey    string // empty → no Authorization header
 	client    *http.Client
 }
 
@@ -29,12 +33,30 @@ func newOpenAIProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
 		baseURL = "https://api.openai.com"
 	}
 	return &openAIProvider{
+		name:      "openai",
 		baseURL:   baseURL,
 		model:     cfg.Model,
 		maxTokens: cfg.MaxTokens,
 		apiKey:    key,
 		client:    &http.Client{},
 	}, nil
+}
+
+// newLlamaProvider targets a local llama.cpp server. Its OpenAI-compatible
+// endpoint needs no API key, defaulting to http://localhost:8080.
+func newLlamaProvider(cfg *config.LLMConfig) *openAIProvider {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+	return &openAIProvider{
+		name:      "llama",
+		baseURL:   baseURL,
+		model:     cfg.Model,
+		maxTokens: cfg.MaxTokens,
+		apiKey:    "",
+		client:    &http.Client{},
+	}
 }
 
 func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...CallOptions) (<-chan Token, error) {
@@ -71,24 +93,26 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		"temperature": temperature,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshal request: %w", err)
+		return nil, fmt.Errorf("%s: marshal request: %w", p.name, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("openai: build request: %w", err)
+		return nil, fmt.Errorf("%s: build request: %w", p.name, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openai: do request: %w", err)
+		return nil, fmt.Errorf("%s: do request: %w", p.name, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
 		return nil, &LLMError{
-			Provider:   "openai",
+			Provider:   p.name,
 			StatusCode: resp.StatusCode,
 			Message:    http.StatusText(resp.StatusCode),
 		}
@@ -118,7 +142,7 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 				} `json:"choices"`
 			}
 			if err := json.Unmarshal([]byte(value), &payload); err != nil {
-				ch <- Token{Error: fmt.Errorf("openai: parse chunk: %w", err)}
+				ch <- Token{Error: fmt.Errorf("%s: parse chunk: %w", p.name, err)}
 				return
 			}
 			if len(payload.Choices) > 0 {
@@ -126,7 +150,7 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			ch <- Token{Error: fmt.Errorf("openai: scan: %w", err)}
+			ch <- Token{Error: fmt.Errorf("%s: scan: %w", p.name, err)}
 		}
 	}()
 
