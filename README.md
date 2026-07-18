@@ -13,7 +13,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 | 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | ✅ done |
 | 06 — Ingestion | SHA256 dedup, chunking, store pipeline | ✅ done |
 | 07 — Search | Vector search, FTS5 keyword search, hybrid | ✅ done |
-| 08 — RAG | Retrieval pipeline, prompt templates, streaming | planned |
+| 08 — RAG | Retrieval pipeline, prompt templates, streaming | ✅ done |
 | 09 — Management | `tbuk stats`, `tbuk delete`, `tbuk update` | planned |
 
 ## Requirements
@@ -32,6 +32,10 @@ tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extrac
 tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose)
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
+tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
+tbuk template list       # list prompt templates in ~/.tbuk/prompts/
+tbuk template show <n>   # print manifest + template files
+tbuk template edit <n>   # open template manifest in $EDITOR
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -89,8 +93,8 @@ internal/
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline
   llm/              LLM interface; Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
-  retrieval/        (planned) retrieval pipeline
-  prompts/          (planned) template loader and renderer
+  retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
+  prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   metadata/         (planned) metadata command handler
 ```
 

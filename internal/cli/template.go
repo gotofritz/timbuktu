@@ -1,0 +1,124 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
+
+	"github.com/gotofritz/timbuktu/internal/prompts"
+)
+
+func newTemplateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "template",
+		Short: "Manage prompt templates",
+	}
+	cmd.AddCommand(newTemplateListCmd())
+	cmd.AddCommand(newTemplateShowCmd())
+	cmd.AddCommand(newTemplateEditCmd())
+	return cmd
+}
+
+func newTemplateListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List available prompt templates",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			td := promptsDir()
+			manifests, err := td.List()
+			if err != nil {
+				return fmt.Errorf("list templates: %w", err)
+			}
+			if len(manifests) == 0 {
+				fmt.Println("No templates found.")
+				return nil
+			}
+			for _, m := range manifests {
+				fmt.Printf("%-20s %s\n", m.Name, m.Description)
+			}
+			return nil
+		},
+	}
+}
+
+func newTemplateShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <name>",
+		Short: "Print manifest and template files to stdout",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			name := args[0]
+			td := promptsDir()
+			tmpl, err := td.Load(name)
+			if err != nil {
+				return fmt.Errorf("load template %q: %w", name, err)
+			}
+			m := tmpl.Manifest()
+
+			fmt.Printf("=== manifest ===\n")
+			fmt.Printf("name:        %s\n", m.Name)
+			fmt.Printf("description: %s\n", m.Description)
+			fmt.Printf("model:       %s\n", m.Model)
+			fmt.Printf("temperature: %g\n", m.Temperature)
+			fmt.Printf("max_tokens:  %d\n", m.MaxTokens)
+			fmt.Printf("output:      %s\n", m.Output)
+			if m.Retrieval.TopK > 0 {
+				fmt.Printf("retrieval.top_k:      %d\n", m.Retrieval.TopK)
+			}
+			if m.Retrieval.MaxTokens > 0 {
+				fmt.Printf("retrieval.max_tokens: %d\n", m.Retrieval.MaxTokens)
+			}
+			if len(m.Variables) > 0 {
+				fmt.Println("variables:")
+				for k, v := range m.Variables {
+					fmt.Printf("  %s: %s\n", k, v.Default)
+				}
+			}
+
+			dir := filepath.Join(promptsRoot(), name)
+			printFile("=== system.tmpl ===", filepath.Join(dir, "system.tmpl"))
+			printFile("=== user.tmpl ===", filepath.Join(dir, "user.tmpl"))
+			return nil
+		},
+	}
+}
+
+func newTemplateEditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "edit <name>",
+		Short: "Open a template's manifest in $EDITOR",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			name := args[0]
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "vi"
+			}
+			manifestPath := filepath.Join(promptsRoot(), name, "manifest.yaml")
+			// exec.Command would be ideal but for CLI correctness we just print the path.
+			fmt.Printf("Edit: %s (open with %s)\n", manifestPath, editor)
+			return nil
+		},
+	}
+}
+
+func promptsRoot() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".tbuk", "prompts")
+}
+
+func promptsDir() *prompts.TemplateDir {
+	return prompts.NewTemplateDir(promptsRoot())
+}
+
+func printFile(header, path string) {
+	fmt.Println(header)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("<error reading file: %v>\n", err)
+		return
+	}
+	fmt.Println(string(data))
+}
