@@ -62,7 +62,7 @@ func newLlamaProvider(cfg *config.LLMConfig) *openAIProvider {
 func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...CallOptions) (<-chan Token, error) {
 	model := p.model
 	maxTokens := p.maxTokens
-	temperature := 0.0
+	var temperature *float64
 	if len(opts) > 0 {
 		o := opts[0]
 		if o.Model != "" {
@@ -71,7 +71,7 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		if o.MaxTokens > 0 {
 			maxTokens = o.MaxTokens
 		}
-		if o.Temperature != 0 {
+		if o.Temperature != nil {
 			temperature = o.Temperature
 		}
 	}
@@ -85,13 +85,16 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		apiMessages = append(apiMessages, apiMsg{Role: string(m.Role), Content: m.Content})
 	}
 
-	body, err := json.Marshal(map[string]any{
-		"model":       model,
-		"max_tokens":  maxTokens,
-		"messages":    apiMessages,
-		"stream":      true,
-		"temperature": temperature,
-	})
+	reqBody := map[string]any{
+		"model":      model,
+		"max_tokens": maxTokens,
+		"messages":   apiMessages,
+		"stream":     true,
+	}
+	if temperature != nil {
+		reqBody["temperature"] = *temperature
+	}
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("%s: marshal request: %w", p.name, err)
 	}

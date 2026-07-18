@@ -246,6 +246,69 @@ func TestIngester_forceFlag(t *testing.T) {
 	}
 }
 
+// toggleEmbedder succeeds until failAfter successful calls, then errors.
+type toggleEmbedder struct {
+	dim       int
+	calls     int
+	failAfter int
+}
+
+func (m *toggleEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	m.calls++
+	if m.calls > m.failAfter {
+		return nil, fmt.Errorf("embed provider down")
+	}
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		vec := make([]float32, m.dim)
+		out[i] = vec
+	}
+	return out, nil
+}
+
+func (m *toggleEmbedder) Dimension() int { return m.dim }
+
+// A failed re-ingest (embedding error) must not destroy the previous index:
+// old chunks stay intact and searchable.
+func TestIngester_reingestEmbedErrorPreservesOldChunks(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("alpha ", 200)}
+	emb := &toggleEmbedder{dim: 4, failAfter: 1} // first ingest ok, second fails
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "doc.md", "original content")
+
+	r1 := ing.IngestFile(context.Background(), path, ingest.Options{})
+	if r1.Err != nil {
+		t.Fatalf("first ingest: %v", r1.Err)
+	}
+	if r1.Chunks == 0 {
+		t.Fatal("expected chunks from first ingest")
+	}
+
+	sqlDB := db.DB()
+	var before int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	// force a re-ingest whose embedding step fails
+	r2 := ing.IngestFile(context.Background(), path, ingest.Options{Force: true})
+	if r2.Err == nil {
+		t.Fatal("expected embed error on re-ingest")
+	}
+
+	var after int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("old chunks destroyed by failed re-ingest: before=%d after=%d", before, after)
+	}
+}
+
 func TestIngester_extractorError(t *testing.T) {
 	db := openTestDB(t)
 	extractedDir := t.TempDir()

@@ -62,8 +62,8 @@ description: "minimal"
 		t.Fatalf("Load: %v", err)
 	}
 	m := tmpl.Manifest()
-	if m.Temperature != 0 {
-		t.Errorf("temperature default: want 0, got %f", m.Temperature)
+	if m.Temperature != nil {
+		t.Errorf("temperature default: want nil (unset), got %v", *m.Temperature)
 	}
 	if m.MaxTokens != 0 {
 		t.Errorf("max_tokens default: want 0, got %d", m.MaxTokens)

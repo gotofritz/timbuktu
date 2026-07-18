@@ -67,11 +67,6 @@ func newAskCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create LLM: %w", err)
 			}
-			manifest := tmpl.Manifest()
-			llmCfg := cfg.LLM
-			if manifest.Model != "" {
-				llmCfg.Model = manifest.Model
-			}
 
 			return RunAsk(
 				os.Stdout,
@@ -148,7 +143,12 @@ func RunAsk(
 		{Role: llm.RoleUser, Content: userPrompt},
 	}
 
-	tokenCh, err := chat(context.Background(), messages) //nolint:wrapcheck
+	opts := llm.CallOptions{
+		Model:       manifest.Model,
+		Temperature: manifest.Temperature,
+		MaxTokens:   manifest.MaxTokens,
+	}
+	tokenCh, err := chat(context.Background(), messages, opts) //nolint:wrapcheck
 	if err != nil {
 		return fmt.Errorf("LLM chat: %w", err)
 	}

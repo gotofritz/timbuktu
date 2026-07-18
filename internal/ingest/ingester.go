@@ -101,9 +101,6 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		if existing.SHA256 == sha && !opts.Force {
 			return Result{Path: path, Skipped: true}
 		}
-		if err := ing.chunks.DeleteByDocument(ctx, existing.ID); err != nil {
-			return Result{Path: path, Err: fmt.Errorf("ingest: delete old chunks: %w", err)}
-		}
 	}
 
 	text, err := ing.readOrExtract(ctx, path, sha)
@@ -165,10 +162,11 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		c.DocumentID = docID
 	}
 
-	if len(storageChunks) > 0 {
-		if err := ing.chunks.BulkInsert(ctx, storageChunks); err != nil {
-			return Result{Path: path, Err: fmt.Errorf("ingest: store chunks: %w", err)}
-		}
+	// Replace old chunks with the new ones atomically: delete + insert in one
+	// transaction, only after extraction and embedding have succeeded, so a
+	// failed re-ingest never destroys the previous index.
+	if err := ing.chunks.ReplaceForDocument(ctx, docID, storageChunks); err != nil {
+		return Result{Path: path, Err: fmt.Errorf("ingest: store chunks: %w", err)}
 	}
 
 	if err := ing.writeAutoMetadata(ctx, docID, path, mime); err != nil {

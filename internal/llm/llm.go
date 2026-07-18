@@ -31,9 +31,11 @@ type Token struct {
 }
 
 // CallOptions overrides per-request LLM parameters.
+// A nil Temperature means "unset" — the provider default is used — so an
+// explicit temperature of 0 is expressible.
 type CallOptions struct {
 	Model       string
-	Temperature float64
+	Temperature *float64
 	MaxTokens   int
 }
 

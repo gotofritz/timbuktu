@@ -191,7 +191,8 @@ func TestClaudeProvider_callOptions(t *testing.T) {
 		t.Fatalf("NewLLM: %v", err)
 	}
 
-	opts := llm.CallOptions{Model: "claude-opus-4-8", MaxTokens: 512, Temperature: 0.5}
+	temp := 0.5
+	opts := llm.CallOptions{Model: "claude-opus-4-8", MaxTokens: 512, Temperature: &temp}
 	ch, err := provider.Chat(context.Background(), []llm.Message{
 		{Role: llm.RoleUser, Content: "hi"},
 	}, opts)
@@ -205,6 +206,36 @@ func TestClaudeProvider_callOptions(t *testing.T) {
 	}
 	if gotBody["max_tokens"] != float64(512) {
 		t.Errorf("max_tokens: want 512, got %v", gotBody["max_tokens"])
+	}
+	if gotBody["temperature"] != float64(0.5) {
+		t.Errorf("temperature: want 0.5, got %v", gotBody["temperature"])
+	}
+}
+
+func TestClaudeProvider_temperatureUnsetOmitted(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+		fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	provider, err := llm.NewLLM(&config.LLMConfig{
+		Provider: "claude", Model: "m", MaxTokens: 100, BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	// No CallOptions → temperature must be omitted, not sent as 0.
+	ch, err := provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	collectTokens(ch)
+
+	if _, ok := gotBody["temperature"]; ok {
+		t.Errorf("temperature should be omitted when unset, got %v", gotBody["temperature"])
 	}
 }
 
