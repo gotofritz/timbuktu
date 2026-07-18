@@ -9,7 +9,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 | 01 — Foundation | CLI skeleton, config loading, `tbuk init` | ✅ done |
 | 02 — Storage | SQLite schema, migrations, typed repositories, FTS5 | ✅ done |
 | 03 — Preprocessing | Text extraction (Markdown, plain text, PDF, HTML), chunking, SHA256 | ✅ done |
-| 04 — Embeddings | Embedding provider interface + adapters | planned |
+| 04 — Embeddings | Embedding provider interface + adapters (llama.cpp, Ollama, OpenAI) | ✅ done |
 | 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | planned |
 | 06 — Ingestion | SHA256 dedup, chunking, store pipeline | planned |
 | 07 — Search | Vector search, FTS5 keyword search, hybrid | planned |
@@ -82,7 +82,7 @@ internal/
   storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence accumulation, configurable size/overlap
-  embeddings/       (planned) Embedder interface + provider adapters
+  embeddings/       Embedder interface; llama.cpp, Ollama, OpenAI adapters
   ingest/           (planned) ingestion pipeline
   llm/              (planned) LLM interface + provider adapters
   retrieval/        (planned) vector + FTS5 + hybrid search
