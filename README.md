@@ -11,7 +11,7 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 | 03 — Preprocessing | Text extraction (Markdown, plain text, PDF, HTML), chunking, SHA256 | ✅ done |
 | 04 — Embeddings | Embedding provider interface + adapters (llama.cpp, Ollama, OpenAI) | ✅ done |
 | 05 — LLM Providers | LLM interface + adapters (Ollama, Claude, OpenAI) | ✅ done |
-| 06 — Ingestion | SHA256 dedup, chunking, store pipeline | planned |
+| 06 — Ingestion | SHA256 dedup, chunking, store pipeline | ✅ done |
 | 07 — Search | Vector search, FTS5 keyword search, hybrid | planned |
 | 08 — RAG | Retrieval pipeline, prompt templates, streaming | planned |
 | 09 — Management | `tbuk stats`, `tbuk delete`, `tbuk update` | planned |
@@ -29,6 +29,7 @@ tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
 tbuk doctor              # check config, database, LLM connectivity, and extractors
 tbuk preprocess <path>   # extract and chunk text from a document (--format text|json)
+tbuk ingest <path>       # ingest a file or directory into the knowledge base (--force, --verbose)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -83,7 +84,7 @@ internal/
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
   chunking/         Chunker.Split — greedy sentence accumulation, configurable size/overlap
   embeddings/       Embedder interface; llama.cpp, Ollama, OpenAI adapters
-  ingest/           (planned) ingestion pipeline
+  ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline
   llm/              LLM interface; Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
   retrieval/        (planned) vector + FTS5 + hybrid search
   prompts/          (planned) template loader and renderer

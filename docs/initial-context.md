@@ -15,7 +15,7 @@ Module: `github.com/gotofritz/timbuktu`
 | 03 | Preprocessing — text extraction, chunking, SHA256 | ✅ done |
 | 04 | Embeddings — `Embedder` interface, llama/ollama/openai adapters | ✅ done |
 | 05 | LLM Providers — `LLM` interface, provider adapters | ✅ done |
-| 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | stub |
+| 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | ✅ done |
 | 07 | Search — vector, FTS5 keyword, hybrid | stub |
 | 08 | RAG — retrieval pipeline, prompt templates, streaming | stub |
 | 09 | Management — `tbuk stats`, delete, update | stub |
@@ -35,7 +35,7 @@ internal/
   chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
   embeddings/       Embedder interface + factory; llama, ollama, openai adapters
   llm/              LLM interface + factory; claude, openai, ollama adapters (SSE + JSON-lines streaming)
-  ingest/           STUB
+  ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          STUB
   retrieval/        STUB
   search/           STUB
@@ -186,13 +186,49 @@ Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. System me
 
 ---
 
+## Ingestion
+
+```go
+type FileExtractor interface {
+    ExtractFile(ctx context.Context, path string) (string, error)
+}
+
+type Embedder interface {
+    Embed(ctx context.Context, texts []string) ([][]float32, error)
+    Dimension() int
+}
+
+type Options struct { Force bool }
+
+type Result struct {
+    Path    string
+    Skipped bool   // SHA256 unchanged and Force=false
+    Chunks  int
+    Err     error
+}
+
+func NewIngester(docs, chunks, meta repos, ext FileExtractor, chunker, emb, progress) *Ingester
+func (ing *Ingester) IngestFile(ctx, path, opts) Result
+func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
+```
+
+Pipeline per file: SHA256 → dedup check → extract text → chunk → embed (batch 16) → upsert doc + chunks.
+Changed SHA256 → old chunks deleted before re-index. `DefaultFileExtractor` detects MIME and delegates to `preprocess` backends.
+
+Supported extensions for `IngestDir`: `.md`, `.txt`, `.pdf`, `.html`, `.htm`.
+
+Doctor shows document/chunk counts from the live DB.
+
+---
+
 ## CLI Commands (implemented)
 
 ```
-tbuk init         create ~/.tbuk/, write default config.yaml and prompts/
-tbuk version      print version string
-tbuk doctor       probe config, DB, LLM/embedding connectivity
-tbuk preprocess   extract + chunk text from file/dir (--format text|json)
+tbuk init              create ~/.tbuk/, write default config.yaml and prompts/
+tbuk version           print version string
+tbuk doctor            probe config, DB (with doc/chunk counts), LLM/embedding connectivity
+tbuk preprocess        extract + chunk text from file/dir (--format text|json)
+tbuk ingest <path>     ingest file or directory (--force, --verbose)
 ```
 
 ---
