@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,6 +89,52 @@ func TestCheckHTTP_serverError(t *testing.T) {
 	msg, ok := cli.CheckHTTP(srv.URL, srv.Client())
 	if ok {
 		t.Errorf("expected ok=false for 503, got true: %s", msg)
+	}
+}
+
+// ── CheckLLMModel ─────────────────────────────────────────────────────────────
+
+func TestCheckLLMModel_discoversFromServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"data":[{"id":"llama-3.2"}]}`) //nolint:errcheck
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	got := cli.CheckLLMModel(srv.URL, "fallback-model", srv.Client())
+	if got != "llama-3.2" {
+		t.Errorf("want llama-3.2, got %q", got)
+	}
+}
+
+func TestCheckLLMModel_fallsBackToConfig(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	got := cli.CheckLLMModel(srv.URL, "my-model", srv.Client())
+	if got != "my-model" {
+		t.Errorf("want my-model, got %q", got)
+	}
+}
+
+func TestCheckLLMModel_emptyModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"data":[]}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	got := cli.CheckLLMModel(srv.URL, "cfg-model", srv.Client())
+	if got != "cfg-model" {
+		t.Errorf("want cfg-model (fallback), got %q", got)
 	}
 }
 
