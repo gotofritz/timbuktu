@@ -162,7 +162,7 @@ const (
 
 type Message struct { Role Role; Content string }
 type Token   struct { Text string; Done bool; Error error }
-type CallOptions struct { Model string; Temperature float64; MaxTokens int }
+type CallOptions struct { Model string; Temperature *float64; MaxTokens int } // nil Temperature = provider default
 
 type LLM interface {
     Chat(ctx context.Context, messages []Message, opts ...CallOptions) (<-chan Token, error)
@@ -228,8 +228,8 @@ func (ing *Ingester) IngestFile(ctx, path, opts) Result
 func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
 ```
 
-Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc + chunks → write automatic metadata.
-Changed SHA256 → old chunks deleted before re-index.
+Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc → `ChunkRepo.ReplaceForDocument` → write automatic metadata.
+Re-index is atomic: extraction and embedding run *first*, then `ReplaceForDocument` deletes old chunks and inserts new ones in a single transaction. A failed re-ingest (embedding error) leaves the previous chunks intact rather than destroying the index.
 
 Automatic metadata written per document: `filename`, `extension` (lowercased, no leading dot), `mime`, `dir`. Refreshed on every ingest via `MetadataRepo.Set` upsert; user-set keys are left intact. Makes `tbuk find filename=README.md` work after plain ingest.
 
@@ -318,7 +318,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa` template installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `variables` come from `manifest.yaml`.
+Built-in `qa` template installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset.
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 

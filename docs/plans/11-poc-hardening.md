@@ -113,6 +113,12 @@ round-trip.
 
 ### 4. Template manifest `model` / `temperature` / `max_tokens` never reach the LLM
 
+> **DONE (PR 4).** Archived to
+> `docs/archive/2026-07-18-2359-a83a9c6-11-p0-4-5-callopts-reingest.md`. `RunAsk` forwards
+> `llm.CallOptions{Model, Temperature, MaxTokens}`; `CallOptions.Temperature`
+> and `Manifest.Temperature` are now `*float64` (explicit `0` honored,
+> omitted from the request body when nil); dead `llmCfg` block removed.
+
 `ask.go` builds `llmCfg` with the manifest's model override — then never uses
 it (dead assignment). `RunAsk` calls `chat(ctx, messages)` with no
 `CallOptions`, so manifest `temperature: 0.2`, `max_tokens: 2048`, and `model`
@@ -129,6 +135,11 @@ the chat call. Remove the dead `llmCfg` block. Note the providers treat
 (assert received `CallOptions`); explicit temperature 0 is honored.
 
 ### 5. Re-ingest deletes old chunks before the new ones exist
+
+> **DONE (PR 4).** Archived to
+> `docs/archive/2026-07-18-2359-a83a9c6-11-p0-4-5-callopts-reingest.md`. Early `DeleteByDocument` dropped; extraction and
+> embedding run first, then `ChunkRepo.ReplaceForDocument` does delete +
+> bulk-insert in one transaction. A failed re-ingest keeps the old index.
 
 `IngestFile` calls `chunks.DeleteByDocument` *before* extraction and
 embedding. If embedding fails (provider down, 429), the old chunks are
@@ -318,7 +329,7 @@ aspirational.
 | 1 | P0-1 pragma DSN + regression test ✅ done (migration dropped — app unused) | — |
 | 2 | P0-2 llama LLM provider + docs alignment (P1-13) ✅ done | — |
 | 3 | P0-3 automatic metadata + `tbuk meta` commands ✅ done | — |
-| 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest | — |
+| 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest ✅ done | — |
 | 5 | P0-6 hybrid MinScore + FTS5 query sanitizing | — |
 | 6 | P1-7 UTF-8 chunking + P1-11 path normalization | 1 |
 | 7 | P1-8 stream cancellation + P1-9 error bodies + P1-10 ErrNotFound | — |

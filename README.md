@@ -116,6 +116,20 @@ after a plain `tbuk ingest`. Attach your own tags with
 `tbuk meta set <path> tag=design` (user-set keys survive re-ingest) and inspect
 them with `tbuk meta list <path>`.
 
+### Prompt templates
+
+A template's `manifest.yaml` drives the LLM call: `model`, `temperature`, and
+`max_tokens` are passed through to the provider on every `tbuk ask`. Omit
+`temperature` to use the provider default; set `temperature: 0` for a
+deterministic answer (an explicit `0` is honored, not treated as "unset").
+
+### Re-ingesting
+
+`tbuk ingest --force` and `tbuk update` replace a document's chunks atomically:
+text extraction and embedding run first, then the old and new chunks are
+swapped in a single transaction. If embedding fails midway (e.g. the provider
+is down), the previous index is left intact and searchable rather than wiped.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
