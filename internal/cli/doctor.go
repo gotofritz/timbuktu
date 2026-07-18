@@ -64,6 +64,9 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 			}
 			_ = db.Close()
 		}
+		if info, err := os.Stat(cfg.Database.Path); err == nil {
+			printCheck("size", humanBytes(info.Size()), "")
+		}
 	}
 
 	printSection("LLM (" + cfg.LLM.Provider + ")")

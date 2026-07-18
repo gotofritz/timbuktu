@@ -18,7 +18,7 @@ Module: `github.com/gotofritz/timbuktu`
 | 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | ✅ done |
 | 07 | Search — vector, FTS5 keyword, hybrid | ✅ done |
 | 08 | RAG — retrieval pipeline, prompt templates, streaming | ✅ done |
-| 09 | Management — `tbuk stats`, delete, update | stub |
+| 09 | Management — `tbuk stats`, delete, update | ✅ done |
 
 ---
 
@@ -335,6 +335,9 @@ tbuk ask <question>            RAG query: retrieve chunks → render template �
 tbuk template list             list prompt templates in ~/.tbuk/prompts/
 tbuk template show <name>      print manifest + template files to stdout
 tbuk template edit <name>      open manifest in $EDITOR
+tbuk delete <path>             remove document + cascade-delete chunks/metadata (--yes skips prompt)
+tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--force)
+tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
 ```
 
 ---
