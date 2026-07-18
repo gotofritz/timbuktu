@@ -17,11 +17,11 @@ func TestDefaults(t *testing.T) {
 	if cfg.Chunking.Overlap != 100 {
 		t.Errorf("chunking overlap: want 100, got %d", cfg.Chunking.Overlap)
 	}
-	if cfg.LLM.Provider != "ollama" {
-		t.Errorf("llm.provider: want ollama, got %s", cfg.LLM.Provider)
+	if cfg.LLM.Provider != "llama" {
+		t.Errorf("llm.provider: want llama, got %s", cfg.LLM.Provider)
 	}
-	if cfg.Embedding.Provider != "ollama" {
-		t.Errorf("embedding.provider: want ollama, got %s", cfg.Embedding.Provider)
+	if cfg.Embedding.Provider != "llama" {
+		t.Errorf("embedding.provider: want llama, got %s", cfg.Embedding.Provider)
 	}
 	if cfg.Embedding.Dimension != 768 {
 		t.Errorf("embedding.dimension: want 768, got %d", cfg.Embedding.Dimension)
@@ -58,7 +58,7 @@ func TestLoad_partialYAML(t *testing.T) {
 	if cfg.Chunking.Overlap != 100 {
 		t.Errorf("overlap should keep default 100, got %d", cfg.Chunking.Overlap)
 	}
-	if cfg.LLM.Provider != "ollama" {
+	if cfg.LLM.Provider != "llama" {
 		t.Errorf("llm.provider should keep default, got %s", cfg.LLM.Provider)
 	}
 }

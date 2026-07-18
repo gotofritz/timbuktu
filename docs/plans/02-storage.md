@@ -150,3 +150,9 @@ func (r *DocumentRepo) List(ctx) ([]*Document, error)
 ## PR Scope
 
 One PR. Depends on Subplan 01 (go.mod + config). No ingestion, no HTTP.
+
+## Doctor
+
+No additions in this subplan. `tbuk doctor` is introduced in the foundation
+layer (subplan 01 follow-up) and already reports config, database, and LLM
+connectivity.

@@ -126,3 +126,45 @@ Verify:
 - [ ] Coverage ≥ 85 %
 - [ ] `tbuk init && tbuk ingest testdata/ && tbuk ask "test"` end-to-end smoke test
 - [ ] No lint warnings
+
+## Doctor
+
+Final doctor state — full summary:
+
+```
+Config
+  path:        ~/.tbuk/config.yaml
+  status:      ✓ valid
+
+Database
+  path:        ~/.tbuk/tbuk.sqlite
+  status:      ✓ open
+  documents:   12
+  chunks:      347
+  size:        2.1 MB
+
+LLM (llama)
+  url:         http://localhost:8080
+  status:      ✓ healthy (HTTP 200)
+  model:       qwen3.5-9b
+  max_tokens:  4096
+
+Embedding (llama)
+  url:         http://localhost:8080
+  status:      ✓ (same server as LLM)
+  dimension:   768
+
+Preprocessing
+  extractors:  markdown, text, html, pdf
+
+Search
+  fts5:        ✓ available
+  vector:      ✓ available (cosine, in-process)
+  hybrid:      ✓ available (RRF)
+
+Prompts
+  dir:         ~/.tbuk/prompts/
+  templates:   qa
+```
+
+Report DB file size via `os.Stat`.

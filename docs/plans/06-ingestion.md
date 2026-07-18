@@ -116,3 +116,17 @@ Depends on: storage (02), preprocessing (03), embeddings (04). No new packages.
 ## PR Scope
 
 One PR. First PR that wires multiple subplans together.
+
+## Doctor
+
+Add to `tbuk doctor` output:
+
+```
+Database
+  path:        ~/.tbuk/tbuk.sqlite
+  status:      ✓ open
+  documents:   12
+  chunks:      347
+```
+
+Query `DocumentRepo.List` and `ChunkRepo` counts and display them.

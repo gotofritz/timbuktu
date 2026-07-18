@@ -38,9 +38,13 @@ func New() *cobra.Command {
 
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(newDoctorCmd())
 
 	return root
 }
+
+// Config returns the loaded configuration after PersistentPreRunE has run.
+func Config() config.Config { return cfg }
 
 // Execute runs the CLI and exits on error.
 func Execute() {

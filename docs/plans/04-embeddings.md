@@ -115,3 +115,18 @@ No new packages — use `net/http`, `encoding/json` from stdlib.
 ## PR Scope
 
 One PR. Depends on Subplan 01 (config). No storage or LLM.
+
+## Doctor
+
+Expand the `Embedding` section in `tbuk doctor`:
+
+```
+Embedding (llama)
+  url:         http://localhost:8080
+  status:      ✓ healthy (HTTP 200)
+  dimension:   768
+  model:       (from /v1/models or config)
+```
+
+Attempt a probe call to the embedding endpoint and report the configured
+dimension. If the model name is discoverable (e.g. via `/v1/models`), report it.

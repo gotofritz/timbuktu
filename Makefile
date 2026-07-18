@@ -1,8 +1,12 @@
-.PHONY: build test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release
+.PHONY: build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release
 
 # Build the binary
 build:
-	mkdir -p bin && go build -o bin/podcast .
+	mkdir -p bin && go build -o bin/tbuk ./cmd/tbuk
+
+# Install to $GOPATH/bin (adds tbuk to PATH if GOPATH/bin is on PATH)
+install:
+	go install ./cmd/tbuk
 
 # Run all tests
 test:
@@ -49,7 +53,7 @@ check: fmt vet lint test
 # Mirror the quality-check CI jobs (lint + build + coverage >= 85%)
 check-ci: lint
 	go build ./...
-	go test -coverpkg=./... ./... -coverprofile=coverage.out -count=1
+	go test -coverpkg=./... ./internal/... -coverprofile=coverage.out -count=1
 	@COVERAGE=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{print $$3}' | tr -d '%'); \
 	rm -f coverage.out; \
 	echo "Total coverage: $${COVERAGE}%"; \

@@ -57,16 +57,16 @@ func Defaults() Config {
 			Path: dbPath,
 		},
 		LLM: LLMConfig{
-			Provider:  "ollama",
+			Provider:  "llama",
 			Model:     "",
 			MaxTokens: 4096,
-			BaseURL:   "http://localhost:11434",
+			BaseURL:   "http://localhost:8080",
 		},
 		Embedding: EmbeddingConfig{
-			Provider:  "ollama",
-			Model:     "nomic-embed-text",
+			Provider:  "llama",
+			Model:     "",
 			Dimension: 768,
-			BaseURL:   "http://localhost:11434",
+			BaseURL:   "http://localhost:8080",
 		},
 		Chunking: ChunkingConfig{
 			Size:    800,
@@ -102,16 +102,16 @@ func DefaultYAML() string {
   path: ` + filepath.Join(home, ".tbuk", "tbuk.sqlite") + `
 
 llm:
-  provider: ollama
+  provider: llama
   model: ""
   max_tokens: 4096
-  base_url: http://localhost:11434
+  base_url: http://localhost:8080
 
 embedding:
-  provider: ollama
-  model: nomic-embed-text
+  provider: llama
+  model: ""
   dimension: 768
-  base_url: http://localhost:11434
+  base_url: http://localhost:8080
 
 chunking:
   size: 800

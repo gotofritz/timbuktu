@@ -143,3 +143,14 @@ JSON output:
 ## PR Scope
 
 One PR. Depends on Subplan 01 (go.mod). No storage writes.
+
+## Doctor
+
+Add to `tbuk doctor` output:
+
+```
+Preprocessing
+  extractors:  markdown, text, html, pdf
+```
+
+List the MIME types / formats that have registered extractors.
