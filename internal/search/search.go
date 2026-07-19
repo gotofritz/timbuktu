@@ -23,7 +23,7 @@ type SearchResult struct {
 type Options struct {
 	TopK     int            // default 5
 	MinScore float64        // skip results below this threshold
-	Metadata map[string]string // AND-combined metadata pre-filter (unused by Vector/Keyword)
+	Metadata map[string]string // AND-combined metadata pre-filter, applied by Vector/Keyword/Hybrid
 }
 
 func (o *Options) topK() int {

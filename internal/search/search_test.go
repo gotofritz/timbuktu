@@ -140,6 +140,84 @@ func TestVectorSearch_dimensionMismatchErrors(t *testing.T) {
 	}
 }
 
+// Options.Metadata must restrict vector results to documents matching the
+// AND-combined filters, not be silently ignored.
+func TestVectorSearch_metadataPrefilter(t *testing.T) {
+	db := openTestDB(t)
+	docGo := seedDoc(t, db, "/go.txt", "Go Doc")
+	seedMeta(t, db, docGo, "topic", "go")
+	seedChunk(t, db, docGo, 0, "go chunk", []float32{1, 0, 0})
+
+	docRust := seedDoc(t, db, "/rust.txt", "Rust Doc")
+	seedChunk(t, db, docRust, 0, "rust chunk", []float32{1, 0, 0})
+
+	emb := &stubEmbedder{vec: []float32{1, 0, 0}, dim: 3}
+	s := search.New(db, emb)
+
+	results, err := s.Vector(context.Background(), "query",
+		search.Options{TopK: 5, Metadata: map[string]string{"topic": "go"}})
+	if err != nil {
+		t.Fatalf("Vector: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result (topic=go only), got %d", len(results))
+	}
+	if results[0].DocumentID != docGo {
+		t.Errorf("want doc %d, got %d", docGo, results[0].DocumentID)
+	}
+}
+
+func TestKeywordSearch_metadataPrefilter(t *testing.T) {
+	db := openTestDB(t)
+	docGo := seedDoc(t, db, "/go.txt", "Go Doc")
+	seedMeta(t, db, docGo, "topic", "go")
+	seedChunk(t, db, docGo, 0, "shared keyword alpha", nil)
+
+	docRust := seedDoc(t, db, "/rust.txt", "Rust Doc")
+	seedChunk(t, db, docRust, 0, "shared keyword alpha", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "alpha",
+		search.Options{TopK: 5, Metadata: map[string]string{"topic": "go"}})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result (topic=go only), got %d", len(results))
+	}
+	if results[0].DocumentID != docGo {
+		t.Errorf("want doc %d, got %d", docGo, results[0].DocumentID)
+	}
+}
+
+func TestHybridSearch_metadataPrefilter(t *testing.T) {
+	db := openTestDB(t)
+	docGo := seedDoc(t, db, "/go.txt", "Go Doc")
+	seedMeta(t, db, docGo, "topic", "go")
+	seedChunk(t, db, docGo, 0, "shared keyword alpha", []float32{1, 0, 0})
+
+	docRust := seedDoc(t, db, "/rust.txt", "Rust Doc")
+	seedChunk(t, db, docRust, 0, "shared keyword alpha", []float32{1, 0, 0})
+
+	emb := &stubEmbedder{vec: []float32{1, 0, 0}, dim: 3}
+	s := search.New(db, emb)
+
+	results, err := s.Hybrid(context.Background(), "alpha",
+		search.Options{TopK: 5, Metadata: map[string]string{"topic": "go"}})
+	if err != nil {
+		t.Fatalf("Hybrid: %v", err)
+	}
+	for _, r := range results {
+		if r.DocumentID != docGo {
+			t.Errorf("result from doc %d leaked past metadata filter (want only %d)",
+				r.DocumentID, docGo)
+		}
+	}
+	if len(results) == 0 {
+		t.Fatal("want ≥1 result for topic=go, got 0")
+	}
+}
+
 func TestVectorSearch_emptyDB(t *testing.T) {
 	db := openTestDB(t)
 	emb := &stubEmbedder{vec: []float32{1, 0}, dim: 2}

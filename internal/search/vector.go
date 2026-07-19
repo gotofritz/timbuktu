@@ -17,12 +17,13 @@ func (s *Searcher) Vector(ctx context.Context, query string, opts Options) ([]Se
 	}
 	queryVec := vecs[0]
 
+	joinSQL, args := metadataFilterJoins(opts.Metadata, "d")
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, c.document_id, c.chunk_index, c.text, c.embedding,
 		       d.path, d.title
 		FROM chunks c
-		JOIN documents d ON d.id = c.document_id
-		WHERE c.embedding IS NOT NULL`)
+		JOIN documents d ON d.id = c.document_id `+joinSQL+`
+		WHERE c.embedding IS NOT NULL`, args...)
 	if err != nil {
 		return nil, err
 	}

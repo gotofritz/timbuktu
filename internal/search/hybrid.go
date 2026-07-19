@@ -9,7 +9,7 @@ const rrfK = 60
 
 // Hybrid runs vector + keyword search and fuses results with Reciprocal Rank Fusion.
 func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]SearchResult, error) {
-	expanded := Options{TopK: opts.topK() * 2, MinScore: 0}
+	expanded := Options{TopK: opts.topK() * 2, MinScore: 0, Metadata: opts.Metadata}
 
 	vecResults, err := s.Vector(ctx, query, expanded)
 	if err != nil {

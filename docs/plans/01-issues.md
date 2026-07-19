@@ -91,7 +91,7 @@ or query time.
 **Fix:** Record embedding dimension (ideally provider/model) in DB. Error loud
 on mismatch at query + ingest. Add `tbuk doctor` check.
 
-### 5. [ARCH] `search.Options.Metadata` silent no-op (orig #1)
+### 5. [ARCH] `search.Options.Metadata` silent no-op (orig #1) — ✅ DONE
 
 **Problem:** `Options.Metadata` documented as "AND-combined metadata
 pre-filter"; `Retriever.Retrieve` accepts `meta` arg, forwards into
