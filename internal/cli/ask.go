@@ -27,10 +27,11 @@ type chatFn func(ctx context.Context, messages []llm.Message, opts ...llm.CallOp
 
 func newAskCmd() *cobra.Command {
 	var (
-		templateName string
-		vars         []string
-		topK         int
-		noStream     bool
+		templateName   string
+		vars           []string
+		topK           int
+		noStream       bool
+		requireContext bool
 	)
 
 	cmd := &cobra.Command{
@@ -79,6 +80,8 @@ func newAskCmd() *cobra.Command {
 				vars,
 				topK,
 				noStream,
+				WithErrOut(cmd.ErrOrStderr()),
+				WithRequireContext(requireContext),
 			)
 		},
 	}
@@ -87,6 +90,7 @@ func newAskCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "template variable override (key=value)")
 	cmd.Flags().IntVar(&topK, "top", 0, "number of chunks to retrieve (overrides manifest)")
 	cmd.Flags().BoolVar(&noStream, "no-stream", false, "buffer output instead of streaming")
+	cmd.Flags().BoolVar(&requireContext, "require-context", false, "abort instead of answering when no relevant context is found")
 	return cmd
 }
 
@@ -107,6 +111,22 @@ func trimToTokenBudget(chunks []retrieval.RetrievedChunk, budget int) []retrieva
 	return chunks
 }
 
+// AskOption configures optional RunAsk behaviour.
+type AskOption func(*askConfig)
+
+type askConfig struct {
+	errOut         io.Writer
+	requireContext bool
+}
+
+// WithErrOut sets the writer for diagnostics such as the empty-context
+// warning. Defaults to io.Discard when unset.
+func WithErrOut(w io.Writer) AskOption { return func(c *askConfig) { c.errOut = w } }
+
+// WithRequireContext makes RunAsk abort (instead of calling the LLM) when
+// retrieval returns no chunks.
+func WithRequireContext(b bool) AskOption { return func(c *askConfig) { c.requireContext = b } }
+
 // RunAsk is the testable core of the ask command. It runs retrieval and the
 // LLM call under a cancellable context derived from ctx, cancelled on return so
 // an abandoned stream goroutine is released (and Ctrl-C interrupts the call).
@@ -120,7 +140,13 @@ func RunAsk(
 	varOverrides []string,
 	topK int,
 	noStream bool,
+	opts ...AskOption,
 ) error {
+	cfg := askConfig{errOut: io.Discard}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -153,6 +179,19 @@ func RunAsk(
 	}
 	chunks = trimToTokenBudget(chunks, manifest.Retrieval.MaxTokens)
 
+	// Empty retrieval means the answer comes purely from model priors, not the
+	// user's documents. Warn loudly (or abort under --require-context) so this
+	// isn't mistaken for a grounded answer.
+	if len(chunks) == 0 {
+		if cfg.requireContext {
+			return fmt.Errorf("no relevant context found in the knowledge base; " +
+				"aborting because --require-context is set")
+		}
+		_, _ = fmt.Fprintln(cfg.errOut,
+			"warning: no relevant context found — answering from the model's general "+
+				"knowledge; the response may not reflect your documents")
+	}
+
 	data := prompts.TemplateData{
 		Question:  question,
 		Chunks:    chunks,
@@ -169,12 +208,12 @@ func RunAsk(
 		{Role: llm.RoleUser, Content: userPrompt},
 	}
 
-	opts := llm.CallOptions{
+	callOpts := llm.CallOptions{
 		Model:       manifest.Model,
 		Temperature: manifest.Temperature,
 		MaxTokens:   manifest.MaxTokens,
 	}
-	tokenCh, err := chat(ctx, messages, opts) //nolint:wrapcheck
+	tokenCh, err := chat(ctx, messages, callOpts) //nolint:wrapcheck
 	if err != nil {
 		return fmt.Errorf("LLM chat: %w", err)
 	}

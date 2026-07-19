@@ -60,6 +60,7 @@ tbuk find <key=value>... # find documents by metadata filters (--limit, --format
 tbuk meta set <path> k=v # attach metadata to a document (repeatable key=value pairs)
 tbuk meta list <path>    # list all metadata for a document
 tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
+                         #   (--top, --template, --no-stream, --require-context to abort when no context matches)
 tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR

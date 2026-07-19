@@ -534,8 +534,12 @@ your indexed documents.
 4. The model writes an answer based only on the retrieved content
 5. The answer streams to your terminal
 
-The model cannot invent facts that are not in your documents — its answer is
-grounded in what you have written.
+When relevant chunks are found, the answer is grounded in what you have
+written. If retrieval finds **nothing** — an empty knowledge base, or no
+matching passages — `tbuk ask` prints a warning to stderr and answers from the
+model's general knowledge instead (the response then reflects the model's
+priors, not your documents, and no `Sources:` section is shown). Pass
+`--require-context` to abort in that case rather than answer ungrounded.
 
 ### Building up from simple to specific
 
