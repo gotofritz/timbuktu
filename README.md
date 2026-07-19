@@ -75,7 +75,36 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 ## Development
 
-Run `make` (or `make help`) to list all available targets with descriptions.
+Run `make` (or `make help`) to list every target with a description — the
+Makefile is self-documenting, so this is always current:
+
+```
+$ make
+Usage: make <target>
+
+  build            Build the tbuk binary into bin/
+  check            Format, vet, lint, and test (run before committing)
+  check-ci         Full CI gate: lint + build + coverage >= 85%
+  clean            Remove built binaries
+  coverage         Print total coverage percentage
+  coverage-html    Open HTML coverage report
+  fmt              Format all Go files
+  help             Show this help
+  install          Install tbuk to $GOPATH/bin
+  lint             Run golangci-lint
+  release-major    Bump major (v0.2.0 -> v1.0.0) and push tag
+  release-minor    Bump minor (v0.1.1 -> v0.2.0) and push tag
+  release-patch    Bump patch (v0.1.0 -> v0.1.1) and push tag
+  release-snapshot Dry-run a release locally into dist/ (no tag, no push)
+  release          Run goreleaser against an already-pushed tag (normally CI does this)
+  serve            Serve output/ over HTTP for local feed testing
+  test             Run all tests
+  test-race        Run tests with the race detector
+  tidy             Tidy go.mod and go.sum
+  vet              Run go vet
+```
+
+Common ones during development:
 
 ```bash
 make test          # run all tests
