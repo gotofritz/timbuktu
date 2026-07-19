@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -136,6 +137,72 @@ func TestRunMetaList_empty(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "No metadata") {
 		t.Errorf("expected 'No metadata' message, got: %s", out.String())
+	}
+}
+
+// meta set/list must normalize the path argument like ingest/update/delete,
+// so a document ingested via an absolute path is found via a relative spelling.
+func TestRunMetaSet_and_List_normalizePath(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	meta := storage.NewMetadataRepo(db)
+	ctx := context.Background()
+
+	abs, err := filepath.Abs("meta-norm-fixture.md")
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	doc := &storage.Document{Path: abs, SHA256: "nn", Title: "n", MimeType: "text/markdown"}
+	if err := docs.Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+
+	// Look up with the relative spelling; it must normalize to the stored abs.
+	var out bytes.Buffer
+	if err := cli.RunMetaSet(ctx, &out, docs, meta, "meta-norm-fixture.md", []string{"k=v"}); err != nil {
+		t.Fatalf("RunMetaSet with relative path: %v", err)
+	}
+	var listOut bytes.Buffer
+	if err := cli.RunMetaList(ctx, &listOut, docs, meta, "meta-norm-fixture.md"); err != nil {
+		t.Fatalf("RunMetaList with relative path: %v", err)
+	}
+	if !strings.Contains(listOut.String(), "k=v") {
+		t.Errorf("list missing entry, got: %s", listOut.String())
+	}
+}
+
+// A real DB error must not be reported as "document not found".
+func TestRunMetaSet_dbError_notReportedAsNotFound(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	meta := storage.NewMetadataRepo(db)
+	ctx := context.Background()
+	_ = db.Close()
+
+	var out bytes.Buffer
+	err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/whatever.md", []string{"k=v"})
+	if err == nil {
+		t.Fatal("expected error from closed DB")
+	}
+	if strings.Contains(err.Error(), "document not found") {
+		t.Errorf("real DB error must not be reported as not-found, got: %v", err)
+	}
+}
+
+func TestRunMetaList_dbError_notReportedAsNotFound(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	meta := storage.NewMetadataRepo(db)
+	ctx := context.Background()
+	_ = db.Close()
+
+	var out bytes.Buffer
+	err := cli.RunMetaList(ctx, &out, docs, meta, "/tmp/whatever.md")
+	if err == nil {
+		t.Fatal("expected error from closed DB")
+	}
+	if strings.Contains(err.Error(), "document not found") {
+		t.Errorf("real DB error must not be reported as not-found, got: %v", err)
 	}
 }
 

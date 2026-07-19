@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -69,9 +70,16 @@ func openMetaRepos(cmd *cobra.Command) (*storage.DocumentRepo, *storage.Metadata
 // RunMetaSet resolves path to a document and sets each key=value pair.
 // Exported for testing.
 func RunMetaSet(ctx context.Context, out io.Writer, docs *storage.DocumentRepo, meta *storage.MetadataRepo, path string, pairs []string) error {
+	path, err := NormalizePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve path %s: %w", path, err)
+	}
 	doc, err := docs.GetByPath(ctx, path)
 	if err != nil {
-		return fmt.Errorf("document not found: %s", path)
+		if errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("document not found: %s", path)
+		}
+		return fmt.Errorf("look up %s: %w", path, err)
 	}
 	for _, kv := range pairs {
 		key, value, ok := strings.Cut(kv, "=")
@@ -89,9 +97,16 @@ func RunMetaSet(ctx context.Context, out io.Writer, docs *storage.DocumentRepo, 
 // RunMetaList resolves path to a document and prints its metadata.
 // Exported for testing.
 func RunMetaList(ctx context.Context, out io.Writer, docs *storage.DocumentRepo, meta *storage.MetadataRepo, path string) error {
+	path, err := NormalizePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve path %s: %w", path, err)
+	}
 	doc, err := docs.GetByPath(ctx, path)
 	if err != nil {
-		return fmt.Errorf("document not found: %s", path)
+		if errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("document not found: %s", path)
+		}
+		return fmt.Errorf("look up %s: %w", path, err)
 	}
 	entries, err := meta.List(ctx, doc.ID)
 	if err != nil {
