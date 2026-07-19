@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -44,7 +43,6 @@ func newUpdateCmd() *cobra.Command {
 				&chunking.Chunker{Size: cfg.Chunking.Size, Overlap: cfg.Chunking.Overlap},
 				emb,
 				cfg.Preprocess.OutputDir,
-				os.Stdout,
 			)
 
 			return RunUpdate(cmd.Context(), cmd.OutOrStdout(), ing, docs, args[0], force)

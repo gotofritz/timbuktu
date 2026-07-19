@@ -71,9 +71,9 @@ func TestDoctorCommand_showsCounts(t *testing.T) {
 }
 
 func TestPrintFileResult_error(t *testing.T) {
-	var errBuf bytes.Buffer
+	var outBuf, errBuf bytes.Buffer
 	r := ingest.Result{Path: "/a.txt", Err: fmt.Errorf("boom")}
-	err := cli.PrintFileResult(r, false, &errBuf)
+	err := cli.PrintFileResult(r, &outBuf, &errBuf)
 	if err == nil {
 		t.Fatal("expected error returned")
 	}
@@ -82,12 +82,28 @@ func TestPrintFileResult_error(t *testing.T) {
 	}
 }
 
-func TestPrintFileResult_skipped_verbose(t *testing.T) {
-	var errBuf bytes.Buffer
-	r := ingest.Result{Path: "/a.txt", Skipped: true}
-	err := cli.PrintFileResult(r, true, &errBuf)
-	if err != nil {
+// Single-file success must print a one-line result unconditionally.
+func TestPrintFileResult_success_printsChunks(t *testing.T) {
+	var outBuf, errBuf bytes.Buffer
+	r := ingest.Result{Path: "/a.txt", Chunks: 4}
+	if err := cli.PrintFileResult(r, &outBuf, &errBuf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	out := outBuf.String()
+	if !strings.Contains(out, "/a.txt") || !strings.Contains(out, "4 chunks embedded") {
+		t.Errorf("want '<path> → 4 chunks embedded', got: %q", out)
+	}
+}
+
+// Single-file skip must print (unconditionally, no --verbose needed).
+func TestPrintFileResult_skipped_prints(t *testing.T) {
+	var outBuf, errBuf bytes.Buffer
+	r := ingest.Result{Path: "/a.txt", Skipped: true}
+	if err := cli.PrintFileResult(r, &outBuf, &errBuf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(outBuf.String(), "skipped (unchanged)") {
+		t.Errorf("want skipped message, got: %q", outBuf.String())
 	}
 }
 

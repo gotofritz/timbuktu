@@ -70,7 +70,6 @@ func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ing
 		&chunking.Chunker{Size: 50, Overlap: 0},
 		emb,
 		extractedDir,
-		nil, // progress: discard
 	)
 }
 

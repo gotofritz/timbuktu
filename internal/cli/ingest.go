@@ -49,7 +49,6 @@ func newIngestCmd() *cobra.Command {
 				},
 				emb,
 				cfg.Preprocess.OutputDir,
-				os.Stdout,
 			)
 
 			path, err := NormalizePath(args[0])
@@ -67,7 +66,7 @@ func newIngestCmd() *cobra.Command {
 				return printDirResults(results, verbose)
 			}
 			res := ing.IngestFile(cmd.Context(), path, opts)
-			return printFileResult(res, verbose)
+			return printFileResult(res)
 		},
 	}
 
@@ -76,18 +75,23 @@ func newIngestCmd() *cobra.Command {
 	return cmd
 }
 
-func printFileResult(r ingest.Result, verbose bool) error {
-	return PrintFileResult(r, verbose, os.Stderr)
+func printFileResult(r ingest.Result) error {
+	return PrintFileResult(r, os.Stdout, os.Stderr)
 }
 
-// PrintFileResult writes a single-file result to errW and returns r.Err.
-func PrintFileResult(r ingest.Result, verbose bool, errW io.Writer) error {
-	if r.Err != nil {
+// PrintFileResult writes a one-line single-file ingest result to outW (or the
+// error to errW) and returns r.Err. Unlike the directory summary, the line is
+// printed unconditionally — a single-file ingest that produced no output left
+// the user unable to tell success from a no-op.
+func PrintFileResult(r ingest.Result, outW, errW io.Writer) error {
+	switch {
+	case r.Err != nil:
 		_, _ = fmt.Fprintf(errW, "error: %v\n", r.Err)
 		return r.Err
-	}
-	if r.Skipped && verbose {
-		fmt.Printf("%s → skipped (unchanged)\n", r.Path)
+	case r.Skipped:
+		_, _ = fmt.Fprintf(outW, "%s → skipped (unchanged)\n", r.Path)
+	default:
+		_, _ = fmt.Fprintf(outW, "%s → %d chunks embedded\n", r.Path, r.Chunks)
 	}
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -49,7 +48,6 @@ type Ingester struct {
 	chunker      *chunking.Chunker
 	embedder     Embedder
 	extractedDir string // directory for extracted text files (<sha256>.txt)
-	progress     io.Writer
 }
 
 // NewIngester constructs an Ingester with the given dependencies.
@@ -61,11 +59,7 @@ func NewIngester(
 	chunker *chunking.Chunker,
 	embedder Embedder,
 	extractedDir string,
-	progress io.Writer,
 ) *Ingester {
-	if progress == nil {
-		progress = io.Discard
-	}
 	return &Ingester{
 		docs:         docs,
 		chunks:       chunks,
@@ -74,7 +68,6 @@ func NewIngester(
 		chunker:      chunker,
 		embedder:     embedder,
 		extractedDir: extractedDir,
-		progress:     progress,
 	}
 }
 
@@ -197,7 +190,6 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		return Result{Path: path, Err: err}
 	}
 
-	_, _ = fmt.Fprintf(ing.progress, "%s → %d chunks embedded\n", path, len(storageChunks))
 	return Result{Path: path, Chunks: len(storageChunks)}
 }
 
