@@ -1127,3 +1127,75 @@ convention; move the `.original.md` backup to `docs/archive/` or delete it.
 - `go mod tidy` drift is CI-enforced (`git diff --exit-code go.mod go.sum`).
 - Go toolchain pinned via `go-version-file: go.mod` (1.25.0) consistently across all three workflows.
 - CGO disabled + pure-Go SQLite keeps cross-compile matrix (6 targets) dependency-free.
+
+## Agent-Readiness Assessment (2026-07-19)
+
+Findings from evaluating how well this repo supports AI coding agents. Baseline is good: `make check-ci` passes clean in a fresh remote container (lint 0 issues, total coverage 86.8%, every package >= 85%), AGENTS.md exists and is loaded via CLAUDE.md, and hooks enforce workflow. Issues below are the gaps.
+
+### AR-1: AGENTS.md mandates `gh` CLI, but remote agent sessions have no `gh`
+
+AGENTS.md says "Use `gh` for all GitHub operations" and the branch workflow requires `gh pr list --state open` before creating a branch. Remote Claude Code sessions (web/mobile) have no `gh` binary — GitHub access goes through MCP tools. An agent following AGENTS.md literally wastes turns on failing `gh` calls or concludes it cannot check PRs.
+
+Fix: reword to "use `gh` when available; in environments without it (e.g. remote agent sessions), use the GitHub MCP tools instead."
+
+### AR-2: TDD hook blocks all edits to `cmd/tbuk/main.go`
+
+`.claude/hooks/check-tdd.sh` blocks Write/Edit of any non-test `.go` file when the directory has no `*_test.go`. `cmd/tbuk/` contains only `main.go` and no test file (by design — thin main, excluded from coverage). Result: an agent cannot make even a trivial edit to `main.go` without first creating a throwaway `cmd/tbuk/*_test.go`, which contradicts "minimal diffs".
+
+Fix: allowlist `cmd/` (or files named `main.go`) in the hook, or add a minimal smoke test to `cmd/tbuk/`.
+
+### AR-3: Session-start "ask which branch" hook stalls autonomous sessions
+
+The SessionStart hook demands the agent ask the user for a branch and wait before any work. In autonomous/remote runs the user is not watching, and task prompts often already name the branch. The instruction as written forces either a stalled session or a rule violation.
+
+Fix: amend hook text to "if the user's prompt already specifies a branch, use it without asking; otherwise ask."
+
+### AR-4: README's golangci-lint install command installs v1, not v2
+
+README says "requires `golangci-lint` v2" but the given command is `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`, which resolves the pre-v2 module path and installs v1.x. v2 lives at `github.com/golangci/golangci-lint/v2/cmd/golangci-lint`. An agent (or human) bootstrapping a machine from the README gets a linter whose results diverge from CI (which pins v2.5.0).
+
+Fix: correct the module path and pin the version to match CI (`@v2.5.0`).
+
+### AR-5: No `.golangci.yml`; linter version pinned only inside the CI workflow
+
+Lint runs with implicit defaults, and the only version pin (v2.5.0) is buried in `.github/workflows/quality-check.yml`. Local `make lint` uses whatever version happens to be installed, so local-vs-CI lint drift is possible and silent.
+
+Fix: commit a minimal `.golangci.yml` (even just documenting the default set) and state the required linter version in README/AGENTS.md, or manage the linter via a pinned Go tool dependency.
+
+### AR-6: Commit-message convention undocumented in AGENTS.md and unenforced in CI
+
+The repo actually uses Conventional Commits (`feat:`, `fix:`, `docs:` throughout `git log`) and pre-commit runs `cz check` on commit messages. But AGENTS.md's Commits section only says "imperative present tense, <= 72 chars" — no mention of the conventional prefix. Additionally, `cz`/`pre-commit` are not installed in remote agent containers and CI has no commit-message check, so agent commits bypass the convention entirely.
+
+Fix: document Conventional Commits explicitly in AGENTS.md; optionally add a commit-lint step to CI so enforcement doesn't depend on locally installed hooks.
+
+### AR-7: CI does not enforce per-package coverage, but AGENTS.md and `make check-ci` do
+
+AGENTS.md requires >= 85% per package and `make check-ci` fails on any package below it, but the quality-check workflow only checks the total. A change that drops one package below 85% while the total stays above passes CI and only fails for whoever runs `make check-ci` locally — the gates disagree.
+
+Fix: add the per-package check (same awk logic as the Makefile) to the coverage job, or have CI simply run `make check-ci`.
+
+### AR-8: Stale `make serve` target references nonexistent `output/` directory
+
+`serve` does `cd output && python3 -m http.server 8080` and its help text mentions "local feed testing" — there is no `output/` dir and no feed anywhere in this project; the target looks copy-pasted from another repo. Self-documenting `make help` is a primary agent affordance here, so a dead target actively misleads.
+
+Fix: delete the target.
+
+### AR-9: Broken reference and version drift in AGENTS.md
+
+Two small doc bugs that misdirect agents:
+- AGENTS.md points to `.claude/skills/tdd.md`; the actual path is `.claude/skills/tdd/SKILL.md`.
+- AGENTS.md says Go "1.24+" while `go.mod` requires 1.25.0 and README says 1.25+.
+
+Fix: correct the path and version.
+
+### AR-10: `make test` runs verbose, flooding agent context
+
+`test` runs `go test ./... -v -count=1`; `-v` prints every test name across the whole suite. For agents (and CI logs) this is thousands of lines of noise per run for no diagnostic gain — failures print regardless. CI's Test step also uses `-v`.
+
+Fix: drop `-v` from the default target; keep a `test-verbose` target for when it's wanted.
+
+### AR-11: TDD enforcement weaker than AGENTS.md claims
+
+AGENTS.md states "MANDATORY TDD — no exceptions. A PreToolUse hook enforces this," but the hook only matches Write/Edit tools and only checks that *some* `_test.go` exists in the directory. File writes via Bash (heredoc, `cat >`, `sed -i`) bypass it, and adding one trivial test file unlocks unlimited implementation files in that package. Not fixable in full, but the doc overstates the guarantee.
+
+Fix: note in AGENTS.md that the hook is a guardrail, not proof of TDD; optionally extend the matcher to Bash write patterns.
