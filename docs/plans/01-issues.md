@@ -751,3 +751,103 @@ benefit too when serving parallel requests.
   (`IngestFile` hashes, then `preprocess.Extract` hashes again): one extra
   sequential file read per *new* file, dwarfed by embedding calls. Not worth
   code.
+
+---
+
+# Additions — developer experience / new-contributor assessment (2026-07-19)
+
+Findings from a walk-through of the repo as a first-time contributor: clone,
+read the docs, install the tooling, build, test, commit. Much of the DX is
+genuinely good — `make` is self-documenting with `help` as the default goal,
+`go build ./...` and the full test suite work first try with zero setup
+(~14 s, all green), the user guide is excellent, and the README covers
+install/quick-start/releasing thoroughly. The issues below are the gaps that
+remain; existing issues 10 (stale `serve` target), 12 (no committed
+golangci-lint config), and 34 (local/CI coverage-gate drift) already cover
+other DX friction found on the same walk-through and are not repeated.
+Numbering continues from above.
+
+## Medium priority
+
+### 38. README's golangci-lint install command installs v1 while CI runs v2 — contributors lint with a different major version
+
+**Problem:** The README's from-source prerequisites say "golangci-lint v2"
+but give the install command
+`go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
+That module path is the **v1** module — its latest version is v1.64.8 — while
+golangci-lint v2 lives at the `/v2` path. CI meanwhile pins v2.5.0
+(`quality-check.yml`). A contributor who follows the README gets v1.64.8, so
+`make lint` / `make check` / `make check-ci` run a different major version
+than CI, with different default linters and an incompatible config format —
+green locally can fail on the PR and vice versa. (The golangci-lint project
+also explicitly does not support `go install` as an install method.) This
+compounds issue 12: with no committed `.golangci.yml` *and* an unpinned,
+wrong-major local install, local lint and CI lint share almost nothing.
+
+**Evidence:** `README.md:42` (v1 module path, `@latest`);
+`.github/workflows/quality-check.yml:23-25` (action pins `v2.5.0`);
+verified `go list -m -versions`: `github.com/golangci/golangci-lint` tops out
+at v1.64.8, v2 releases live under `github.com/golangci/golangci-lint/v2`.
+
+**Fix:** Replace the README command with the project's supported install
+(binary install script or `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0`),
+pinned to the same version CI uses, and note that golangci-lint is only
+needed for `make lint`/`check`/`check-ci`, not to build or test. Best done
+together with issue 12 so the version is stated in exactly one place.
+
+### 39. Commit-time gates (pre-commit + commitizen) are enforced but nowhere documented — a contributor's first commit fails on missing tools
+
+**Problem:** AGENTS.md declares "Pre-commit enabled" and
+`.pre-commit-config.yaml` wires a commit-msg hook that runs `cz check`
+(commitizen, a Python tool, `language: system` — it must already be on PATH)
+plus Go hooks that need `goimports`. None of this is documented for humans:
+the README's Development section never mentions pre-commit, no CONTRIBUTING.md
+exists, and AGENTS.md's Environment section says "No virtualenv. Standard Go
+toolchain", which is actively misleading about the Python tooling the hooks
+require. The README even presents Conventional Commits as an optional
+nicety for release notes ("Writing Conventional Commit subjects therefore
+produces clean, categorised release notes"), when the commit-msg hook makes
+them mandatory. A new contributor either hits
+`cz: command not found` / hook failures on their first commit, or — more
+likely — never runs `pre-commit install`, commits unchecked, and discovers
+the conventions via CI or review instead.
+
+**Evidence:** `.pre-commit-config.yaml:40-48` (commitizen commit-msg hook,
+`language: system`), `:53-57` (go-imports, golangci-lint hooks);
+`AGENTS.md` Environment + Enforcement sections; `README.md` Development
+section (no mention); no `CONTRIBUTING.md` in the repo.
+
+**Fix:** Add a short "Contributing" section to the README (or a
+CONTRIBUTING.md linked from it) listing the one-time setup —
+`pipx install pre-commit commitizen` (or equivalent), `pre-commit install
+--install-hooks`, `go install .../goimports` — and stating plainly that
+commit subjects must pass `cz check`. Correct AGENTS.md's Environment section
+to mention the Python-based hook tooling. Alternatively, if the commitizen
+gate isn't wanted, drop the hook rather than leaving it half-enforced.
+
+## Low priority
+
+### 40. Contributor-facing docs disagree on the Go version and still advertise the nonexistent `metadata` package
+
+Two small drifts that each cost a new contributor a double-take:
+AGENTS.md's tooling list says "go (1.24+)" while the README requires
+"Go 1.25+" and `go.mod` pins `go 1.25.0` (making 1.24 wrong — the toolchain
+auto-download masks it, but only for contributors with auto-download
+enabled); and the README's Architecture section lists
+`internal/metadata/  stub (not yet active)` — the same stale entry issue 11
+flags in `docs/initial-context.md:26` — but no `internal/metadata` package
+exists. Fix: state the Go requirement in one place (README) and have
+AGENTS.md defer to it; when fixing issue 11, remove the stale line from
+`README.md:206` in the same pass.
+
+## Noted, no action needed (DX review)
+
+- **`make` UX**: default goal is `help`, every target documented, README
+  embeds the output. Model example of a self-documenting Makefile.
+- **Zero-setup build/test**: fresh clone → `go build ./...` → `go test ./...`
+  all green in ~14 s with no services, env vars, or fixtures to arrange.
+  In-memory SQLite and `httptest` mocks keep it that way — preserve this.
+- **`make test`'s `-v -count=1`** produces long output and defeats the test
+  cache, but CI does the same and the suite is fast; not worth churn.
+- **No issue/feature templates** under `.github/ISSUE_TEMPLATE`: fine for a
+  single-maintainer project at this stage.
