@@ -75,6 +75,8 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 ## Development
 
+Run `make` (or `make help`) to list all available targets with descriptions.
+
 ```bash
 make test          # run all tests
 make test-race     # tests with race detector

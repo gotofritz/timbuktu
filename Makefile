@@ -1,63 +1,61 @@
-.PHONY: build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release release-snapshot release-patch release-minor release-major _bump
+.PHONY: help build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release release-snapshot release-patch release-minor release-major _bump
+
+.DEFAULT_GOAL := help
 
 # Version derived from git (matches the tag goreleaser stamps at release time).
 # Falls back to "dev" outside a git checkout.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/gotofritz/timbuktu/internal/cli.version=$(VERSION)
 
-# Build the binary
-build:
+# List all documented targets (the `## ...` text after each target name).
+help: ## Show this help
+	@echo "Usage: make <target>"
+	@echo
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	  | sort \
+	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+build: ## Build the tbuk binary into bin/
 	mkdir -p bin && go build -ldflags "$(LDFLAGS)" -o bin/tbuk ./cmd/tbuk
 
-# Install to $GOPATH/bin (adds tbuk to PATH if GOPATH/bin is on PATH)
-install:
+install: ## Install tbuk to $GOPATH/bin
 	go install -ldflags "$(LDFLAGS)" ./cmd/tbuk
 
-# Run all tests
-test:
+test: ## Run all tests
 	go test ./... -v -count=1
 
-# Run tests and print total coverage percentage
-coverage:
+coverage: ## Print total coverage percentage
 	go test ./... -coverprofile=coverage.out -count=1
 	go tool cover -func=coverage.out | tail -1
 	@rm -f coverage.out
 
-# Run tests and open HTML coverage report
-coverage-html:
+coverage-html: ## Open HTML coverage report
 	go test ./... -coverprofile=coverage.out -count=1
 	go tool cover -html=coverage.out
 
-# Run tests with race detector
-test-race:
+test-race: ## Run tests with the race detector
 	go test -race ./... -count=1
 
-# Format all Go files
-fmt:
+fmt: ## Format all Go files
 	gofmt -w .
 
-# Run go vet
-vet:
+vet: ## Run go vet
 	go vet ./...
 
-# Run golangci-lint (install: brew install golangci-lint)
-lint:
+lint: ## Run golangci-lint
 	golangci-lint run ./...
 
-# Tidy go.mod and go.sum
-tidy:
+tidy: ## Tidy go.mod and go.sum
 	go mod tidy
 
-# Remove built binary
-clean:
+clean: ## Remove built binaries
 	rm -rf bin/
 
-# Full check — run before committing
-check: fmt vet lint test
+check: fmt vet lint test ## Format, vet, lint, and test (run before committing)
 
 # Mirror the quality-check CI jobs (lint + build + coverage >= 85% total and
 # per package — AGENTS.md demands >= 85% for every package, not just the total)
-check-ci: lint
+check-ci: lint ## Full CI gate: lint + build + coverage >= 85%
 	go build ./...
 	go test -coverpkg=./... ./internal/... -coverprofile=coverage.out -count=1
 	@COVERAGE=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{print $$3}' | tr -d '%'); \
@@ -74,18 +72,18 @@ check-ci: lint
 	        else print "PASS: every package >= 85%" }'
 
 # Serve output/ over HTTP for local feed testing (install python3 if needed)
-serve:
+serve: ## Serve output/ over HTTP for local feed testing
 	cd output && python3 -m http.server 8080
 
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and
 # GITHUB_TOKEN in env.
-release:
+release: ## Run goreleaser against an already-pushed tag (normally CI does this)
 	goreleaser release --clean
 
 # Dry-run the release locally: builds all archives into dist/ without tagging,
 # pushing, or publishing. Use to sanity-check the goreleaser config.
-release-snapshot:
+release-snapshot: ## Dry-run a release locally into dist/ (no tag, no push)
 	goreleaser release --snapshot --clean
 
 # Latest semver tag (v-prefixed), or v0.0.0 if none exists yet.
