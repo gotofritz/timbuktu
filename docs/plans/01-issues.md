@@ -591,3 +591,78 @@ file, error recorded and loop moves on).
 - **Observability:** errors already carry provider response bodies (capped
   at 2 KB); for a local CLI that is adequate — no structured logging
   needed at this scale.
+
+---
+
+# Additions — test & QA assessment (2026-07-19)
+
+Findings from a QA-lead review of the test suite itself: what the tests
+actually exercise, where the gates can drift, and which bug classes the
+current suite structurally cannot catch. The suite is in good shape overall —
+providers are mocked with `net/http/httptest`, storage tests run on in-memory
+SQLite, there are UTF-8 boundary property tests, a goroutine-leak test for
+stream cancellation, FTS5-trigger-sync assertions, and a generated minimal-PDF
+fixture. All packages currently pass with ≥85% coverage. The two issues below
+are the gaps that remain. Numbering continues from above.
+
+## Medium priority
+
+### 34. CI enforces only *total* coverage — the per-package ≥ 85% rule exists only locally
+
+**Problem:** AGENTS.md mandates coverage ≥ 85% *per package*. `make check-ci`
+enforces this (its comment even says it "mirrors the quality-check CI jobs"),
+but the actual CI coverage job checks only the total: a PR can drop one
+package to 40% while the repo total stays above 85%, and CI goes green — the
+per-package rule fires only for contributors who remember to run
+`make check-ci` locally. This is not hypothetical headroom: `cli` (85.8%),
+`storage` (85.6%), `llm` (86.1%), `embeddings` (86.0%) all sit within ~1% of
+the line today, so silent per-package drift is the expected failure mode.
+The two gates are also maintained as duplicated shell/awk, so they will keep
+diverging (this divergence is the proof).
+
+**Evidence:** `.github/workflows/quality-check.yml:44-56` (total-only check)
+vs `Makefile:56-72` (`check-ci` with the per-package awk pass).
+
+**Fix:** Make CI run the same per-package check — simplest is to have the
+coverage job run `make check-ci` (or extract the coverage-gate script to one
+file both the Makefile and workflow invoke), so the local and CI gates cannot
+drift apart again.
+
+### 35. No test exercises the real wiring — production extractor, root command, and exit codes have zero coverage
+
+**Problem:** Every test injects fakes at package seams; nothing ever runs the
+assembled pipeline. Concretely: `DefaultFileExtractor.ExtractFile` — the only
+production `FileExtractor`, the one every real `tbuk ingest` invocation uses —
+has 0% coverage (ingester tests use a mock extractor; CLI ingest tests cover
+only missing-arg and nonexistent-path failures). `cli.Execute` and
+`cmd/tbuk/main` are likewise at 0%, so the error → exit-code-1 path is
+untested. This matters because the bug classes the other reviews found are
+precisely wiring-level, invisible to per-package unit tests no matter how high
+coverage climbs: the metadata filter dropped between retrieval and search
+(issue 1), `meta set` skipping path normalization that its sibling commands
+apply (issue 16), the signal context that is plumbed everywhere but never
+created (issue 32).
+
+**Evidence:** coverage run 2026-07-19: `internal/ingest/ingester.go:247`
+(`ExtractFile` 0%), `internal/cli/root.go:78` (`Execute` 0%),
+`cmd/tbuk` (no test files); `internal/cli/ingest_test.go` (failure paths
+only).
+
+**Fix:** Add one CLI-level happy-path integration test: temp `HOME`,
+`tbuk init` → `ingest` a real `.md` fixture (embedder backed by
+`httptest`) → `search` finds it → `meta set`/`meta list` → `delete`. Drive it
+through the root command (`SetArgs` + `Execute`) so flag parsing, config
+loading, and the composition wiring are all exercised — this also pins
+exit-code behaviour before the issue 32 signal work changes it, and running
+the same test in a small OS matrix would give issue 31's platform gap runtime
+(not just compile-time) coverage.
+
+## Noted, no action needed (QA review)
+
+- **Chunker test gaps** (uniform single-separator fixtures are why issues
+  14/15 slipped through): the fixes for those issues already specify the
+  missing mixed-separator and `Size <= 0` tests. No separate issue.
+- **Goroutine-leak test** polls `runtime.NumGoroutine` with a 2 s deadline;
+  bounded and package-sequential, not a flake risk. Fine as-is.
+- **`printFileResult`/`printDirResults` at 0%**: one-line stdout wrappers
+  around fully tested exported variants. Not worth code.
