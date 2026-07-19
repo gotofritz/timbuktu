@@ -151,13 +151,118 @@ This guide assumes:
    number. If you get "command not found", see the README for installation
    instructions.
 
-2. **llama.cpp is running** with an embedding model and a chat model loaded.
-   This guide does not cover how to install or start llama.cpp — see the
-   [llama.cpp documentation](https://github.com/ggml-org/llama.cpp) for that.
-   A typical setup runs llama.cpp as a local server on port 8080.
+2. **An AI backend is available.** Timbuktu needs two things: an *embedding*
+   model (to fingerprint your text) and a *chat* model (to write answers). The
+   next section shows two ways to provide them — a fully local setup with
+   llama.cpp, or a hybrid setup that uses Claude for the answers.
 
 3. **You have some documents** to index — notes, PDFs, saved articles, anything
    in the supported formats.
+
+### Choosing an AI backend
+
+Timbuktu always needs a **local embedding model** (embeddings are what make
+meaning-based search work, and there is no hosted embedding provider for
+Claude). For *generating answers* you can either keep everything local with
+llama.cpp, or hand the writing off to Claude. Pick one of the two paths below.
+
+| | Fully local (llama.cpp) | Hybrid (llama.cpp embeddings + Claude) |
+|---|---|---|
+| Answer quality | Depends on local model size | Strongest |
+| Privacy | Nothing leaves your machine | Retrieved chunks are sent to Anthropic |
+| Cost | Free (uses your hardware) | Pay-per-use Anthropic API |
+| Needs internet | No (after models downloaded) | Yes, for `tbuk ask` |
+| Needs a GPU | Recommended for speed | Only for the embedding model |
+
+Embeddings run locally in **both** paths, so start by setting up llama.cpp for
+embeddings, then choose your generation backend.
+
+#### Path A — Fully local with llama.cpp
+
+llama.cpp runs GGUF models on your own machine and exposes an HTTP server.
+Install it from the [llama.cpp
+project](https://github.com/ggml-org/llama.cpp) (Homebrew: `brew install
+llama.cpp`; or build from source). You get the `llama-server` command.
+
+**Finding and downloading a model.** GGUF models live on
+[Hugging Face](https://huggingface.co/models?library=gguf). Browse or search
+there, open a repository (e.g.
+[`unsloth/Qwen3-8B-GGUF`](https://huggingface.co)), and note two things: the
+**repo id** (`user/name-GGUF`) and the **quantisation** you want (a file such
+as `UD-Q4_K_XL` — smaller = faster and less memory, larger = higher quality).
+You do **not** download the file by hand: `llama-server`'s `-hf` flag pulls it
+straight from Hugging Face and caches it locally the first time you run it.
+
+Timbuktu talks to embeddings and chat through **separate** `base_url`s, so run
+**two** servers on two ports.
+
+Embedding server (port 8080). Pick an embedding model whose output size matches
+`embedding.dimension` in your config (default `768`); `nomic-embed-text` is
+768-dimensional, so it fits the default without any config change:
+
+```bash
+llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q4_K_M \
+  --embeddings --port 8080 -ngl 99
+```
+
+Chat server (port 8081). Any instruct/chat GGUF works here; a Qwen3 model is a
+good default. Compared with a bare `llama-server -hf …` command, this adds what
+RAG benefits from — a larger context window (`-c 8192`) so retrieved chunks
+fit, and GPU offload (`-ngl 99`; drop it if you have no GPU):
+
+```bash
+llama-server -hf unsloth/Qwen3-8B-GGUF:UD-Q4_K_XL \
+  --port 8081 -c 8192 -ngl 99
+```
+
+You can drop `--temp` / `--top-p` / `--repeat-penalty` from the original
+command: Timbuktu sets sampling per request from the prompt template's
+`manifest.yaml` (see section 11), so server-side sampling flags are just
+defaults it overrides.
+
+Then point the config at both servers (see section 5 for the full file):
+
+```yaml
+llm:
+  provider: llama
+  base_url: http://localhost:8081
+
+embedding:
+  provider: llama
+  base_url: http://localhost:8080
+  dimension: 768
+```
+
+#### Path B — Hybrid: local embeddings + Claude for answers
+
+Keep the llama.cpp **embedding** server from Path A (Claude has no embedding
+API, so this stays local), and let Claude write the answers. The `claude`
+provider is the same Anthropic API that powers Claude Code.
+
+1. Get an API key from the [Anthropic Console](https://console.anthropic.com)
+   and export it:
+
+   ```bash
+   export ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+2. Set the LLM provider to `claude` and name a model explicitly (unlike llama,
+   Claude has no "currently loaded" model to fall back on):
+
+   ```yaml
+   llm:
+     provider: claude
+     model: claude-sonnet-5    # any current Claude model id
+
+   embedding:
+     provider: llama            # still local
+     base_url: http://localhost:8080
+     dimension: 768
+   ```
+
+`tbuk doctor` won't probe the Claude endpoint (hosted APIs have no health
+check) — it prints `hosted API — not probed`. That is expected; run a real
+`tbuk ask` to confirm the key and model work.
 
 ### Quick sanity check
 
@@ -233,10 +338,12 @@ database:
 llm:
   provider: llama    # llama | ollama | claude | openai
   model: ""          # leave empty to use the model currently loaded in llama.cpp
+  base_url: http://localhost:8080
 
 embedding:
   provider: llama    # llama | ollama | openai
   model: ""          # leave empty to use the model currently loaded in llama.cpp
+  base_url: http://localhost:8080
   dimension: 768
 
 chunking:
@@ -247,10 +354,17 @@ chunking:
 **Settings most users never need to change:** `database.path`, `chunking.size`,
 `chunking.overlap`.
 
-**Setting you might need to change:** `llm.model` and `embedding.model`, if
-llama.cpp requires a specific model name to be passed in requests. Check your
-llama.cpp setup — if it has only one model loaded, leaving these empty usually
-works fine.
+**Settings you set once, per backend** (see [section 4](#4-before-you-start)
+for the two backend paths):
+
+- `llm.base_url` / `embedding.base_url` — the address of each llama.cpp server.
+  If you run separate embedding and chat servers, give them different ports
+  (e.g. `8080` for embeddings, `8081` for chat).
+- `llm.provider` — `llama` for the fully local path, or `claude` for the hybrid
+  path. With `claude`, also set `llm.model` (Claude has no loaded-model default)
+  and export `ANTHROPIC_API_KEY`. `embedding.provider` stays `llama` either way.
+- `llm.model` / `embedding.model` — leave empty for llama.cpp when only one
+  model is loaded per server; set them if the server needs an explicit name.
 
 ---
 
