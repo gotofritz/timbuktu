@@ -666,3 +666,88 @@ the same test in a small OS matrix would give issue 31's platform gap runtime
   bounded and package-sequential, not a flake risk. Fine as-is.
 - **`printFileResult`/`printDirResults` at 0%**: one-line stdout wrappers
   around fully tested exported variants. Not worth code.
+
+---
+
+# Additions — performance & efficiency assessment (2026-07-19)
+
+Findings from a performance-engineering review of the hot paths: the vector
+scan, the ingest pipeline, the SQLite layer, and per-query allocation
+behaviour. The earlier acceptance of the O(n) vector scan (see "Noted" under
+the architecture assessment) stands — neither issue below re-litigates it.
+Numbering continues from above.
+
+## Medium priority
+
+### 36. Vector search materialises the full text of every chunk per query and full-sorts all candidates
+
+**Problem:** The accepted design is an O(n) scan over embeddings; the current
+implementation does strictly more than that design requires. The scan query
+selects `c.text`, `d.path`, and `d.title` for *every* chunk in the database,
+and every row passing `MinScore` (default `0`, which almost all cosine scores
+clear) is appended to `candidates` — so peak per-query memory is roughly the
+entire corpus text plus all decoded embeddings, held simultaneously, only to
+throw away all but K results. The final ranking is a `sort.Slice` over all n
+candidates (O(n log n)) when only the top K are needed. `Hybrid` runs this
+with `TopK*2`, and `ask` runs it on every question. At the documented
+~100k-chunk comfort zone with ~1–3 KB chunks this is hundreds of MB of
+transient allocations per query — GC churn and latency the design doesn't
+ask for.
+
+**Evidence:** `internal/search/vector.go:19-24` (SELECT includes text/path/
+title for all rows), `vector.go:34-52` (unbounded `candidates` append),
+`vector.go:57-59` (full sort).
+
+**Fix:** Two-phase within the same scan design: first pass selects only
+`id, embedding`, maintains a bounded min-heap of the top K (O(n log k) time,
+O(k) memory, one row's blob live at a time); second query hydrates
+text/path/title for just those K chunk IDs. No `Searcher` API change, and the
+later sqlite-vec swap noted in the architecture review gets cheaper, not
+harder. Benchmark before/after with a synthetic 50–100k-chunk DB
+(`go test -bench`) to pin the win.
+
+### 37. Bulk ingest is fully serial — embedding round-trip latency is the wall clock
+
+**Problem:** `IngestDir` processes one file at a time, and within a file the
+embed loop issues one blocking `Embed` call per 16-chunk batch. The ollama
+adapter then splits each of those into sequential batches of 8
+(`ollamaBatchSize`), so every ingester batch costs *two* serial HTTP
+round-trips. Nothing overlaps network wait with extraction, chunking, or
+storage, and no two embedding requests are ever in flight at once. For the
+primary bulk operation — a first-time `tbuk ingest <dir>` against any
+network-backed embedder — wall clock is essentially
+(number of batches) × (round-trip latency), leaving the provider and the
+machine idle in alternation. A corpus needing ~600 batches at 300 ms RTT
+spends ~3 minutes purely waiting in sequence; modest concurrency turns that
+into tens of seconds.
+
+**Evidence:** `internal/ingest/ingester.go:226-240` (serial per-file walk),
+`ingester.go:116-138` (serial batch loop, `embedBatchSize = 16` at line 81),
+`internal/embeddings/ollama.go:13,33-47` (further sequential split into 8s).
+
+**Fix:** Add bounded concurrency at one level — simplest is a small worker
+pool (2–4 workers, semaphore-bounded) over embed batches within a file,
+keeping per-file DB writes serial so `ReplaceForDocument` atomicity is
+untouched; concurrency across files is the alternative if per-file chunk
+counts are typically small. Align or make configurable the ingester/adapter
+batch sizes so a batch is one request. Keep the concurrency limit low and
+configurable — it must compose with the 429/5xx retry work in issue 33
+rather than amplify rate-limit pressure. Local providers (ollama/llama)
+benefit too when serving parallel requests.
+
+## Noted, no action needed (performance review)
+
+- **Hybrid runs its vector and keyword legs sequentially:** the vector leg is
+  dominated by the query-embedding network call; parallelising saves
+  single-digit milliseconds. Not worth the goroutines.
+- **No prepared-statement reuse:** each CLI invocation runs a handful of
+  queries once; `database/sql` per-call prepare overhead is noise here.
+- **`stats` aggregates in a single grouped query** — already the efficient
+  shape; no N+1 anywhere in the CLI.
+- **FTS5 external-content index never gets `optimize`:** segment buildup from
+  repeated re-ingests is negligible at personal-corpus scale; revisit only if
+  keyword latency ever degrades.
+- **Redundant second SHA256 hash on the auto-preprocess path**
+  (`IngestFile` hashes, then `preprocess.Extract` hashes again): one extra
+  sequential file read per *new* file, dwarfed by embedding calls. Not worth
+  code.
