@@ -488,3 +488,106 @@ small writer wrapper in one place.
 - **Path traversal via `--template`** (`ask -t ../../x` escapes
   `~/.tbuk/prompts`): the attacker and victim are the same local user, so
   there is no trust boundary to cross. Not worth code.
+
+---
+
+# Additions — production readiness / SRE assessment (2026-07-19)
+
+Findings from an SRE/platform review: release pipeline, failure recovery,
+signal handling, and operational behaviour of the SQLite layer. Much is
+already solid — WAL + `busy_timeout(5000)` + `foreign_keys` are set per
+pooled connection in the DSN (`internal/storage/db.go:50`), partial ingest
+failures exit non-zero with a per-file error report
+(`internal/cli/ingest.go:121-124`), re-runs recover cheaply via SHA256
+dedup, and CI gates coverage at 85%. Backup/export is already on the
+roadmap (`next-steps.md` quick win 3), migration-runner hardening is
+issue 23, and supply-chain gaps are issues 28–29. Numbering continues.
+
+## Medium priority
+
+### 31. Release workflow publishes without any test gate, and CI never builds the platforms it ships
+
+**Problem:** Two related holes in the path from commit to published binary:
+
+1. `release.yml` triggers on any `v*` tag push and goes straight to
+   GoReleaser — no lint, no tests. The `make release-*` helpers enforce
+   "clean main" locally, but nothing server-side does: a tag pushed by hand
+   (or from a commit that never went through a PR) publishes untested
+   binaries to the Releases page. GitHub tag pushes don't trigger the CI
+   workflow either (`ci.yml` runs only on branch pushes/PRs to main), so a
+   release can ship from a commit CI never saw.
+2. Releases ship six platform builds (linux/darwin/windows × amd64/arm64)
+   but CI only ever compiles linux/amd64. A change that breaks compilation
+   on another GOOS (a `syscall` usage, a build-tag slip, path handling)
+   is first discovered when the tagged release *fails at publish time* —
+   the worst moment to find out.
+
+**Evidence:** `.github/workflows/release.yml` (checkout → setup-go →
+goreleaser, nothing else); `.github/workflows/ci.yml` (single
+`ubuntu-latest` job, no GOOS matrix); `.goreleaser.yml:15-21` (six
+targets).
+
+**Fix:** In `release.yml`, add a job that runs `go test ./...` and
+`go vet` (or reuse the CI steps) as a prerequisite of the goreleaser job.
+In `ci.yml`, add a cheap cross-compile check — `GOOS=darwin`/`windows`
+`go build ./...` in a small matrix, or a `goreleaser release --snapshot`
+smoke job — so platform breakage surfaces on the PR, not at tag time.
+
+### 32. No signal handling — Ctrl-C is not the clean cancel the README claims
+
+**Problem:** The README/troubleshooting table says "Press `Ctrl-C` to
+cancel — retrieval and streaming are interrupted cleanly", and the code is
+carefully context-plumbed end to end (`cmd.Context()` flows into ingest
+loops, embedding calls, and the SSE stream goroutines, whose
+`ctx.Done()` selects exist precisely for this). But nothing ever creates a
+signal-aware context: `main` calls `cli.Execute()` → cobra `Execute()`
+with the default background context, and `signal.NotifyContext` appears
+nowhere. On SIGINT the Go runtime's default handler simply kills the
+process — the cancellation paths are dead code in production, deferred
+cleanup (`db.Close`, in-flight chunk transaction rollback) never runs, and
+a mid-directory `tbuk ingest` dies without printing the partial
+"Done: N ingested" summary that would tell the user where it stopped.
+Data is safe (WAL journal recovers on next open), but the documented
+behaviour doesn't exist and the interrupted-run UX is worse than designed.
+
+**Evidence:** `cmd/tbuk/main.go` (no signal setup),
+`internal/cli/root.go:77-83` (`Execute()`, not `ExecuteContext`);
+contrast the ctx plumbing it would activate:
+`internal/ingest/ingester.go`, `internal/llm/stream.go:12`.
+
+**Fix:** In `Execute`, wrap the root context with
+`signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)`
+and run `root.ExecuteContext(ctx)`. On cancellation, let commands return
+`ctx.Err()` and exit non-zero. For `IngestDir`, print the summary of
+results accumulated so far before returning. A second Ctrl-C should
+force-quit (the stdlib gives this for free: `NotifyContext` restores
+default handling after the first signal cancels).
+
+## Low priority
+
+### 33. No retry on transient provider errors during bulk ingest
+
+A bulk `tbuk ingest <dir>` against a hosted embedding provider will hit
+rate limits (HTTP 429) and occasional 5xx/connection resets; each such
+error fails that file permanently for the run. Recovery exists — re-running
+skips completed files via SHA dedup and retries only the failures — so this
+is friction, not data loss, but a large first-time ingest against OpenAI
+degrades into several manual re-runs. Fix: a small bounded retry
+(2–3 attempts, exponential backoff, honour `Retry-After`) on 429/5xx in
+the embedding adapters — or once in `Ingester` around the `Embed` call.
+Do not retry LLM streaming calls (`ask` is interactive; fail fast there).
+Evidence: `internal/embeddings/openai.go`, `internal/embeddings/ollama.go`
+(single-shot POSTs); `internal/ingest/ingester.go:126` (one `Embed` per
+file, error recorded and loop moves on).
+
+## Noted, no action needed (SRE review)
+
+- **Concurrent `tbuk` processes:** WAL + `busy_timeout(5000)` handles the
+  realistic case (a search while an ingest runs). Fine as-is.
+- **Partial-failure exit codes:** dir ingest exits non-zero when any file
+  fails and says how many. Fine as-is.
+- **Backup story:** roadmap quick win 3 (export/import/backup) covers it;
+  issue 23's pre-migration copy covers the upgrade path. No new issue.
+- **Observability:** errors already carry provider response bodies (capped
+  at 2 KB); for a local CLI that is adequate — no structured logging
+  needed at this scale.
