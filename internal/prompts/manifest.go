@@ -23,7 +23,7 @@ type Manifest struct {
 	Name        string                     `yaml:"name"`
 	Description string                     `yaml:"description"`
 	Model       string                     `yaml:"model"`
-	Temperature float64                    `yaml:"temperature"`
+	Temperature *float64                   `yaml:"temperature"` // nil = unset (provider default)
 	MaxTokens   int                        `yaml:"max_tokens"`
 	Retrieval   RetrievalConfig            `yaml:"retrieval"`
 	Variables   map[string]VariableDefault `yaml:"variables"`

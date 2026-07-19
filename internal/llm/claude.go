@@ -40,7 +40,7 @@ func newClaudeProvider(cfg *config.LLMConfig) (*claudeProvider, error) {
 func (p *claudeProvider) Chat(ctx context.Context, messages []Message, opts ...CallOptions) (<-chan Token, error) {
 	model := p.model
 	maxTokens := p.maxTokens
-	temperature := 0.0
+	var temperature *float64
 	if len(opts) > 0 {
 		o := opts[0]
 		if o.Model != "" {
@@ -49,7 +49,7 @@ func (p *claudeProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		if o.MaxTokens > 0 {
 			maxTokens = o.MaxTokens
 		}
-		if o.Temperature != 0 {
+		if o.Temperature != nil {
 			temperature = o.Temperature
 		}
 	}
@@ -70,11 +70,13 @@ func (p *claudeProvider) Chat(ctx context.Context, messages []Message, opts ...C
 	}
 
 	reqBody := map[string]any{
-		"model":       model,
-		"max_tokens":  maxTokens,
-		"messages":    apiMessages,
-		"stream":      true,
-		"temperature": temperature,
+		"model":      model,
+		"max_tokens": maxTokens,
+		"messages":   apiMessages,
+		"stream":     true,
+	}
+	if temperature != nil {
+		reqBody["temperature"] = *temperature
 	}
 	if systemPrompt != "" {
 		reqBody["system"] = systemPrompt

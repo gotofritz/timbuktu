@@ -55,6 +55,46 @@ func (r *ChunkRepo) BulkInsert(ctx context.Context, chunks []*Chunk) error {
 	return nil
 }
 
+// ReplaceForDocument deletes the document's existing chunks and inserts the
+// given ones in a single transaction, so a re-ingest never leaves the index
+// in a partially-updated state. Each inserted chunk's ID is set.
+func (r *ChunkRepo) ReplaceForDocument(ctx context.Context, documentID int64, chunks []*Chunk) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("ChunkRepo.ReplaceForDocument begin: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE document_id=?`, documentID); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("ChunkRepo.ReplaceForDocument delete: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO chunks(document_id,chunk_index,text,token_count,embedding)
+         VALUES(?,?,?,?,?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("ChunkRepo.ReplaceForDocument prepare: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, c := range chunks {
+		var blob []byte
+		if c.Embedding != nil {
+			blob = Float32SliceToBlob(c.Embedding)
+		}
+		res, err := stmt.ExecContext(ctx, c.DocumentID, c.ChunkIndex, c.Text, c.TokenCount, blob)
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("ChunkRepo.ReplaceForDocument exec: %w", err)
+		}
+		c.ID, _ = res.LastInsertId()
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ChunkRepo.ReplaceForDocument commit: %w", err)
+	}
+	return nil
+}
+
 // DeleteByDocument removes all chunks for the given document ID.
 func (r *ChunkRepo) DeleteByDocument(ctx context.Context, documentID int64) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM chunks WHERE document_id=?`, documentID)

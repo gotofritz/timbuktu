@@ -306,6 +306,75 @@ func TestChunkRepo_DeleteByDocument(t *testing.T) {
 	}
 }
 
+func TestChunkRepo_ReplaceForDocument(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	docRepo := storage.NewDocumentRepo(db.DB())
+	chunkRepo := storage.NewChunkRepo(db.DB())
+
+	doc := seedDocument(t, ctx, docRepo)
+	old := []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "old one", TokenCount: 2},
+		{DocumentID: doc.ID, ChunkIndex: 1, Text: "old two", TokenCount: 2},
+	}
+	if err := chunkRepo.BulkInsert(ctx, old); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	fresh := []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "new one", TokenCount: 2},
+	}
+	if err := chunkRepo.ReplaceForDocument(ctx, doc.ID, fresh); err != nil {
+		t.Fatalf("ReplaceForDocument: %v", err)
+	}
+
+	got, err := chunkRepo.ListByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("ListByDocument: %v", err)
+	}
+	if len(got) != 1 || got[0].Text != "new one" {
+		t.Fatalf("want [new one], got %+v", got)
+	}
+	if got[0].ID == 0 {
+		t.Error("replaced chunk missing ID")
+	}
+}
+
+func TestChunkRepo_ReplaceForDocument_Empty(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	docRepo := storage.NewDocumentRepo(db.DB())
+	chunkRepo := storage.NewChunkRepo(db.DB())
+
+	doc := seedDocument(t, ctx, docRepo)
+	if err := chunkRepo.BulkInsert(ctx, []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "gone", TokenCount: 1},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	// Replacing with an empty set clears existing chunks.
+	if err := chunkRepo.ReplaceForDocument(ctx, doc.ID, nil); err != nil {
+		t.Fatalf("ReplaceForDocument nil: %v", err)
+	}
+	got, err := chunkRepo.ListByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("ListByDocument: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want 0 chunks, got %d", len(got))
+	}
+}
+
+func TestChunkRepo_ReplaceForDocument_ClosedDB(t *testing.T) {
+	ctx := context.Background()
+	repo := storage.NewChunkRepo(closedDB(t).DB())
+	chunks := []*storage.Chunk{{DocumentID: 1, ChunkIndex: 0, Text: "x"}}
+	if err := repo.ReplaceForDocument(ctx, 1, chunks); err == nil {
+		t.Error("expected error on closed DB")
+	}
+}
+
 // ── MetadataRepo ──────────────────────────────────────────────────────────────
 
 func TestMetadataRepo_SetGet(t *testing.T) {

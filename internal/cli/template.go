@@ -61,7 +61,11 @@ func newTemplateShowCmd() *cobra.Command {
 			fmt.Printf("name:        %s\n", m.Name)
 			fmt.Printf("description: %s\n", m.Description)
 			fmt.Printf("model:       %s\n", m.Model)
-			fmt.Printf("temperature: %g\n", m.Temperature)
+			if m.Temperature != nil {
+				fmt.Printf("temperature: %g\n", *m.Temperature)
+			} else {
+				fmt.Printf("temperature: (default)\n")
+			}
 			fmt.Printf("max_tokens:  %d\n", m.MaxTokens)
 			fmt.Printf("output:      %s\n", m.Output)
 			if m.Retrieval.TopK > 0 {

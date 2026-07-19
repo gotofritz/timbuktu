@@ -100,6 +100,83 @@ func TestRunAsk_streamsOutput(t *testing.T) {
 	}
 }
 
+// capturingChat records the CallOptions it receives.
+func capturingChat(got *[]llm.CallOptions) func(context.Context, []llm.Message, ...llm.CallOptions) (<-chan llm.Token, error) {
+	return func(_ context.Context, _ []llm.Message, opts ...llm.CallOptions) (<-chan llm.Token, error) {
+		*got = opts
+		ch := make(chan llm.Token, 1)
+		ch <- llm.Token{Done: true}
+		close(ch)
+		return ch, nil
+	}
+}
+
+func TestRunAsk_forwardsManifestCallOptions(t *testing.T) {
+	tmpl := buildQATemplate(t) // manifest: temperature 0.2, max_tokens 2048
+	var out bytes.Buffer
+	var got []llm.CallOptions
+
+	err := cli.RunAsk(
+		&out,
+		mockRetrieve(nil, nil),
+		capturingChat(&got),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want CallOptions forwarded, got %d", len(got))
+	}
+	if got[0].MaxTokens != 2048 {
+		t.Errorf("max_tokens: want 2048, got %d", got[0].MaxTokens)
+	}
+	if got[0].Temperature == nil {
+		t.Fatal("temperature: want 0.2, got nil")
+	}
+	if *got[0].Temperature != 0.2 {
+		t.Errorf("temperature: want 0.2, got %g", *got[0].Temperature)
+	}
+}
+
+func TestRunAsk_honorsExplicitTemperatureZero(t *testing.T) {
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "qa")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "name: qa\ntemperature: 0.0\nmax_tokens: 100\nretrieval:\n  top_k: 3\noutput: text\n"
+	for name, content := range map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   "sys",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("qa")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	var out bytes.Buffer
+	var got []llm.CallOptions
+	if err := cli.RunAsk(&out, mockRetrieve(nil, nil), capturingChat(&got), tmpl, "q", nil, 0, false); err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if len(got) != 1 || got[0].Temperature == nil {
+		t.Fatalf("want explicit temperature forwarded, got %+v", got)
+	}
+	if *got[0].Temperature != 0 {
+		t.Errorf("temperature: want explicit 0, got %g", *got[0].Temperature)
+	}
+}
+
 func TestRunAsk_noStream(t *testing.T) {
 	tmpl := buildQATemplate(t)
 	var out bytes.Buffer
