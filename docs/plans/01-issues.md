@@ -1094,3 +1094,36 @@ convention; move the `.original.md` backup to `docs/archive/` or delete it.
 - **Fix:** Drop the Test step from ci.yml (coverage job already runs everything with `-count=1`),
   or merge the two workflows; drop `-v` either way.
 - **Effort:** Small. Priority: low.
+
+## Ecosystem Health Assessment (Dependency Manager, 2026-07-19)
+
+### ECO-1: No automated dependency updates (Dependabot/Renovate absent)
+- **What**: `.github/` has no `dependabot.yml` or Renovate config. Direct deps are currently fresh (cobra v1.10.2, x/net v0.57.0, modernc.org/sqlite v1.54.0), but nothing keeps them that way; indirect updates are already pending (`spf13/pflag v1.0.10`, `modernc.org/libc v1.74.3`).
+- **Why it matters**: security patches in x/net and sqlite land silently; without automation the module drifts stale between manual audits. GitHub Actions (`actions/checkout@v4`, `setup-go@v5`, `golangci-lint-action@v7`, `goreleaser-action@v6`) also get no update PRs.
+- **Fix**: add `.github/dependabot.yml` with `gomod` (weekly) and `github-actions` (weekly) ecosystems. Optionally group indirect `modernc.org/*` bumps to cut PR noise.
+
+### ECO-2: No vulnerability scanning in CI
+- **What**: neither `ci.yml` nor `quality-check.yml` runs `govulncheck`. (Verified locally too: govulncheck cannot run in this sandbox — vuln DB fetch blocked — so no scan has been recorded anywhere.)
+- **Why it matters**: the module ships an HTTP-adjacent stack (`golang.org/x/net`) and a C-transpiled SQLite (`modernc.org/sqlite`); both have had CVEs historically. Symbol-level `govulncheck` is cheap and low-noise.
+- **Fix**: add a CI step `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` (or `golang/govulncheck-action`) to quality-check.yml.
+
+### ECO-3: golangci-lint runs with no config; local vs CI version drift
+- **What**: no `.golangci.yml` in repo. CI pins golangci-lint v2.5.0 via `golangci-lint-action@v7`; `make lint` and the pre-commit `golangci-lint` hook run whatever version is on PATH with default linters.
+- **Why it matters**: default linter set changes across golangci-lint releases, so the CI gate can shift silently on action bumps, and local `make check-ci` can pass while CI fails (or vice versa).
+- **Fix**: commit a minimal `.golangci.yml` (version: "2", explicit linter list) and pin the same golangci-lint version expectation in the Makefile comment or a tools file.
+
+### ECO-4: `ledongthuc/pdf` is an unreleased, panic-prone dependency on the untrusted-input path
+- **What**: `internal/preprocess/pdf.go` parses arbitrary PDFs with `github.com/ledongthuc/pdf`, pinned to a pseudo-version (`v0.0.0-20250511090121`) — the project has no tagged releases and minimal maintenance. The library panics (rather than returning errors) on many malformed inputs, and `pdfExtractor.Extract` has no `recover`.
+- **Why it matters**: one corrupt/hostile PDF crashes the whole `tbuk` run instead of failing that single document.
+- **Fix**: wrap `Extract` in `defer func() { if p := recover(); p != nil { err = fmt.Errorf("pdf: panic: %v", p) } }()` (test with a malformed fixture). Longer term, evaluate a maintained alternative (e.g. `pdfcpu`) if PDF coverage grows.
+
+### ECO-5: Release builds use unpinned goreleaser (`version: latest`)
+- **What**: `release.yml` runs `goreleaser/goreleaser-action@v6` with `version: latest`.
+- **Why it matters**: a goreleaser major bump can change archive layout/changelog behavior or break the v2 config exactly at release time — the worst moment to discover it.
+- **Fix**: pin `version: '~> v2'` so releases stay on the tested major.
+
+### Healthy — no action needed
+- Direct dependencies all current as of 2026-07-19; dep tree is small (5 direct, ~15 indirect).
+- `go mod tidy` drift is CI-enforced (`git diff --exit-code go.mod go.sum`).
+- Go toolchain pinned via `go-version-file: go.mod` (1.25.0) consistently across all three workflows.
+- CGO disabled + pure-Go SQLite keeps cross-compile matrix (6 targets) dependency-free.
