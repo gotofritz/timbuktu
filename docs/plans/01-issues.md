@@ -357,3 +357,134 @@ so all config errors surface together at startup.
 multi-turn `ask` adds more concurrency. Races regress silently until a user
 hits them. Add `-race` to the CI test step (or a parallel job if runtime
 matters).
+
+---
+
+# Additions — security & attack surface assessment (2026-07-19)
+
+Findings from a security review of the repo's attack surface: untrusted
+inputs (ingested documents), secrets handling, network calls, the SQLite
+layer, and the release/CI pipeline. The core is in good shape — SQL is
+parameterised throughout, FTS5 queries are sanitised
+(`internal/search/keyword.go:49-56`), API keys come only from environment
+variables and never touch config or logs, no external commands are executed,
+and `~/.tbuk` content is created owner-only (dirs `0700`, config/DB/extracted
+files `0600`, including a `chmod` on open in `internal/storage/db.go:37-43`).
+The issues below are the remaining gaps. Numbering continues from above.
+
+## Medium priority
+
+### 26. A malformed PDF can panic and kill an entire ingest run
+
+**Problem:** The primary untrusted-input surface is document ingestion — PDFs
+are exactly the kind of file users download from elsewhere. PDF extraction
+delegates to `github.com/ledongthuc/pdf`, a parser with known
+index-out-of-range / nil-dereference panics on malformed or hostile files
+(see its upstream issue tracker), and nothing recovers: a panic anywhere in
+`Extract` unwinds past `IngestDir`'s per-file error handling and crashes the
+whole `tbuk ingest` run, instead of recording one error `Result` and moving
+on. The extractor also `io.ReadAll`s the entire file with no size cap
+(`pdf.go:17`, and `plaintext.go`/`html.go` read unbounded too), so a
+multi-GB stray file in an ingest directory exhausts memory before chunking
+starts.
+
+**Evidence:** `internal/preprocess/pdf.go:15-42` (no recover, unbounded
+read); `internal/ingest/ingester.go:226-240` (per-file loop has no panic
+isolation).
+
+**Fix:** Wrap the extractor call (`Extractor.Extract` or
+`preprocess.Extract`) in a `defer`/`recover` that converts a panic into an
+error `Result` for that file. Add a configurable max-file-size guard (stat
+before read; a generous default like 100 MB) so one oversized file can't OOM
+the run. Both fold naturally into the error-surfacing work in issue 4.
+
+### 27. API keys are attached to any configured `base_url`, including plain HTTP
+
+**Problem:** The claude/openai adapters set `x-api-key` /
+`Authorization: Bearer` on requests to whatever `base_url` the config
+supplies, with no scheme or host check. Combined with issue 17 (defaults
+hardcode `base_url: http://localhost:8080`, so switching `provider: llama` →
+`provider: claude` without editing `base_url` is a realistic slip), the
+failure mode is concrete: the user's real `ANTHROPIC_API_KEY` is sent in
+cleartext to whatever answers on localhost:8080 — or, if they point
+`base_url` at a remote `http://` host, across the network unencrypted.
+
+**Evidence:** `internal/llm/claude.go:90-96`, `internal/llm/openai.go`,
+`internal/embeddings/openai.go:50-58` — headers set unconditionally;
+`internal/config/config.go:69,75` — non-empty default `base_url` makes the
+misdirect reachable.
+
+**Fix:** In the cloud-provider factories (claude, openai), reject — or at
+minimum loudly warn on — a `base_url` that is non-HTTPS and not a loopback
+address when an API key will be attached. Do this alongside the issue 17 fix
+(empty default `base_url` resolved per provider), which removes the most
+likely way to hit it.
+
+### 28. No dependency vulnerability scanning, and the release toolchain is unpinned
+
+**Problem:** The project ships standalone binaries but nothing watches its
+dependency tree: no `govulncheck` in CI, no Dependabot/Renovate config, so a
+CVE in `golang.org/x/net`, `modernc.org/sqlite`, or the PDF parser (the one
+dependency that parses untrusted input, see issue 26) goes unnoticed until a
+user is bitten. Meanwhile the release workflow runs
+`goreleaser/goreleaser-action@v6` with `version: latest`, so every tagged
+release builds with whatever GoReleaser happens to be current that day —
+unreproducible, and exposed to a bad or compromised upstream release at the
+worst moment (publish time).
+
+**Evidence:** `.github/workflows/ci.yml`, `quality-check.yml` (no vuln
+scanning); `.github/workflows/release.yml:24-27` (`version: latest`); no
+`.github/dependabot.yml`.
+
+**Fix:** Add a `govulncheck ./...` step to CI (it's fast and has no config
+burden); add a minimal `dependabot.yml` for `gomod` and `github-actions`
+ecosystems; pin the GoReleaser version in `release.yml`. Optionally pin
+actions to commit SHAs — with Dependabot keeping them fresh, pinning costs
+nothing.
+
+## Low priority
+
+### 29. Release artifacts have no provenance or signature
+
+GoReleaser publishes `checksums.txt` alongside the binaries, but checksums
+and binaries live in the same release — an attacker who can tamper with one
+can tamper with both, so the checksum verifies download integrity, not
+authenticity. GitHub's `actions/attest-build-provenance` gives signed
+build-provenance attestations (verifiable with `gh attestation verify`) for
+a few lines of workflow YAML; cosign keyless signing of `checksums.txt` is
+the alternative. Cheap insurance for a tool users install by downloading a
+binary. Evidence: `.goreleaser.yml` (`checksum:` only),
+`.github/workflows/release.yml`.
+
+### 30. Ingested documents can smuggle terminal escape sequences through `ask` output
+
+`tbuk search` escapes previews with `%q` (`internal/cli/search.go:139`), but
+`tbuk ask` streams LLM output to the terminal verbatim
+(`internal/cli/ask.go:193-205`). Retrieved chunk text is placed in the
+prompt, and models readily echo it — so a document a user ingested from
+elsewhere can carry ANSI/OSC sequences that reach the terminal raw: OSC 52
+writes to the clipboard, OSC 0 retitles the window, cursor/erase sequences
+can hide or rewrite what the user thinks they read. Same applies to
+doc-derived fields printed with `%s` elsewhere (citations, titles, metadata
+values in `meta list`/`stats`). Fix: filter C0/C1 control characters (keep
+`\n`, `\t`) from streamed `ask` output and doc-derived display strings — a
+small writer wrapper in one place.
+
+## Noted, no action needed (security review)
+
+- **SQL injection:** all queries use placeholders; the one dynamically built
+  query (`internal/search/metadata.go:16-31`) interpolates only generated
+  aliases, never user input. Fine as-is.
+- **FTS5 injection:** `sanitizeFTS5Query` quotes every term and doubles
+  embedded quotes. Fine as-is.
+- **Prompt injection via ingested documents** is inherent to RAG and the
+  blast radius here is small by design: the LLM's output is text to a
+  terminal, there is no tool-use or shell execution path. Issue 30 covers
+  the one real escalation (terminal escapes). Revisit if the roadmap ever
+  gives `ask` tool-calling abilities.
+- **Secrets hygiene:** keys are read from env at construction, stored only
+  in unexported struct fields, and never logged; `errorMessage` caps error
+  bodies at 2 KB and echoes only the server response. Fine as-is.
+- **Path traversal via `--template`** (`ask -t ../../x` escapes
+  `~/.tbuk/prompts`): the attacker and victim are the same local user, so
+  there is no trust boundary to cross. Not worth code.
