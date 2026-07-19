@@ -1,12 +1,17 @@
 .PHONY: build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release
 
+# Version derived from git (matches the tag goreleaser stamps at release time).
+# Falls back to "dev" outside a git checkout.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/gotofritz/timbuktu/internal/cli.version=$(VERSION)
+
 # Build the binary
 build:
-	mkdir -p bin && go build -o bin/tbuk ./cmd/tbuk
+	mkdir -p bin && go build -ldflags "$(LDFLAGS)" -o bin/tbuk ./cmd/tbuk
 
 # Install to $GOPATH/bin (adds tbuk to PATH if GOPATH/bin is on PATH)
 install:
-	go install ./cmd/tbuk
+	go install -ldflags "$(LDFLAGS)" ./cmd/tbuk
 
 # Run all tests
 test:
