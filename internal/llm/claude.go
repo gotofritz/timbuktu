@@ -28,6 +28,9 @@ func newClaudeProvider(cfg *config.LLMConfig) (*claudeProvider, error) {
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com"
 	}
+	if err := config.ValidateKeyedBaseURL(baseURL); err != nil {
+		return nil, fmt.Errorf("llm claude: %w", err)
+	}
 	return &claudeProvider{
 		baseURL:   baseURL,
 		model:     cfg.Model,

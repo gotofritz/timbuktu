@@ -168,6 +168,32 @@ func TestClaudeProvider_missingKey(t *testing.T) {
 	}
 }
 
+// A cloud provider must refuse to attach the API key to a non-HTTPS,
+// non-loopback base_url (the key would cross the network unencrypted).
+func TestClaudeProvider_rejectsInsecureRemoteBaseURL(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	cfg := &config.LLMConfig{
+		Provider: "claude",
+		Model:    "claude-haiku-4-5-20251001",
+		BaseURL:  "http://api.remote.example.com",
+	}
+	if _, err := llm.NewLLM(cfg); err == nil {
+		t.Fatal("expected error for API key on non-HTTPS remote base_url")
+	}
+}
+
+func TestOpenAIProvider_rejectsInsecureRemoteBaseURL(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	cfg := &config.LLMConfig{
+		Provider: "openai",
+		Model:    "gpt-4o-mini",
+		BaseURL:  "http://api.remote.example.com",
+	}
+	if _, err := llm.NewLLM(cfg); err == nil {
+		t.Fatal("expected error for API key on non-HTTPS remote base_url")
+	}
+}
+
 func TestClaudeProvider_callOptions(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
