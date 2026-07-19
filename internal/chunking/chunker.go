@@ -86,17 +86,22 @@ func findBoundary(text string, minStart, maxEnd int) int {
 	if maxEnd > len(text) {
 		maxEnd = len(text)
 	}
-	best := maxEnd
+	best := -1
 	for _, sep := range sentenceSeps {
-		// Search backwards from maxEnd for sep.
+		// Search backwards from maxEnd for sep, taking the latest break so the
+		// chunk stays as close to maxEnd as possible.
 		window := text[minStart:maxEnd]
 		idx := strings.LastIndex(window, sep)
 		if idx >= 0 {
 			candidate := minStart + idx + len(sep)
-			if candidate > minStart && candidate < best {
+			if candidate > minStart && candidate > best {
 				best = candidate
 			}
 		}
+	}
+	if best < 0 {
+		// No separator found: fall back to maxEnd.
+		return maxEnd
 	}
 	return best
 }
