@@ -1,15 +1,19 @@
 package cli_test
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
 	"github.com/gotofritz/timbuktu/internal/config"
+	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
 // ── checkConfig ───────────────────────────────────────────────────────────────
@@ -222,4 +226,97 @@ func TestRunDoctor_missingConfig(t *testing.T) {
 	if err := cli.RunDoctor(srv.Client(), cfg, "/no/such/config.yaml"); err != nil {
 		t.Fatalf("RunDoctor: %v", err)
 	}
+}
+
+// Hosted providers (claude/openai) must not be HTTP-probed: no /health or
+// /v1/models request, and the report says the API was not probed (P1-12).
+func TestRunDoctorTo_hostedProviderNotProbed(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+	cfg.LLM.Provider = "claude"
+	cfg.LLM.BaseURL = srv.URL
+	cfg.Embedding.Provider = "openai"
+	cfg.Embedding.BaseURL = srv.URL
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, srv.Client(), cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("hosted providers must not be probed, got %d HTTP hits", got)
+	}
+	if !strings.Contains(out.String(), "not probed") {
+		t.Errorf("expected 'not probed' for hosted provider, got:\n%s", out.String())
+	}
+}
+
+// FTS5 health must be gated on DB health, not on the embedding server's
+// reachability. With a broken FTS index and a down embedder, the report must
+// still surface the FTS failure instead of printing a bogus ✓ (P1-12).
+func TestRunDoctorTo_fts5CheckedWhenEmbedderDown(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+	breakFTS(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+	// llama providers so probes run; unreachable URL so they fail (embedder down).
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+	cfg.Embedding.Provider = "llama"
+	cfg.Embedding.BaseURL = "http://127.0.0.1:19998"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+
+	if !ftsLineFailed(out.String()) {
+		t.Errorf("expected fts5 check to report failure with broken index, got:\n%s", out.String())
+	}
+}
+
+// seedDB creates a schema-initialized database file at path.
+func seedDB(t *testing.T, path string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	_ = db.Close()
+}
+
+// breakFTS drops the chunks_fts virtual table so search.CheckFTS5 fails.
+func breakFTS(t *testing.T, path string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.DB().Exec(`DROP TABLE chunks_fts`); err != nil {
+		t.Fatalf("drop chunks_fts: %v", err)
+	}
+	_ = db.Close()
+}
+
+// ftsLineFailed reports whether the doctor output's fts5 line shows a failure.
+func ftsLineFailed(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "fts5") && strings.Contains(line, "✗") {
+			return true
+		}
+	}
+	return false
 }

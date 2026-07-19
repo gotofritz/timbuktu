@@ -3,6 +3,8 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -41,7 +43,7 @@ func TestRunDelete_found(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := cli.RunDelete(ctx, &out, db, docs, "/tmp/test.md")
+	err := cli.RunDelete(ctx, &out, db, docs, "", "/tmp/test.md")
 	if err != nil {
 		t.Fatalf("RunDelete: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestRunDelete_notFound(t *testing.T) {
 	ctx := context.Background()
 
 	var out bytes.Buffer
-	err := cli.RunDelete(ctx, &out, db, docs, "/no/such/file.md")
+	err := cli.RunDelete(ctx, &out, db, docs, "", "/no/such/file.md")
 	if err == nil {
 		t.Fatal("expected error for missing document")
 	}
@@ -81,12 +83,58 @@ func TestRunDelete_dbError_notReportedAsNotFound(t *testing.T) {
 	_ = db.Close()
 
 	var out bytes.Buffer
-	err := cli.RunDelete(ctx, &out, db, docs, "/tmp/whatever.md")
+	err := cli.RunDelete(ctx, &out, db, docs, "", "/tmp/whatever.md")
 	if err == nil {
 		t.Fatal("expected error from closed DB")
 	}
 	if strings.Contains(err.Error(), "document not found") {
 		t.Errorf("real DB error must not be reported as not-found, got: %v", err)
+	}
+}
+
+// Deleting a document must also remove its extracted-text cache file
+// (extractedDir/<sha>.txt), which was previously left behind forever (P1-12).
+func TestRunDelete_removesExtractedCacheFile(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	ctx := context.Background()
+
+	extractedDir := t.TempDir()
+	sha := "cafebabe"
+	cachePath := filepath.Join(extractedDir, sha+".txt")
+	if err := os.WriteFile(cachePath, []byte("extracted text"), 0o600); err != nil {
+		t.Fatalf("write cache file: %v", err)
+	}
+
+	doc := &storage.Document{Path: "/tmp/cached.md", SHA256: sha, Title: "cached", MimeType: "text/plain"}
+	if err := docs.Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := cli.RunDelete(ctx, &out, db, docs, extractedDir, "/tmp/cached.md"); err != nil {
+		t.Fatalf("RunDelete: %v", err)
+	}
+
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Errorf("expected extracted cache file removed, stat err = %v", err)
+	}
+}
+
+// A missing cache file must not turn delete into an error (best-effort cleanup).
+func TestRunDelete_missingCacheFileIsNotAnError(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	ctx := context.Background()
+
+	doc := &storage.Document{Path: "/tmp/nocache.md", SHA256: "0badf00d", Title: "nocache", MimeType: "text/plain"}
+	if err := docs.Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := cli.RunDelete(ctx, &out, db, docs, t.TempDir(), "/tmp/nocache.md"); err != nil {
+		t.Fatalf("RunDelete with no cache file should succeed: %v", err)
 	}
 }
 
@@ -110,7 +158,7 @@ func TestRunDelete_showsChunkCount(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunDelete(ctx, &out, db, docs, "/tmp/doc.md"); err != nil {
+	if err := cli.RunDelete(ctx, &out, db, docs, "", "/tmp/doc.md"); err != nil {
 		t.Fatalf("RunDelete: %v", err)
 	}
 
