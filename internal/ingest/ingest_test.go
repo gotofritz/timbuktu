@@ -153,6 +153,69 @@ func TestIngester_newFile(t *testing.T) {
 	}
 }
 
+// A second file embedded at a different dimension than the existing index
+// must fail loudly rather than silently corrupting vector search.
+func TestIngester_dimensionMismatchErrors(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// First file: 4-dim embeddings establish the index dimension.
+	ext := &mockExtractor{text: "content one"}
+	ing4 := newIngester(t, db, ext, &mockEmbedder{dim: 4}, extractedDir)
+	p1 := writeTempFile(t, dir, "one.md", "first document body here")
+	if res := ing4.IngestFile(ctx, p1, ingest.Options{}); res.Err != nil {
+		t.Fatalf("first ingest: %v", res.Err)
+	}
+
+	// Second file with an 8-dim embedder (model/config changed) must error.
+	ing8 := newIngester(t, db, &mockExtractor{text: "content two"}, &mockEmbedder{dim: 8}, extractedDir)
+	p2 := writeTempFile(t, dir, "two.md", "second document body here")
+	res := ing8.IngestFile(ctx, p2, ingest.Options{})
+	if res.Err == nil {
+		t.Fatal("expected dimension-mismatch error, got nil")
+	}
+	if !strings.Contains(res.Err.Error(), "dimension") {
+		t.Errorf("error = %v, want it to mention dimension", res.Err)
+	}
+
+	// The mismatched file must not have been stored.
+	var count int
+	if err := db.DB().QueryRow(
+		`SELECT COUNT(*) FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.path=?`,
+		p2).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("mismatched file stored %d chunks, want 0", count)
+	}
+}
+
+// Re-ingesting the SAME file at a new dimension is allowed with --force: its
+// old chunks are excluded from the consistency check, so a full re-embed of a
+// single-document KB succeeds.
+func TestIngester_reingestSameFileNewDimension(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	ext := &mockExtractor{text: "content"}
+	p := writeTempFile(t, dir, "doc.md", "body")
+
+	ing4 := newIngester(t, db, ext, &mockEmbedder{dim: 4}, extractedDir)
+	if res := ing4.IngestFile(ctx, p, ingest.Options{}); res.Err != nil {
+		t.Fatalf("first ingest: %v", res.Err)
+	}
+
+	ing8 := newIngester(t, db, ext, &mockEmbedder{dim: 8}, extractedDir)
+	res := ing8.IngestFile(ctx, p, ingest.Options{Force: true})
+	if res.Err != nil {
+		t.Fatalf("re-ingest same file at new dim: %v", res.Err)
+	}
+}
+
 func TestIngester_usesExtractedFile(t *testing.T) {
 	db := openTestDB(t)
 	extractedDir := t.TempDir()

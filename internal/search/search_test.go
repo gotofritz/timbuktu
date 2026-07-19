@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -115,6 +116,27 @@ func TestVectorSearch_returnsTopK(t *testing.T) {
 	}
 	if results[0].Source != "vector" {
 		t.Errorf("want source=vector, got %q", results[0].Source)
+	}
+}
+
+// A query embedding whose dimension differs from the stored vectors must
+// return a loud error instead of silently scoring everything 0 (cosine
+// similarity returns 0 for mismatched lengths).
+func TestVectorSearch_dimensionMismatchErrors(t *testing.T) {
+	db := openTestDB(t)
+	docID := seedDoc(t, db, "/a.txt", "Doc A")
+	seedChunk(t, db, docID, 0, "stored 3-dim", []float32{1, 0, 0})
+
+	// Query embedder now produces 4-dim vectors (model/config changed).
+	emb := &stubEmbedder{vec: []float32{1, 0, 0, 0}, dim: 4}
+	s := search.New(db, emb)
+
+	_, err := s.Vector(context.Background(), "query", search.Options{TopK: 5})
+	if err == nil {
+		t.Fatal("expected dimension-mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "dimension") {
+		t.Errorf("error = %v, want it to mention dimension", err)
 	}
 }
 

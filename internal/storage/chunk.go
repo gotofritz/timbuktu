@@ -95,6 +95,45 @@ func (r *ChunkRepo) ReplaceForDocument(ctx context.Context, documentID int64, ch
 	return nil
 }
 
+// EmbeddingDimension returns the dimension (float count) of the embeddings
+// stored in the chunks table, derived from the blob byte length. found is
+// false when no embedded chunks exist. Chunks belonging to excludeDocID are
+// ignored (pass 0 to consider all); this lets a re-ingest compare new
+// embeddings against the rest of the index without matching the document's own
+// soon-to-be-replaced chunks. It returns an error if the stored embeddings do
+// not all share one dimension — an already-corrupt index.
+func (r *ChunkRepo) EmbeddingDimension(ctx context.Context, excludeDocID int64) (dim int, found bool, err error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT length(embedding) FROM chunks
+         WHERE embedding IS NOT NULL AND (?1 = 0 OR document_id != ?1)`, excludeDocID)
+	if err != nil {
+		return 0, false, fmt.Errorf("ChunkRepo.EmbeddingDimension: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var dims []int
+	for rows.Next() {
+		var byteLen int
+		if err := rows.Scan(&byteLen); err != nil {
+			return 0, false, fmt.Errorf("ChunkRepo.EmbeddingDimension scan: %w", err)
+		}
+		dims = append(dims, byteLen/4)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("ChunkRepo.EmbeddingDimension rows: %w", err)
+	}
+
+	switch len(dims) {
+	case 0:
+		return 0, false, nil
+	case 1:
+		return dims[0], true, nil
+	default:
+		return 0, false, fmt.Errorf(
+			"ChunkRepo.EmbeddingDimension: stored embeddings have inconsistent dimensions %v", dims)
+	}
+}
+
 // DeleteByDocument removes all chunks for the given document ID.
 func (r *ChunkRepo) DeleteByDocument(ctx context.Context, documentID int64) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM chunks WHERE document_id=?`, documentID)

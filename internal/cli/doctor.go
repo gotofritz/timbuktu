@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -108,6 +109,11 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		msg, ok = CheckHTTP(cfg.Embedding.BaseURL+"/health", client)
 		printCheck(w, "status", msg, boolToStatus(ok))
 	}
+	printCheck(w, "dimension", fmt.Sprintf("%d (config)", cfg.Embedding.Dimension), "")
+	if dbOK {
+		dimMsg, dimStatus := CheckEmbeddingDimension(cfg.Database.Path, cfg.Embedding.Dimension)
+		printCheck(w, "stored", dimMsg, dimStatus)
+	}
 
 	printSection(w, "Preprocessing")
 	printCheck(w, "extractors", "markdown, text, html, pdf", "✓")
@@ -166,6 +172,33 @@ func CheckLLMModel(baseURL, cfgModel string, client *http.Client) string {
 		return cfgModel
 	}
 	return body.Data[0].ID
+}
+
+// CheckEmbeddingDimension reports the dimension of the embeddings stored in the
+// database and whether it matches the configured embedding dimension. A
+// mismatch means vector search will silently return nothing, so it is flagged
+// as a failure. An empty knowledge base or an unreadable DB is reported
+// neutrally (no status marker).
+func CheckEmbeddingDimension(dbPath string, cfgDim int) (msg, status string) {
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		return fmt.Sprintf("cannot open: %v", err), ""
+	}
+	defer func() { _ = db.Close() }()
+
+	dim, found, err := storage.NewChunkRepo(db.DB()).EmbeddingDimension(context.Background(), 0)
+	if err != nil {
+		return fmt.Sprintf("inconsistent stored dimensions: %v", err), "✗"
+	}
+	if !found {
+		return "no embeddings stored yet", ""
+	}
+	if cfgDim > 0 && dim != cfgDim {
+		return fmt.Sprintf(
+			"stored %d, config %d — MISMATCH: vector search will return nothing; "+
+				"re-ingest the corpus or restore embedding.dimension", dim, cfgDim), "✗"
+	}
+	return fmt.Sprintf("%d (matches config)", dim), "✓"
 }
 
 // CheckConfig verifies the config file exists and contains valid YAML.
