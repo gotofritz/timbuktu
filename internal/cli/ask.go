@@ -36,7 +36,7 @@ func newAskCmd() *cobra.Command {
 		Use:   "ask <question>",
 		Short: "Ask a question using RAG over your knowledge base",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			question := strings.Join(args, " ")
 			cfg := Config()
 
@@ -69,6 +69,7 @@ func newAskCmd() *cobra.Command {
 			}
 
 			return RunAsk(
+				cmd.Context(),
 				os.Stdout,
 				ret.Retrieve,
 				l.Chat,
@@ -88,8 +89,11 @@ func newAskCmd() *cobra.Command {
 	return cmd
 }
 
-// RunAsk is the testable core of the ask command.
+// RunAsk is the testable core of the ask command. It runs retrieval and the
+// LLM call under a cancellable context derived from ctx, cancelled on return so
+// an abandoned stream goroutine is released (and Ctrl-C interrupts the call).
 func RunAsk(
+	ctx context.Context,
 	out io.Writer,
 	retrieve retrieverFn,
 	chat chatFn,
@@ -99,6 +103,9 @@ func RunAsk(
 	topK int,
 	noStream bool,
 ) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	manifest := tmpl.Manifest()
 
 	k := topK
@@ -122,7 +129,7 @@ func RunAsk(
 		variables[parts[0]] = parts[1]
 	}
 
-	chunks, err := retrieve(context.Background(), question, k, nil)
+	chunks, err := retrieve(ctx, question, k, nil)
 	if err != nil {
 		return fmt.Errorf("retrieve: %w", err)
 	}
@@ -148,7 +155,7 @@ func RunAsk(
 		Temperature: manifest.Temperature,
 		MaxTokens:   manifest.MaxTokens,
 	}
-	tokenCh, err := chat(context.Background(), messages, opts) //nolint:wrapcheck
+	tokenCh, err := chat(ctx, messages, opts) //nolint:wrapcheck
 	if err != nil {
 		return fmt.Errorf("LLM chat: %w", err)
 	}

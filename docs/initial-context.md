@@ -94,6 +94,8 @@ Embeddings: `storage.Float32SliceToBlob` / `BlobToFloat32Slice` — little-endia
 
 Repos: `DocumentRepo`, `ChunkRepo`, `MetadataRepo` — all take `*sql.DB`, return typed errors wrapping `fmt.Errorf("Repo.Method: %w", err)`.
 
+Lookups that can miss (`DocumentRepo.GetByPath` / `GetBySHA256`) return the sentinel `storage.ErrNotFound` (wrapping `sql.ErrNoRows`) when no row matches. Callers branch with `errors.Is(err, storage.ErrNotFound)` so a genuine "does not exist" is never conflated with a transient DB error.
+
 ---
 
 ## Preprocessing
@@ -189,7 +191,9 @@ func NewLLM(cfg *config.LLMConfig) (LLM, error)
 
 `base_url` defaults to `https://api.anthropic.com` (claude), `https://api.openai.com` (openai), `http://localhost:8080` (llama), `http://localhost:11434` (ollama).
 
-Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
+Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. Every send goes through `sendToken`, which selects on `ctx.Done()`, so a consumer that abandons the channel (e.g. `RunAsk` returning on a mid-stream error) releases the goroutine instead of leaking it. `RunAsk` runs retrieval and the chat call under a cancellable context derived from `cmd.Context()`, cancelled on return (Ctrl-C interrupts). System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
+
+On a non-200 response the adapters read up to ~2 KB of the body into `LLMError`/`EmbedError.Message` (falling back to the HTTP status text when empty), preserving the provider's own error text ("model not found", "context length exceeded").
 
 ---
 
@@ -363,6 +367,9 @@ tbuk stats                     knowledge base summary: documents, chunks, embedd
 - HTTP providers mocked with `net/http/httptest`
 - In-memory SQLite (`:memory:`) for storage tests
 - `fmt.Errorf("context: %w", err)` for error wrapping
+- Sentinel errors (e.g. `storage.ErrNotFound`) matched with `errors.Is`, not string comparison
 - No `init()`, no global mutable state, no `interface{}`
 - `defer func() { _ = resp.Body.Close() }()` for HTTP responses
+- HTTP error responses surface the provider's body (bounded read), not just the status text
+- Stream goroutines select on `ctx.Done()` on every channel send to avoid leaks
 - Imports grouped: stdlib / external / internal

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gotofritz/timbuktu/internal/config"
 	"github.com/gotofritz/timbuktu/internal/llm"
@@ -452,6 +455,118 @@ func TestLlamaProvider_serverError(t *testing.T) {
 	}
 	if llmErr.Provider != "llama" {
 		t.Errorf("provider: want llama, got %q", llmErr.Provider)
+	}
+}
+
+// --- stream cancellation (P1-8) ---
+
+// A consumer that stops reading and cancels the context must not leak the
+// provider's stream goroutine: it should observe ctx.Done() on its next send
+// and return instead of blocking forever on the channel.
+func TestOpenAIProvider_streamCancellation_noLeak(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		f, _ := w.(http.Flusher)
+		// Emit several chunks so the goroutine has more to send than the
+		// consumer will read, then hold the connection open.
+		for i := 0; i < 5; i++ {
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n") //nolint:errcheck
+			if f != nil {
+				f.Flush()
+			}
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	provider, err := llm.NewLLM(&config.LLMConfig{Provider: "openai", Model: "x", MaxTokens: 100, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+
+	baseline := runtime.NumGoroutine()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := provider.Chat(ctx, []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	<-ch // read exactly one token, then abandon the channel
+	cancel()
+
+	// The stream goroutine must exit; wait for the count to return to baseline.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= baseline {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("stream goroutine leaked: goroutines=%d baseline=%d", runtime.NumGoroutine(), baseline)
+}
+
+// --- error body tests (P1-9) ---
+
+func TestOpenAIProvider_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"model not found"}}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	provider, err := llm.NewLLM(&config.LLMConfig{Provider: "openai", Model: "x", MaxTokens: 100, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err == nil {
+		t.Fatal("expected error from 400")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Errorf("error must include response body, got %v", err)
+	}
+}
+
+func TestClaudeProvider_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"context length exceeded"}}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	provider, err := llm.NewLLM(&config.LLMConfig{Provider: "claude", Model: "x", MaxTokens: 100, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err == nil {
+		t.Fatal("expected error from 400")
+	}
+	if !strings.Contains(err.Error(), "context length exceeded") {
+		t.Errorf("error must include response body, got %v", err)
+	}
+}
+
+func TestOllamaProvider_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"model 'foo' not found"}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	provider, err := llm.NewLLM(&config.LLMConfig{Provider: "ollama", Model: "foo", MaxTokens: 100, BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err == nil {
+		t.Fatal("expected error from 404")
+	}
+	if !strings.Contains(err.Error(), "model 'foo' not found") {
+		t.Errorf("error must include response body, got %v", err)
 	}
 }
 

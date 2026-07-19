@@ -66,11 +66,12 @@ func (p *ollamaProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		return nil, fmt.Errorf("ollama: do request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		msg := errorMessage(resp)
 		_ = resp.Body.Close()
 		return nil, &LLMError{
 			Provider:   "ollama",
 			StatusCode: resp.StatusCode,
-			Message:    http.StatusText(resp.StatusCode),
+			Message:    msg,
 		}
 	}
 
@@ -92,17 +93,19 @@ func (p *ollamaProvider) Chat(ctx context.Context, messages []Message, opts ...C
 				Done bool `json:"done"`
 			}
 			if err := json.Unmarshal([]byte(line), &payload); err != nil {
-				ch <- Token{Error: fmt.Errorf("ollama: parse line: %w", err)}
+				sendToken(ctx, ch, Token{Error: fmt.Errorf("ollama: parse line: %w", err)})
 				return
 			}
 			if payload.Done {
-				ch <- Token{Done: true}
+				sendToken(ctx, ch, Token{Done: true})
 				return
 			}
-			ch <- Token{Text: payload.Message.Content}
+			if !sendToken(ctx, ch, Token{Text: payload.Message.Content}) {
+				return
+			}
 		}
 		if err := scanner.Err(); err != nil {
-			ch <- Token{Error: fmt.Errorf("ollama: scan: %w", err)}
+			sendToken(ctx, ch, Token{Error: fmt.Errorf("ollama: scan: %w", err)})
 		}
 	}()
 

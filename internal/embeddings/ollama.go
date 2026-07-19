@@ -71,7 +71,7 @@ func (o *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 		return nil, &EmbedError{
 			Provider:   "ollama",
 			StatusCode: resp.StatusCode,
-			Message:    http.StatusText(resp.StatusCode),
+			Message:    errorMessage(resp),
 		}
 	}
 

@@ -100,11 +100,12 @@ func (p *claudeProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		return nil, fmt.Errorf("claude: do request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		msg := errorMessage(resp)
 		_ = resp.Body.Close()
 		return nil, &LLMError{
 			Provider:   "claude",
 			StatusCode: resp.StatusCode,
-			Message:    http.StatusText(resp.StatusCode),
+			Message:    msg,
 		}
 	}
 
@@ -132,13 +133,15 @@ func (p *claudeProvider) Chat(ctx context.Context, messages []Message, opts ...C
 						} `json:"delta"`
 					}
 					if err := json.Unmarshal([]byte(value), &payload); err != nil {
-						ch <- Token{Error: fmt.Errorf("claude: parse delta: %w", err)}
+						sendToken(ctx, ch, Token{Error: fmt.Errorf("claude: parse delta: %w", err)})
 						return
 					}
-					ch <- Token{Text: payload.Delta.Text}
+					if !sendToken(ctx, ch, Token{Text: payload.Delta.Text}) {
+						return
+					}
 
 				case "message_stop":
-					ch <- Token{Done: true}
+					sendToken(ctx, ch, Token{Done: true})
 					return
 
 				case "error":
@@ -148,16 +151,16 @@ func (p *claudeProvider) Chat(ctx context.Context, messages []Message, opts ...C
 						} `json:"error"`
 					}
 					if err := json.Unmarshal([]byte(value), &payload); err != nil {
-						ch <- Token{Error: fmt.Errorf("claude: parse error event: %w", err)}
+						sendToken(ctx, ch, Token{Error: fmt.Errorf("claude: parse error event: %w", err)})
 					} else {
-						ch <- Token{Error: fmt.Errorf("claude: %s", payload.Error.Message)}
+						sendToken(ctx, ch, Token{Error: fmt.Errorf("claude: %s", payload.Error.Message)})
 					}
 					return
 				}
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			ch <- Token{Error: fmt.Errorf("claude: scan: %w", err)}
+			sendToken(ctx, ch, Token{Error: fmt.Errorf("claude: scan: %w", err)})
 		}
 	}()
 

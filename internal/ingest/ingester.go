@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -97,10 +98,11 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	}
 
 	existing, err := ing.docs.GetByPath(ctx, path)
-	if err == nil {
-		if existing.SHA256 == sha && !opts.Force {
-			return Result{Path: path, Skipped: true}
-		}
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return Result{Path: path, Err: fmt.Errorf("ingest: lookup %s: %w", path, err)}
+	}
+	if existing != nil && existing.SHA256 == sha && !opts.Force {
+		return Result{Path: path, Skipped: true}
 	}
 
 	text, err := ing.readOrExtract(ctx, path, sha)

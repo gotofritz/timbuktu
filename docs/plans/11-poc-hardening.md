@@ -207,6 +207,13 @@ chunk; preview truncation of multi-byte text stays valid.
 
 ### 8. LLM stream goroutines can leak
 
+> **DONE (PR 7).** Archived to
+> `docs/archive/2026-07-19-1210-3e976ac-11-p1-8-9-10-stream-errors-notfound.md`.
+> Every channel send in the claude/openai/ollama stream loops goes through
+> `sendToken`, which selects on `ctx.Done()`; `RunAsk` runs retrieval and the
+> chat call under a cancellable context derived from `cmd.Context()`, cancelled
+> on return (Ctrl-C interrupts).
+
 Provider goroutines send on an unbuffered channel with no `select` on
 `ctx.Done()`. If the consumer stops reading early (as `RunAsk` does on a
 mid-stream error via `return` — it never drains), the goroutine blocks on send
@@ -223,6 +230,12 @@ runtime.NumGoroutine delta).
 
 ### 9. Provider HTTP errors discard the response body
 
+> **DONE (PR 7).** Archived to
+> `docs/archive/2026-07-19-1210-3e976ac-11-p1-8-9-10-stream-errors-notfound.md`.
+> Each LLM/embedding adapter reads up to ~2 KB of the error body into
+> `LLMError`/`EmbedError.Message` (via a package-local `errorMessage` helper),
+> falling back to the status text only when the body is empty.
+
 All five HTTP adapters map non-200 to `StatusText(code)` (e.g. literally
 "Bad Request"), throwing away the API's error message ("model not found",
 "context length exceeded", rate-limit details). Painful to debug.
@@ -233,6 +246,12 @@ All five HTTP adapters map non-200 to `StatusText(code)` (e.g. literally
 **Tests**: mock 400 with JSON error body → error string contains the body.
 
 ### 10. "Not found" conflated with real DB errors
+
+> **DONE (PR 7).** Archived to
+> `docs/archive/2026-07-19-1210-3e976ac-11-p1-8-9-10-stream-errors-notfound.md`.
+> `GetByPath`/`GetBySHA256` return `storage.ErrNotFound` (wrapping
+> `sql.ErrNoRows`); `IngestFile` and `RunDelete` branch with `errors.Is`, so a
+> transient DB error is surfaced instead of routing into create / "not found".
 
 `Ingester.IngestFile` and `RunDelete` treat *any* `GetByPath` error as "does
 not exist". A transient DB error during ingest routes into the create path
@@ -348,7 +367,7 @@ aspirational.
 | 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest ✅ done | — |
 | 5 | P0-6 hybrid MinScore + FTS5 query sanitizing ✅ done | — |
 | 6 | P1-7 UTF-8 chunking + P1-11 path normalization ✅ done | 1 |
-| 7 | P1-8 stream cancellation + P1-9 error bodies + P1-10 ErrNotFound | — |
+| 7 | P1-8 stream cancellation + P1-9 error bodies + P1-10 ErrNotFound ✅ done | — |
 | 8 | P1-12 doctor fixes + delete cache cleanup | — |
 | 9 | P2 cleanups + per-package coverage gate + perms hardening | 1–8 |
 

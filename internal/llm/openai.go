@@ -113,11 +113,12 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		return nil, fmt.Errorf("%s: do request: %w", p.name, err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		msg := errorMessage(resp)
 		_ = resp.Body.Close()
 		return nil, &LLMError{
 			Provider:   p.name,
 			StatusCode: resp.StatusCode,
-			Message:    http.StatusText(resp.StatusCode),
+			Message:    msg,
 		}
 	}
 
@@ -134,7 +135,7 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 				continue
 			}
 			if value == "[DONE]" {
-				ch <- Token{Done: true}
+				sendToken(ctx, ch, Token{Done: true})
 				return
 			}
 			var payload struct {
@@ -145,15 +146,17 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 				} `json:"choices"`
 			}
 			if err := json.Unmarshal([]byte(value), &payload); err != nil {
-				ch <- Token{Error: fmt.Errorf("%s: parse chunk: %w", p.name, err)}
+				sendToken(ctx, ch, Token{Error: fmt.Errorf("%s: parse chunk: %w", p.name, err)})
 				return
 			}
 			if len(payload.Choices) > 0 {
-				ch <- Token{Text: payload.Choices[0].Delta.Content}
+				if !sendToken(ctx, ch, Token{Text: payload.Choices[0].Delta.Content}) {
+					return
+				}
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			ch <- Token{Error: fmt.Errorf("%s: scan: %w", p.name, err)}
+			sendToken(ctx, ch, Token{Error: fmt.Errorf("%s: scan: %w", p.name, err)})
 		}
 	}()
 

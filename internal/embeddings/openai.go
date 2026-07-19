@@ -66,7 +66,7 @@ func (o *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, &EmbedError{
 			Provider:   "openai",
 			StatusCode: resp.StatusCode,
-			Message:    http.StatusText(resp.StatusCode),
+			Message:    errorMessage(resp),
 		}
 	}
 
