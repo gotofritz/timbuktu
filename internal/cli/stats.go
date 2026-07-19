@@ -20,7 +20,7 @@ func newStatsCmd() *cobra.Command {
 		Short: "Show knowledge base statistics",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := Config()
+			cfg := configFrom(cmd)
 			db, err := storage.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)

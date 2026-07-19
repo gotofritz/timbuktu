@@ -20,14 +20,14 @@ func newPreprocessCmd() *cobra.Command {
 		Use:   "preprocess <path>",
 		Short: "Extract text from a document and save to the extracted-text store",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
 			if dryRun {
 				return PreviewExtracted(path, os.Stdout)
 			}
 			dir := outputDir
 			if dir == "" {
-				dir = Config().Preprocess.OutputDir
+				dir = configFrom(cmd).Preprocess.OutputDir
 			}
 			savedPath, err := SaveExtracted(path, dir)
 			if err != nil {

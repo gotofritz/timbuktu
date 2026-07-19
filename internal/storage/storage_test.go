@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -551,6 +552,24 @@ func TestOpen_FilePath(t *testing.T) {
 		t.Fatalf("reopen file: %v", err)
 	}
 	_ = db2.Close()
+}
+
+func TestOpen_FilePrivatePerms(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/perms.sqlite"
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("Open file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat db: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("db perms = %o, want 600", fi.Mode().Perm())
+	}
 }
 
 func TestChunkRepo_BulkInsert_Empty(t *testing.T) {

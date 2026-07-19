@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/embeddings"
 	"github.com/gotofritz/timbuktu/internal/llm"
 	"github.com/gotofritz/timbuktu/internal/prompts"
@@ -38,7 +39,7 @@ func newAskCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			question := strings.Join(args, " ")
-			cfg := Config()
+			cfg := configFrom(cmd)
 
 			home, _ := os.UserHomeDir()
 			promptsRoot := filepath.Join(home, ".tbuk", "prompts")
@@ -89,6 +90,23 @@ func newAskCmd() *cobra.Command {
 	return cmd
 }
 
+// trimToTokenBudget drops trailing chunks once the cumulative approximate
+// token count would exceed budget. A non-positive budget disables trimming.
+// At least one chunk is always kept when any are present.
+func trimToTokenBudget(chunks []retrieval.RetrievedChunk, budget int) []retrieval.RetrievedChunk {
+	if budget <= 0 || len(chunks) == 0 {
+		return chunks
+	}
+	total := 0
+	for i, ch := range chunks {
+		total += chunking.CountTokens(ch.Text)
+		if total > budget && i > 0 {
+			return chunks[:i]
+		}
+	}
+	return chunks
+}
+
 // RunAsk is the testable core of the ask command. It runs retrieval and the
 // LLM call under a cancellable context derived from ctx, cancelled on return so
 // an abandoned stream goroutine is released (and Ctrl-C interrupts the call).
@@ -133,6 +151,7 @@ func RunAsk(
 	if err != nil {
 		return fmt.Errorf("retrieve: %w", err)
 	}
+	chunks = trimToTokenBudget(chunks, manifest.Retrieval.MaxTokens)
 
 	data := prompts.TemplateData{
 		Question:  question,

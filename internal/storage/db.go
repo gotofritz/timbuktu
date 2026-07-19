@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"os"
 
 	_ "modernc.org/sqlite"
 )
@@ -32,6 +33,13 @@ func Open(path string) (*DB, error) {
 	if err := RunMigrations(db); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if path != ":memory:" {
+		// Knowledge-base content is personal; keep the DB owner-only.
+		if err := os.Chmod(path, 0o600); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("storage.Open: chmod: %w", err)
+		}
 	}
 	return &DB{db: db}, nil
 }

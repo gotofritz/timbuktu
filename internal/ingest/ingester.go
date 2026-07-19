@@ -213,10 +213,10 @@ func (ing *Ingester) readOrExtract(ctx context.Context, path, sha string) (strin
 	if extractErr != nil {
 		return "", fmt.Errorf("ingest: auto-preprocess %s: %w", path, extractErr)
 	}
-	if err := os.MkdirAll(ing.extractedDir, 0o755); err != nil {
+	if err := os.MkdirAll(ing.extractedDir, 0o700); err != nil {
 		return "", fmt.Errorf("ingest: mkdir extractedDir: %w", err)
 	}
-	if err := os.WriteFile(extractedPath, []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(extractedPath, []byte(text), 0o600); err != nil {
 		return "", fmt.Errorf("ingest: save extracted: %w", err)
 	}
 	return text, nil

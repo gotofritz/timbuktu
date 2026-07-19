@@ -29,7 +29,7 @@ func newSearchCmd() *cobra.Command {
 			if format != "text" && format != "json" {
 				return fmt.Errorf("invalid format %q: must be text or json", format)
 			}
-			cfg := Config()
+			cfg := configFrom(cmd)
 			db, err := storage.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
@@ -96,7 +96,7 @@ func newFindCmd() *cobra.Command {
 				filters[parts[0]] = parts[1]
 			}
 
-			cfg := Config()
+			cfg := configFrom(cmd)
 			db, err := storage.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)

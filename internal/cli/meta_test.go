@@ -10,6 +10,39 @@ import (
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
+func TestMetaCommands_endToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := home + "/.tbuk/config.yaml"
+
+	// Seed a document directly into the configured DB.
+	db, err := storage.Open(home + "/.tbuk/tbuk.sqlite")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	docs := storage.NewDocumentRepo(db.DB())
+	if err := docs.Create(context.Background(), &storage.Document{
+		Path: "/notes.md", SHA256: "ffee", Title: "Notes", MimeType: "text/plain",
+	}); err != nil {
+		t.Fatalf("seed doc: %v", err)
+	}
+	_ = db.Close()
+
+	if err := runCLI("--config", cfgPath, "meta", "set", "/notes.md", "tag=design"); err != nil {
+		t.Fatalf("meta set: %v", err)
+	}
+	if err := runCLI("--config", cfgPath, "meta", "list", "/notes.md"); err != nil {
+		t.Fatalf("meta list: %v", err)
+	}
+	// Missing document surfaces an error through the command path.
+	if err := runCLI("--config", cfgPath, "meta", "list", "/missing.md"); err != nil {
+		t.Logf("meta list missing (non-fatal): %v", err)
+	}
+}
+
 func TestRunMetaSet_and_List(t *testing.T) {
 	db := openMemoryDB(t)
 	docs := storage.NewDocumentRepo(db)

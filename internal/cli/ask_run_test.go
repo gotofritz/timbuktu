@@ -179,6 +179,49 @@ func TestRunAsk_honorsExplicitTemperatureZero(t *testing.T) {
 	}
 }
 
+func TestRunAsk_trimsChunksToRetrievalMaxTokens(t *testing.T) {
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "qa")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// max_tokens budget 25; each chunk is 40 bytes ≈ 10 tokens (len/4), so
+	// only the first two chunks fit; the third must be dropped.
+	manifest := "name: qa\nretrieval:\n  top_k: 3\n  max_tokens: 25\noutput: text\n"
+	for name, content := range map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   "sys",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("qa")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	body := strings.Repeat("x", 40)
+	chunks := []retrieval.RetrievedChunk{
+		{Citation: "/a.md §0", Text: body},
+		{Citation: "/b.md §1", Text: body},
+		{Citation: "/c.md §2", Text: body},
+	}
+
+	var out bytes.Buffer
+	if err := cli.RunAsk(context.Background(), &out, mockRetrieve(chunks, nil), mockChat([]string{"ok"}, nil), tmpl, "q", nil, 0, false); err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "/a.md §0") || !strings.Contains(got, "/b.md §1") {
+		t.Errorf("want first two chunks kept, got: %q", got)
+	}
+	if strings.Contains(got, "/c.md §2") {
+		t.Errorf("third chunk should be dropped by max_tokens budget, got: %q", got)
+	}
+}
+
 func TestRunAsk_noStream(t *testing.T) {
 	tmpl := buildQATemplate(t)
 	var out bytes.Buffer

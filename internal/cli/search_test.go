@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +9,46 @@ import (
 	"unicode/utf8"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
+	"github.com/gotofritz/timbuktu/internal/storage"
 )
+
+func TestFindCommand_returnsResults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := home + "/.tbuk/config.yaml"
+
+	db, err := storage.Open(home + "/.tbuk/tbuk.sqlite")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	ctx := context.Background()
+	docs := storage.NewDocumentRepo(db.DB())
+	meta := storage.NewMetadataRepo(db.DB())
+	chunks := storage.NewChunkRepo(db.DB())
+	doc := &storage.Document{Path: "/design.md", SHA256: "d1", Title: "Design", MimeType: "text/plain"}
+	if err := docs.Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	if err := meta.Set(ctx, doc.ID, "tag", "design"); err != nil {
+		t.Fatalf("set meta: %v", err)
+	}
+	if err := chunks.BulkInsert(ctx, []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: strings.Repeat("word ", 40), TokenCount: 10},
+	}); err != nil {
+		t.Fatalf("insert chunk: %v", err)
+	}
+	_ = db.Close()
+
+	if err := runCLI("--config", cfgPath, "find", "tag=design"); err != nil {
+		t.Fatalf("find text: %v", err)
+	}
+	if err := runCLI("--config", cfgPath, "find", "tag=design", "--format", "json", "--limit", "1"); err != nil {
+		t.Fatalf("find json: %v", err)
+	}
+}
 
 func TestSearchCommand_missingArg(t *testing.T) {
 	err := runCLI("search")

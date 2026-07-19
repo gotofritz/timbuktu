@@ -38,8 +38,8 @@ func makeDoctorRunner(client *http.Client) func(*cobra.Command, []string) error 
 		if client == nil {
 			client = &http.Client{Timeout: 3 * time.Second}
 		}
-		cfg := Config()
-		cfgPath := cfgFile
+		cfg := configFrom(cmd)
+		cfgPath := configPathFrom(cmd)
 		if cfgPath == "" {
 			cfgPath = config.DefaultPath()
 		}

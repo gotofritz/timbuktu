@@ -27,7 +27,7 @@ func newMetaSetCmd() *cobra.Command {
 		Short: "Set metadata key=value pairs on a document",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			docs, meta, closeDB, err := openMetaRepos()
+			docs, meta, closeDB, err := openMetaRepos(cmd)
 			if err != nil {
 				return err
 			}
@@ -43,7 +43,7 @@ func newMetaListCmd() *cobra.Command {
 		Short: "List all metadata for a document",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			docs, meta, closeDB, err := openMetaRepos()
+			docs, meta, closeDB, err := openMetaRepos(cmd)
 			if err != nil {
 				return err
 			}
@@ -55,8 +55,8 @@ func newMetaListCmd() *cobra.Command {
 
 // openMetaRepos opens the configured database and returns the repos plus a
 // close function.
-func openMetaRepos() (*storage.DocumentRepo, *storage.MetadataRepo, func(), error) {
-	cfg := Config()
+func openMetaRepos(cmd *cobra.Command) (*storage.DocumentRepo, *storage.MetadataRepo, func(), error) {
+	cfg := configFrom(cmd)
 	db, err := storage.Open(cfg.Database.Path)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open database: %w", err)

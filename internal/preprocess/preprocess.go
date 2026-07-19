@@ -39,11 +39,11 @@ func ExtractToFile(ctx context.Context, srcPath, outputDir string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("preprocess.ExtractToFile: %w", err)
 	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o700); err != nil {
 		return "", fmt.Errorf("preprocess.ExtractToFile mkdir: %w", err)
 	}
 	outPath := filepath.Join(outputDir, sha+".txt")
-	if err := os.WriteFile(outPath, []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(outPath, []byte(text), 0o600); err != nil {
 		return "", fmt.Errorf("preprocess.ExtractToFile write: %w", err)
 	}
 	return outPath, nil
