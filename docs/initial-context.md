@@ -6,24 +6,6 @@ Module: `github.com/gotofritz/timbuktu`
 
 ---
 
-## Subplan Status
-
-| # | Area | State |
-|---|------|-------|
-| 01 | Foundation — CLI skeleton, config, `tbuk init` | ✅ done |
-| 02 | Storage — SQLite schema, migrations, typed repos, FTS5 | ✅ done |
-| 03 | Preprocessing — text extraction, chunking, SHA256 | ✅ done |
-| 04 | Embeddings — `Embedder` interface, llama/ollama/openai adapters | ✅ done |
-| 05 | LLM Providers — `LLM` interface, provider adapters | ✅ done |
-| 06 | Ingestion — SHA256 dedup, chunk + embed pipeline | ✅ done |
-| 07 | Search — vector, FTS5 keyword, hybrid | ✅ done |
-| 08 | RAG — retrieval pipeline, prompt templates, streaming | ✅ done |
-| 09 | Management — `tbuk stats`, delete, update | ✅ done |
-| 10 | User Guide — README, docs | ✅ done |
-| 11 | POC Hardening — correctness/requirement/hygiene gaps (P0–P2) | ✅ done |
-
----
-
 ## Architecture
 
 ```

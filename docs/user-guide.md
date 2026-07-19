@@ -147,9 +147,14 @@ personal knowledge base from your own files.
 
 This guide assumes:
 
-1. **Timbuktu is installed.** Run `tbuk version` — it should print a version
-   number. If you get "command not found", see the README for installation
-   instructions.
+1. **Timbuktu is installed.** The easiest way is to grab a pre-built binary
+   from the [Releases page](https://github.com/gotofritz/timbuktu/releases):
+   download the archive for your OS/architecture, extract the `tbuk` binary,
+   and move it onto your `PATH` (e.g. `/usr/local/bin` on macOS/Linux). No Go
+   toolchain is needed — the binary is self-contained. If you prefer to build
+   from source, see the [README](../README.md#install). Then run `tbuk version`
+   — it should print a version number. If you get "command not found", the
+   binary is not on your `PATH`.
 
 2. **An AI backend is available.** Timbuktu needs two things: an *embedding*
    model (to fingerprint your text) and a *chat* model (to write answers). The

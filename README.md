@@ -7,15 +7,47 @@ Local-first CLI knowledge base for indexing and querying personal documents with
 See [User Guide](docs/user-guide.md) for a full walkthrough — what RAG is,
 how to index your documents, and how to query your knowledge base.
 
-## Requirements
+## Install
+
+### Pre-built binary (recommended)
+
+Each tagged release publishes standalone binaries for Linux, macOS, and Windows
+(amd64 and arm64) on the [Releases page](https://github.com/gotofritz/timbuktu/releases).
+No Go toolchain required — the binary is statically linked (pure-Go SQLite).
+
+Download the archive for your platform, extract `tbuk`, and put it on your
+`PATH`. For example, on macOS/Linux:
+
+```bash
+# pick the asset matching your OS/arch from the latest release
+VERSION=v0.1.0          # replace with the latest tag
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # linux or darwin
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+
+curl -sSL -o tbuk.tar.gz \
+  "https://github.com/gotofritz/timbuktu/releases/download/${VERSION}/tbuk_${VERSION}_${OS}_${ARCH}.tar.gz"
+tar -xzf tbuk.tar.gz tbuk
+sudo mv tbuk /usr/local/bin/     # or any dir on your PATH
+tbuk version
+```
+
+On Windows, download the `_windows_amd64.zip` asset, unzip it, and move
+`tbuk.exe` to a folder on your `PATH`.
+
+### From source
+
+Requires:
 
 - Go 1.25+
 - `golangci-lint` v2 (`go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`)
 
+```bash
+make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin
+```
+
 ## Quick start
 
 ```bash
-make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin
 tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
 tbuk doctor              # check config, database, LLM connectivity, and extractors
