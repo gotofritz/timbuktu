@@ -131,6 +131,17 @@ text extraction and embedding run first, then the old and new chunks are
 swapped in a single transaction. If embedding fails midway (e.g. the provider
 is down), the previous index is left intact and searchable rather than wiped.
 
+### Paths & Unicode
+
+`tbuk ingest`, `update`, and `delete` resolve their path argument to an
+absolute, cleaned form, so a document ingested as `docs/a.md` is deleted just
+the same via `./docs/a.md` or its full absolute path — no double-indexing under
+different spellings. (Documents indexed before this behaviour existed are keyed
+by their original relative path; re-ingest to re-key them absolutely.)
+
+Chunk and search-preview boundaries snap to UTF-8 rune starts, so non-ASCII
+text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

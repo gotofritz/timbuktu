@@ -122,6 +122,12 @@ func (c *Chunker) Split(text string) []Chunk
 
 Token approximation: `CountTokens(s) = len(s) / 4`.
 Boundary search: walks backwards from target end looking for `. `, `\n\n`, `! `, `? `.
+Boundary and overlap byte offsets snap back to a UTF-8 rune start
+(`snapRuneStart`) so non-ASCII text is never sliced mid-rune.
+
+CLI paths (`ingest`/`update`/`delete`) are resolved to absolute+cleaned form
+via `cli.NormalizePath` (`filepath.Abs`) so a document is keyed by one
+canonical path regardless of the spelling used.
 
 ---
 

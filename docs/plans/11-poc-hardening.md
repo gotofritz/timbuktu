@@ -188,6 +188,11 @@ returns results/empty without error; closed-DB error propagates.
 
 ### 7. Chunker can split multi-byte UTF-8 runes
 
+> **DONE (PR 6).** Archived to
+> `docs/archive/2026-07-19-0000-0b3ae32-11-p1-7-11-utf8-paths.md`. `Split` snaps
+> boundary and overlap offsets to a rune start (`snapRuneStart`); the search
+> preview truncates on runes via `TruncatePreview`.
+
 `Chunker.Split` slices at byte offsets (`sizeBytes`, `overlapBytes`,
 `findBoundary` fallback `maxEnd`). For non-ASCII text (accents, CJK), chunk
 boundaries can land mid-rune, producing invalid UTF-8 that is stored, embedded,
@@ -241,6 +246,11 @@ wrapping `sql.ErrNoRows`); callers branch with `errors.Is`.
 not-found/create.
 
 ### 11. Paths are not normalized
+
+> **DONE (PR 6).** Archived to
+> `docs/archive/2026-07-19-0000-0b3ae32-11-p1-7-11-utf8-paths.md`. `NormalizePath`
+> (`filepath.Abs`) is applied at the ingest/update/delete boundary; existing
+> relative-path rows won't match (POC-acceptable) — re-ingest re-keys them.
 
 Documents are keyed by the path string exactly as typed. `tbuk ingest docs/`
 then `tbuk delete ./docs/a.md` or an absolute path misses; the same file can
@@ -337,7 +347,7 @@ aspirational.
 | 3 | P0-3 automatic metadata + `tbuk meta` commands ✅ done | — |
 | 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest ✅ done | — |
 | 5 | P0-6 hybrid MinScore + FTS5 query sanitizing ✅ done | — |
-| 6 | P1-7 UTF-8 chunking + P1-11 path normalization | 1 |
+| 6 | P1-7 UTF-8 chunking + P1-11 path normalization ✅ done | 1 |
 | 7 | P1-8 stream cancellation + P1-9 error bodies + P1-10 ErrNotFound | — |
 | 8 | P1-12 doctor fixes + delete cache cleanup | — |
 | 9 | P2 cleanups + per-package coverage gate + perms hardening | 1–8 |
