@@ -73,7 +73,6 @@ func TestRunUpdate_unchanged(t *testing.T) {
 		&chunking.Chunker{Size: 100, Overlap: 10},
 		&stubEmbedder{},
 		t.TempDir(),
-		nil,
 	)
 	ctx := context.Background()
 	res := ing.IngestFile(ctx, filePath, ingest.Options{})
@@ -111,7 +110,6 @@ func TestRunUpdate_changed(t *testing.T) {
 		&chunking.Chunker{Size: 100, Overlap: 10},
 		&stubEmbedder{},
 		extractDir,
-		nil,
 	)
 	ctx := context.Background()
 
@@ -155,7 +153,6 @@ func TestRunUpdate_force(t *testing.T) {
 		&chunking.Chunker{Size: 100, Overlap: 10},
 		&stubEmbedder{},
 		t.TempDir(),
-		nil,
 	)
 	ctx := context.Background()
 

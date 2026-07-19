@@ -210,7 +210,7 @@ localhost:8080 — or a remote `http://` host, unencrypted across the network.
 loud warn on — non-HTTPS non-loopback `base_url` when an API key is attached.
 Do alongside the issue 10 fix, which removes the most likely trigger.
 
-### 12. [PROD] Single-file `tbuk ingest` succeeds silent — user guide shows output that doesn't exist (orig #43)
+### 12. [PROD] Single-file `tbuk ingest` succeeds silent — user guide shows output that doesn't exist (orig #43) — ✅ DONE
 
 **Problem:** Single file: `PrintFileResult` prints nothing on success; dedup
 skip prints nothing without `--verbose`. Guide's first ingest walkthrough

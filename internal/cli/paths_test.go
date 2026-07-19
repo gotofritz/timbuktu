@@ -80,7 +80,6 @@ func TestRunUpdate_storesAbsolutePath(t *testing.T) {
 		&chunking.Chunker{Size: 100, Overlap: 10},
 		&stubEmbedder{},
 		t.TempDir(),
-		nil,
 	)
 	ctx := context.Background()
 

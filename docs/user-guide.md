@@ -408,9 +408,9 @@ Now index it.
 tbuk preprocess ~/notes/first-note.md
 ```
 
-This extracts plain text from the file, splits it into chunks, and saves the
-result to `~/.tbuk/extracted/`. It does **not** talk to the AI model yet — it
-is just preparing the text.
+This extracts plain text from the file and saves the result to
+`~/.tbuk/extracted/`. It does **not** chunk, embed, or talk to the AI model
+yet — it is just preparing the text (chunking happens during ingest).
 
 Use `--dry-run` to see what would happen without saving anything:
 
@@ -425,14 +425,11 @@ tbuk ingest ~/notes/first-note.md
 ```
 
 This reads the extracted text, sends each chunk to llama.cpp to compute its
-embedding, and stores everything in the database. You will see output like:
+embedding, and stores everything in the database. You will see a one-line
+result:
 
 ```
-Ingesting ~/notes/first-note.md
-  chunks: 1
-  embedded: 1
-  stored: 1
-Done.
+/home/you/notes/first-note.md → 1 chunks embedded
 ```
 
 ### Shortcut: skip the preprocess step
@@ -454,7 +451,7 @@ If you run `tbuk ingest` on the same file twice without changing it, the second
 run does nothing:
 
 ```
-Skipped ~/notes/first-note.md (unchanged)
+/home/you/notes/first-note.md → skipped (unchanged)
 ```
 
 The file's content is fingerprinted; only changed files are re-indexed.
