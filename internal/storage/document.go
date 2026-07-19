@@ -3,9 +3,15 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrNotFound is returned by lookups (GetByPath, GetBySHA256) when no row
+// matches. It wraps sql.ErrNoRows so callers can distinguish a genuine
+// "does not exist" from a transient DB error with errors.Is.
+var ErrNotFound = fmt.Errorf("storage: document not found: %w", sql.ErrNoRows)
 
 // Document represents a source file tracked in the database.
 type Document struct {
@@ -106,6 +112,9 @@ func scanDocument(row *sql.Row) (*Document, error) {
 	var createdAt, updatedAt string
 	err := row.Scan(&d.ID, &d.Path, &d.SHA256, &d.Title, &d.MimeType, &createdAt, &updatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("DocumentRepo scan: %w", err)
 	}
 	d.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)

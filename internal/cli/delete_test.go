@@ -73,6 +73,23 @@ func TestRunDelete_notFound(t *testing.T) {
 	}
 }
 
+// A real DB error must not be reported as "document not found" (P1-10).
+func TestRunDelete_dbError_notReportedAsNotFound(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	ctx := context.Background()
+	_ = db.Close()
+
+	var out bytes.Buffer
+	err := cli.RunDelete(ctx, &out, db, docs, "/tmp/whatever.md")
+	if err == nil {
+		t.Fatal("expected error from closed DB")
+	}
+	if strings.Contains(err.Error(), "document not found") {
+		t.Errorf("real DB error must not be reported as not-found, got: %v", err)
+	}
+}
+
 func TestRunDelete_showsChunkCount(t *testing.T) {
 	db := openMemoryDB(t)
 	docs := storage.NewDocumentRepo(db)

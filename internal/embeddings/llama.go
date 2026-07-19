@@ -61,7 +61,7 @@ func (l *llamaEmbedder) embedOne(ctx context.Context, text string) ([]float32, e
 		return nil, &EmbedError{
 			Provider:   "llama",
 			StatusCode: resp.StatusCode,
-			Message:    http.StatusText(resp.StatusCode),
+			Message:    errorMessage(resp),
 		}
 	}
 

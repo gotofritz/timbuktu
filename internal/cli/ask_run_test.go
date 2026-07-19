@@ -82,6 +82,7 @@ func TestRunAsk_streamsOutput(t *testing.T) {
 	var out bytes.Buffer
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		mockChat([]string{"Hello", " world"}, nil),
@@ -117,6 +118,7 @@ func TestRunAsk_forwardsManifestCallOptions(t *testing.T) {
 	var got []llm.CallOptions
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		capturingChat(&got),
@@ -166,7 +168,7 @@ func TestRunAsk_honorsExplicitTemperatureZero(t *testing.T) {
 
 	var out bytes.Buffer
 	var got []llm.CallOptions
-	if err := cli.RunAsk(&out, mockRetrieve(nil, nil), capturingChat(&got), tmpl, "q", nil, 0, false); err != nil {
+	if err := cli.RunAsk(context.Background(), &out, mockRetrieve(nil, nil), capturingChat(&got), tmpl, "q", nil, 0, false); err != nil {
 		t.Fatalf("RunAsk: %v", err)
 	}
 	if len(got) != 1 || got[0].Temperature == nil {
@@ -182,6 +184,7 @@ func TestRunAsk_noStream(t *testing.T) {
 	var out bytes.Buffer
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		mockChat([]string{"buffered"}, nil),
@@ -207,6 +210,7 @@ func TestRunAsk_printsCitations(t *testing.T) {
 	}
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(chunks, nil),
 		mockChat([]string{"answer"}, nil),
@@ -233,6 +237,7 @@ func TestRunAsk_badVarFormat(t *testing.T) {
 	var out bytes.Buffer
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		mockChat(nil, nil),
@@ -256,6 +261,7 @@ func TestRunAsk_retrieveError(t *testing.T) {
 	sentinel := errors.New("search broken")
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, sentinel),
 		mockChat(nil, nil),
@@ -276,6 +282,7 @@ func TestRunAsk_chatError(t *testing.T) {
 	sentinel := errors.New("LLM down")
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		mockChat(nil, sentinel),
@@ -303,6 +310,7 @@ func TestRunAsk_streamError(t *testing.T) {
 	}
 
 	err := cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		chatWithError,
@@ -314,6 +322,31 @@ func TestRunAsk_streamError(t *testing.T) {
 	)
 	if !errors.Is(err, sentinel) {
 		t.Errorf("want sentinel error, got: %v", err)
+	}
+}
+
+// RunAsk must run the LLM call under a cancellable context and cancel it when
+// it returns, so an abandoned stream goroutine is released (P1-8).
+func TestRunAsk_cancelsStreamContextOnExit(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out bytes.Buffer
+	var captured context.Context
+
+	chat := func(ctx context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		captured = ctx
+		ch := make(chan llm.Token, 1)
+		ch <- llm.Token{Error: errors.New("boom")} // force early return mid-stream
+		close(ch)
+		return ch, nil
+	}
+
+	_ = cli.RunAsk(context.Background(), &out, mockRetrieve(nil, nil), chat, tmpl, "q", nil, 0, false)
+
+	if captured == nil {
+		t.Fatal("chat was not called")
+	}
+	if captured.Err() == nil {
+		t.Error("expected RunAsk to cancel the stream context on return")
 	}
 }
 
@@ -345,6 +378,7 @@ variables:
 
 	var out bytes.Buffer
 	_ = cli.RunAsk(
+		context.Background(),
 		&out,
 		mockRetrieve(nil, nil),
 		mockChat([]string{"ok"}, nil),

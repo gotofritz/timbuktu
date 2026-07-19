@@ -3,6 +3,7 @@ package storage_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -497,8 +498,15 @@ func TestDocumentRepo_GetByPath_NotFound(t *testing.T) {
 	db := openTestDB(t)
 	repo := storage.NewDocumentRepo(db.DB())
 
-	if _, err := repo.GetByPath(ctx, "/no/such/path"); err == nil {
+	_, err := repo.GetByPath(ctx, "/no/such/path")
+	if err == nil {
 		t.Fatal("expected error for missing path")
+	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("want errors.Is(err, ErrNotFound), got %v", err)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("ErrNotFound must wrap sql.ErrNoRows, got %v", err)
 	}
 }
 
@@ -507,8 +515,12 @@ func TestDocumentRepo_GetBySHA256_NotFound(t *testing.T) {
 	db := openTestDB(t)
 	repo := storage.NewDocumentRepo(db.DB())
 
-	if _, err := repo.GetBySHA256(ctx, "nonexistent"); err == nil {
+	_, err := repo.GetBySHA256(ctx, "nonexistent")
+	if err == nil {
 		t.Fatal("expected error for missing sha256")
+	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("want errors.Is(err, ErrNotFound), got %v", err)
 	}
 }
 

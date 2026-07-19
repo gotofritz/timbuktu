@@ -3,8 +3,10 @@ package embeddings_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/config"
@@ -368,6 +370,75 @@ func TestOpenAIEmbedder_missingKey(t *testing.T) {
 	_, err := embeddings.NewEmbedder(cfg)
 	if err == nil {
 		t.Fatal("expected error when OPENAI_API_KEY is missing")
+	}
+}
+
+// --- error body tests (P1-9) ---
+
+func TestOpenAIEmbedder_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"input too long"}}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "openai", Model: "m", BaseURL: srv.URL, Dimension: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	_, err = emb.Embed(context.Background(), []string{"hi"})
+	if err == nil {
+		t.Fatal("expected error from 400")
+	}
+	if !strings.Contains(err.Error(), "input too long") {
+		t.Errorf("error must include response body, got %v", err)
+	}
+}
+
+func TestLlamaEmbedder_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, "model still loading") //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "llama", BaseURL: srv.URL, Dimension: 3,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	_, err = emb.Embed(context.Background(), []string{"hi"})
+	if err == nil {
+		t.Fatal("expected error from 503")
+	}
+	if !strings.Contains(err.Error(), "model still loading") {
+		t.Errorf("error must include response body, got %v", err)
+	}
+}
+
+func TestOllamaEmbedder_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"model not found"}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "ollama", Model: "m", BaseURL: srv.URL, Dimension: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	_, err = emb.Embed(context.Background(), []string{"hi"})
+	if err == nil {
+		t.Fatal("expected error from 404")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Errorf("error must include response body, got %v", err)
 	}
 }
 

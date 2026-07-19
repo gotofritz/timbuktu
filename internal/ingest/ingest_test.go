@@ -97,6 +97,29 @@ func writeExtractedFile(t *testing.T, extractedDir, sha, text string) {
 
 // ── tests ────────────────────────────────────────────────────────────────────
 
+// A transient DB error during the initial lookup must surface as the real
+// error, not be swallowed into the "new document" create path (P1-10).
+func TestIngester_lookupError_notMaskedAsCreate(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, &mockExtractor{text: "hi"}, emb, extractedDir)
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "doc.md", "# Hello")
+
+	// Close the DB so GetByPath returns a real error (not ErrNotFound).
+	_ = db.Close()
+
+	res := ing.IngestFile(context.Background(), path, ingest.Options{})
+	if res.Err == nil {
+		t.Fatal("expected error from closed DB, got nil")
+	}
+	if !strings.Contains(res.Err.Error(), "lookup") {
+		t.Errorf("want lookup error surfaced, got %v", res.Err)
+	}
+}
+
 func TestIngester_newFile(t *testing.T) {
 	db := openTestDB(t)
 	extractedDir := t.TempDir()

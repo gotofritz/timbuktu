@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,7 +38,10 @@ func newDeleteCmd() *cobra.Command {
 				}
 				doc, lookupErr := docs.GetByPath(cmd.Context(), path)
 				if lookupErr != nil {
-					return fmt.Errorf("document not found: %s", path)
+					if errors.Is(lookupErr, storage.ErrNotFound) {
+						return fmt.Errorf("document not found: %s", path)
+					}
+					return fmt.Errorf("look up %s: %w", path, lookupErr)
 				}
 				var n int
 				_ = sqlDB.QueryRowContext(cmd.Context(), `SELECT COUNT(*) FROM chunks WHERE document_id=?`, doc.ID).Scan(&n)
@@ -67,7 +71,10 @@ func RunDelete(ctx context.Context, out io.Writer, db *sql.DB, docs *storage.Doc
 
 	doc, err := docs.GetByPath(ctx, path)
 	if err != nil {
-		return fmt.Errorf("document not found: %s", path)
+		if errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("document not found: %s", path)
+		}
+		return fmt.Errorf("look up %s: %w", path, err)
 	}
 
 	var chunkCount int
