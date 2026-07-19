@@ -47,6 +47,19 @@ func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]Se
 		return fused[i].rrf > fused[j].rrf
 	})
 
+	// Apply MinScore to the fused RRF scores. Note these are RRF sums
+	// (1/(k+rank) across legs), not cosine values, so a hybrid MinScore is on a
+	// different scale from vector search.
+	if opts.MinScore > 0 {
+		kept := make([]*entry, 0, len(fused))
+		for _, e := range fused {
+			if e.rrf >= opts.MinScore {
+				kept = append(kept, e)
+			}
+		}
+		fused = kept
+	}
+
 	k := opts.topK()
 	if k > len(fused) {
 		k = len(fused)

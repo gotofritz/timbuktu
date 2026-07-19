@@ -218,6 +218,44 @@ func TestKeywordSearch_emptyDB(t *testing.T) {
 	}
 }
 
+func TestKeywordSearch_sanitizesSpecialChars(t *testing.T) {
+	db := openTestDB(t)
+	docID := seedDoc(t, db, "/l.txt", "Doc L")
+	seedChunk(t, db, docID, 0, "uses JWT tokens", nil)
+
+	s := search.New(db, nil)
+
+	// Raw FTS5 syntax operators/unbalanced parens/quotes previously errored and
+	// were swallowed to nil. After sanitizing, terms become quoted phrases so
+	// the query is always valid FTS5.
+	for _, q := range []string{`JWT`, `JWT!`, `foo AND (`, `"unterminated`, `NOT OR`, ``} {
+		if _, err := s.Keyword(context.Background(), q, search.Options{TopK: 5}); err != nil {
+			t.Errorf("query %q: want no error, got %v", q, err)
+		}
+	}
+
+	// A special-char query still matches the underlying term after sanitizing.
+	results, err := s.Keyword(context.Background(), `JWT!`, search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error(`want "JWT!" to match "JWT" after sanitizing`)
+	}
+}
+
+func TestKeywordSearch_dbErrorPropagates(t *testing.T) {
+	db := openTestDB(t)
+	docID := seedDoc(t, db, "/m.txt", "Doc M")
+	seedChunk(t, db, docID, 0, "content", nil)
+	_ = db.Close() // force a real query error
+
+	s := search.New(db, nil)
+	if _, err := s.Keyword(context.Background(), "content", search.Options{TopK: 5}); err == nil {
+		t.Fatal("want error from closed DB, got nil")
+	}
+}
+
 // ── Metadata Search ────────────────────────────────────────────────────────────
 
 func TestMetadataSearch_singleFilter(t *testing.T) {
@@ -319,6 +357,33 @@ func TestHybridSearch_combinesResults(t *testing.T) {
 	// chunk 0 ranked highest in both — should be first
 	if results[0].ChunkIndex != 0 {
 		t.Errorf("want chunk 0 first (highest combined rank), got chunk %d", results[0].ChunkIndex)
+	}
+}
+
+func TestHybridSearch_respectsMinScore(t *testing.T) {
+	db := openTestDB(t)
+	docID := seedDoc(t, db, "/n.txt", "Doc N")
+
+	// chunk 0: matches both legs (vector + keyword) → highest RRF (~2/61)
+	seedChunk(t, db, docID, 0, "authentication JWT token RS256 security", []float32{1, 0, 0})
+	// chunk 1: keyword-only match → single-leg RRF (≤ 1/61)
+	seedChunk(t, db, docID, 1, "JWT configuration setting", nil)
+	// chunk 2: vector-only match → single-leg RRF (≤ 1/61)
+	seedChunk(t, db, docID, 2, "unrelated text about cars", []float32{1, 0, 0})
+
+	emb := &stubEmbedder{vec: []float32{1, 0, 0}, dim: 3}
+	s := search.New(db, emb)
+
+	// MinScore between a two-leg RRF (~0.0325) and a one-leg RRF (~0.0164).
+	results, err := s.Hybrid(context.Background(), "JWT authentication", search.Options{TopK: 5, MinScore: 0.02})
+	if err != nil {
+		t.Fatalf("Hybrid: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result above MinScore, got %d", len(results))
+	}
+	if results[0].ChunkIndex != 0 {
+		t.Errorf("want chunk 0 (two-leg match), got chunk %d", results[0].ChunkIndex)
 	}
 }
 

@@ -263,7 +263,7 @@ type Searcher struct { /* db, embedder */ }
 
 func New(db *sql.DB, emb embeddings.Embedder) *Searcher
 func (s *Searcher) Vector(ctx, query, opts)   ([]SearchResult, error) // cosine, full table scan
-func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25
+func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25 (query sanitized to quoted phrases)
 func (s *Searcher) Metadata(ctx, filters)     ([]SearchResult, error) // AND-joined metadata keys
 func (s *Searcher) Hybrid(ctx, query, opts)   ([]SearchResult, error) // RRF k=60 over vector+keyword
 func CheckFTS5(db *sql.DB) error                                       // probes chunks_fts index
@@ -271,6 +271,10 @@ func CheckFTS5(db *sql.DB) error                                       // probes
 
 Vector: full table scan acceptable for < 100k chunks; swap sqlite-vec later without interface change.
 Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK then fuses.
+`Options.MinScore` filters the fused RRF sums (a different scale from vector cosine),
+applied before truncating to TopK.
+Keyword: user input is sanitized for FTS5 — each whitespace-separated term becomes a
+double-quoted phrase, neutralizing operators/special chars; real query errors propagate.
 
 ---
 

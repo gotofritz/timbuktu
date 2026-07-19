@@ -2,10 +2,17 @@ package search
 
 import (
 	"context"
+	"fmt"
+	"strings"
 )
 
 // Keyword runs an FTS5 BM25 search and returns top-K results.
 func (s *Searcher) Keyword(ctx context.Context, query string, opts Options) ([]SearchResult, error) {
+	match := sanitizeFTS5Query(query)
+	if match == "" {
+		return nil, nil
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, c.document_id, c.chunk_index, c.text,
 		       bm25(chunks_fts) AS bm25score,
@@ -15,11 +22,9 @@ func (s *Searcher) Keyword(ctx context.Context, query string, opts Options) ([]S
 		JOIN documents d ON d.id = c.document_id
 		WHERE chunks_fts MATCH ?
 		ORDER BY bm25score
-		LIMIT ?`, query, opts.topK())
+		LIMIT ?`, match, opts.topK())
 	if err != nil {
-		// FTS5 returns an error for no-match queries with special tokens;
-		// treat as empty result set rather than propagating.
-		return nil, nil //nolint:nilerr
+		return nil, fmt.Errorf("keyword search: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -35,4 +40,17 @@ func (s *Searcher) Keyword(ctx context.Context, query string, opts Options) ([]S
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// sanitizeFTS5Query neutralises FTS5 operators so arbitrary user input is a
+// valid MATCH expression: each whitespace-separated term becomes a
+// double-quoted phrase (embedded quotes doubled). Space-separated phrases are
+// implicitly AND-combined by FTS5. Returns "" for input with no terms.
+func sanitizeFTS5Query(query string) string {
+	fields := strings.Fields(query)
+	quoted := make([]string, 0, len(fields))
+	for _, f := range fields {
+		quoted = append(quoted, `"`+strings.ReplaceAll(f, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, " ")
 }

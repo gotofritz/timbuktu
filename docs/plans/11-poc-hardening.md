@@ -158,6 +158,12 @@ intact and searchable; success path replaces atomically.
 
 ### 6. Hybrid search ignores `MinScore`; keyword search swallows all errors
 
+> **DONE (PR 5).** Archived to
+> `docs/archive/11-p0-6-hybrid-minscore-fts5.md`. `Hybrid` filters the fused
+> RRF scores by `opts.MinScore` before truncating to TopK; `Keyword` sanitizes
+> user input into double-quoted FTS5 phrases (via `sanitizeFTS5Query`) and
+> propagates real query errors instead of swallowing them with `nilerr`.
+
 - `Hybrid` runs both legs with `MinScore: 0` and never filters the fused
   results, so `tbuk search --min-score 0.3` (default mode: hybrid) silently
   ignores the flag.
@@ -330,7 +336,7 @@ aspirational.
 | 2 | P0-2 llama LLM provider + docs alignment (P1-13) ✅ done | — |
 | 3 | P0-3 automatic metadata + `tbuk meta` commands ✅ done | — |
 | 4 | P0-4 manifest CallOptions + P0-5 transactional re-ingest ✅ done | — |
-| 5 | P0-6 hybrid MinScore + FTS5 query sanitizing | — |
+| 5 | P0-6 hybrid MinScore + FTS5 query sanitizing ✅ done | — |
 | 6 | P1-7 UTF-8 chunking + P1-11 path normalization | 1 |
 | 7 | P1-8 stream cancellation + P1-9 error bodies + P1-10 ErrNotFound | — |
 | 8 | P1-12 doctor fixes + delete cache cleanup | — |
