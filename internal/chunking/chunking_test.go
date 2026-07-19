@@ -3,6 +3,7 @@ package chunking_test
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
@@ -186,6 +187,43 @@ func TestChunker_boundary_falls_back_to_maxEnd_when_no_separator(t *testing.T) {
 	if chunks[0].EndByte != 3200 {
 		t.Errorf("first chunk EndByte = %d, want 3200 (maxEnd fallback)",
 			chunks[0].EndByte)
+	}
+}
+
+func TestChunker_nonpositive_size_does_not_hang(t *testing.T) {
+	// Size <= 0 (e.g. a hand-edited config) previously made Split loop forever
+	// appending empty chunks. It must terminate and return the whole text as a
+	// single chunk instead.
+	cases := []struct {
+		name string
+		size int
+	}{
+		{"zero", 0},
+		{"negative", -5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text := "One sentence. Two sentence. Three sentence."
+			c := &chunking.Chunker{Size: tc.size, Overlap: 100}
+
+			done := make(chan []chunking.Chunk, 1)
+			go func() { done <- c.Split(text) }()
+
+			select {
+			case chunks := <-done:
+				if len(chunks) != 1 {
+					t.Fatalf("got %d chunks, want 1", len(chunks))
+				}
+				if chunks[0].Text != text {
+					t.Errorf("Text = %q, want %q", chunks[0].Text, text)
+				}
+				if chunks[0].EndByte != len(text) {
+					t.Errorf("EndByte = %d, want %d", chunks[0].EndByte, len(text))
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Split did not terminate within 2s (infinite loop)")
+			}
+		})
 	}
 }
 

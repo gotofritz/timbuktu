@@ -34,6 +34,21 @@ func (c *Chunker) Split(text string) []Chunk {
 		return nil
 	}
 
+	// A non-positive Size makes the boundary math degenerate (end <= start),
+	// which otherwise loops forever appending empty chunks or panics on a
+	// negative slice bound. Treat it as "no splitting" and return the whole
+	// text as a single chunk. Config.Validate should reject this earlier, but
+	// Chunker is also constructed directly in code.
+	if c.Size <= 0 {
+		return []Chunk{{
+			Index:      0,
+			Text:       text,
+			TokenCount: CountTokens(text),
+			StartByte:  0,
+			EndByte:    len(text),
+		}}
+	}
+
 	sizeBytes := c.Size * 4
 	overlapBytes := c.Overlap * 4
 
