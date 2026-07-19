@@ -25,7 +25,7 @@ func newIngestCmd() *cobra.Command {
 		Short: "Index a file or directory into the knowledge base",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := Config()
+			cfg := configFrom(cmd)
 			db, err := storage.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)

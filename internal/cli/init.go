@@ -28,14 +28,14 @@ func runInit(_ *cobra.Command, _ []string) error {
 	promptsDir := filepath.Join(tbukDir, "prompts", "qa")
 
 	for _, dir := range []string{tbukDir, promptsDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create dir %s: %w", dir, err)
 		}
 	}
 
 	cfgPath := filepath.Join(tbukDir, "config.yaml")
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		if err := os.WriteFile(cfgPath, []byte(config.DefaultYAML()), 0o644); err != nil {
+		if err := os.WriteFile(cfgPath, []byte(config.DefaultYAML()), 0o600); err != nil {
 			return fmt.Errorf("write config: %w", err)
 		}
 		fmt.Printf("Created config: %s\n", cfgPath)
@@ -86,7 +86,7 @@ Source: {{ .Citation }}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				return fmt.Errorf("write %s: %w", path, err)
 			}
 		}

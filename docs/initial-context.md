@@ -19,6 +19,8 @@ Module: `github.com/gotofritz/timbuktu`
 | 07 | Search — vector, FTS5 keyword, hybrid | ✅ done |
 | 08 | RAG — retrieval pipeline, prompt templates, streaming | ✅ done |
 | 09 | Management — `tbuk stats`, delete, update | ✅ done |
+| 10 | User Guide — README, docs | ✅ done |
+| 11 | POC Hardening — correctness/requirement/hygiene gaps (P0–P2) | ✅ done |
 
 ---
 
@@ -32,7 +34,7 @@ internal/
   cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
-  chunking/         Chunker.Split — greedy sentence boundary, Size/Overlap in tokens
+  chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
   embeddings/       Embedder interface + factory; llama, ollama, openai adapters
   llm/              LLM interface + factory; claude, openai, llama, ollama adapters (SSE + JSON-lines streaming)
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
@@ -79,7 +81,7 @@ Defaults: llm.provider=`llama`, embedding.provider=`llama`, dimension=768, chunk
 
 ## Storage
 
-SQLite, WAL mode, foreign keys ON.
+SQLite, WAL mode, foreign keys ON. Pragmas are set in the DSN (`dsnFor`) so every pooled connection inherits them. The DB file is `chmod 0o600` after open — knowledge-base content is personal data.
 
 ```sql
 documents   — id, path (UNIQUE), sha256, title, mime_type, created_at, updated_at
@@ -338,7 +340,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa` template installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset.
+Built-in `qa` template installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
@@ -374,7 +376,8 @@ tbuk stats                     knowledge base summary: documents, chunks, embedd
 - In-memory SQLite (`:memory:`) for storage tests
 - `fmt.Errorf("context: %w", err)` for error wrapping
 - Sentinel errors (e.g. `storage.ErrNotFound`) matched with `errors.Is`, not string comparison
-- No `init()`, no global mutable state, no `interface{}`
+- No `init()`, no global mutable state, no `interface{}` — CLI config is loaded in the root `PersistentPreRunE` and threaded through the cobra command context (`configFrom`/`configPathFrom`), not package-level vars
+- Data files are owner-only: `~/.tbuk` dirs `0o700`; config, extracted text and DB files `0o600`
 - `defer func() { _ = resp.Body.Close() }()` for HTTP responses
 - HTTP error responses surface the provider's body (bounded read), not just the status text
 - Stream goroutines select on `ctx.Done()` on every channel send to avoid leaks

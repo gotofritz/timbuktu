@@ -20,7 +20,7 @@ func newStatsCmd() *cobra.Command {
 		Short: "Show knowledge base statistics",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := Config()
+			cfg := configFrom(cmd)
 			db, err := storage.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
@@ -57,7 +57,7 @@ FROM (
         d.id,
         COUNT(c.id)        AS chunk_count,
         COUNT(c.embedding) AS embedded_count,
-        COALESCE(LENGTH(GROUP_CONCAT(c.text)), 0) AS size_bytes
+        COALESCE(SUM(LENGTH(c.text)), 0) AS size_bytes
     FROM documents d
     LEFT JOIN chunks c ON c.document_id = d.id
     GROUP BY d.id

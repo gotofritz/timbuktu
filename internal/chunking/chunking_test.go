@@ -61,6 +61,14 @@ func TestChunker_empty_returns_no_chunks(t *testing.T) {
 	}
 }
 
+func TestChunker_whitespace_only_returns_no_chunks(t *testing.T) {
+	c := &chunking.Chunker{Size: 800, Overlap: 100}
+	chunks := c.Split("   \n\t  ")
+	if len(chunks) != 0 {
+		t.Errorf("got %d chunks, want 0", len(chunks))
+	}
+}
+
 func TestChunker_overlap_reincluded(t *testing.T) {
 	// 3 sentences each ~400 tokens (1600 chars); total ~1200 tokens.
 	// Size=400, Overlap=100 → should produce multiple chunks.

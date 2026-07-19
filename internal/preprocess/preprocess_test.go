@@ -290,6 +290,45 @@ func TestExtractToFile_createsOutputDir(t *testing.T) {
 	}
 }
 
+func TestHashFile_missing(t *testing.T) {
+	if _, err := preprocess.HashFile(filepath.Join(t.TempDir(), "nope.txt")); err == nil {
+		t.Error("want error for missing file")
+	}
+}
+
+func TestExtract_missingFile(t *testing.T) {
+	// Unknown extension resolves to a known MIME, but the file is absent, so
+	// HashFile must surface the error.
+	if _, _, _, err := preprocess.Extract(context.Background(), filepath.Join(t.TempDir(), "gone.txt")); err == nil {
+		t.Error("want error for missing file")
+	}
+}
+
+func TestExtractToFile_missingSource(t *testing.T) {
+	if _, err := preprocess.ExtractToFile(context.Background(), filepath.Join(t.TempDir(), "gone.txt"), t.TempDir()); err == nil {
+		t.Error("want error for missing source")
+	}
+}
+
+func TestExtractToFile_mkdirFails(t *testing.T) {
+	src, err := os.CreateTemp(t.TempDir(), "*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = src.WriteString("body")
+	_ = src.Close()
+
+	// Point outputDir under an existing regular file so MkdirAll fails.
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(blocker, "sub")
+	if _, err := preprocess.ExtractToFile(context.Background(), src.Name(), outDir); err == nil {
+		t.Error("want error when output dir cannot be created")
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func mustExtract(t *testing.T, mime, content string) string {

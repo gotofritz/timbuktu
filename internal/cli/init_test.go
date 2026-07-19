@@ -33,6 +33,32 @@ func TestInitCommand_createsDirs(t *testing.T) {
 	}
 }
 
+func TestInitCommand_dirsAndConfigPrivatePerms(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	dir := filepath.Join(home, ".tbuk")
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if di.Mode().Perm() != 0o700 {
+		t.Errorf(".tbuk perms = %o, want 700", di.Mode().Perm())
+	}
+
+	fi, err := os.Stat(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("config perms = %o, want 600", fi.Mode().Perm())
+	}
+}
+
 func TestInitCommand_writesConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

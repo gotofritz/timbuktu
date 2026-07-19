@@ -82,6 +82,40 @@ func TestRunStats_populated(t *testing.T) {
 	}
 }
 
+func TestRunStats_sizeIsExactSumOfChunkLengths(t *testing.T) {
+	// Size must be the exact byte sum of chunk texts, not GROUP_CONCAT length
+	// (which adds a separator comma per chunk boundary).
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	chunks := storage.NewChunkRepo(db)
+	ctx := context.Background()
+
+	doc := &storage.Document{Path: "/s.md", SHA256: "ss", Title: "S", MimeType: "text/plain"}
+	if err := docs.Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	if err := chunks.BulkInsert(ctx, []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "hello", TokenCount: 1},
+		{DocumentID: doc.ID, ChunkIndex: 1, Text: "world", TokenCount: 1},
+	}); err != nil {
+		t.Fatalf("bulk insert: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := cli.RunStats(&out, db, "/fake/tbuk.sqlite", "json"); err != nil {
+		t.Fatalf("RunStats: %v", err)
+	}
+	var result struct {
+		TotalSizeBytes int64 `json:"total_size_bytes"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if result.TotalSizeBytes != 10 {
+		t.Errorf("total_size_bytes = %d, want 10 (len(hello)+len(world))", result.TotalSizeBytes)
+	}
+}
+
 func TestRunStats_jsonFormat(t *testing.T) {
 	db := openMemoryDB(t)
 	var out bytes.Buffer
