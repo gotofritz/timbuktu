@@ -29,6 +29,9 @@ func newOpenAIEmbedder(cfg config.EmbeddingConfig) (*openAIEmbedder, error) {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}
+	if err := config.ValidateKeyedBaseURL(baseURL); err != nil {
+		return nil, fmt.Errorf("embeddings openai: %w", err)
+	}
 	return &openAIEmbedder{
 		baseURL:   baseURL,
 		model:     cfg.Model,

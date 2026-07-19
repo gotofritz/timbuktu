@@ -167,3 +167,32 @@ chunking:
 		t.Errorf("chunking.size: want 600, got %d", cfg.Chunking.Size)
 	}
 }
+
+func TestValidateKeyedBaseURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"https remote ok", "https://api.openai.com", false},
+		{"https with port ok", "https://example.com:8443", false},
+		{"http loopback localhost ok", "http://localhost:8080", false},
+		{"http loopback 127.0.0.1 ok", "http://127.0.0.1:1234", false},
+		{"http loopback ipv6 ok", "http://[::1]:8080", false},
+		{"http remote host rejected", "http://api.example.com", true},
+		{"http remote ip rejected", "http://10.0.0.5:8080", true},
+		{"empty rejected", "", true},
+		{"malformed rejected", "://nope", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := config.ValidateKeyedBaseURL(tc.url)
+			if tc.wantErr && err == nil {
+				t.Errorf("ValidateKeyedBaseURL(%q) = nil, want error", tc.url)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("ValidateKeyedBaseURL(%q) = %v, want nil", tc.url, err)
+			}
+		})
+	}
+}

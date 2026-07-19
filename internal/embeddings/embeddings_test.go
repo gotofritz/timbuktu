@@ -360,6 +360,19 @@ func TestOpenAIEmbedder_success(t *testing.T) {
 	}
 }
 
+func TestOpenAIEmbedder_rejectsInsecureRemoteBaseURL(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	cfg := config.EmbeddingConfig{
+		Provider:  "openai",
+		Model:     "text-embedding-3-small",
+		BaseURL:   "http://api.remote.example.com",
+		Dimension: 2,
+	}
+	if _, err := embeddings.NewEmbedder(cfg); err == nil {
+		t.Fatal("expected error for API key on non-HTTPS remote base_url")
+	}
+}
+
 func TestOpenAIEmbedder_missingKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	cfg := config.EmbeddingConfig{

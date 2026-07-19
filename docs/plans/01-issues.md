@@ -193,7 +193,7 @@ per-provider defaults instead), resolve per provider in factories. Or have
 `Config.Validate()` (issue 17) reject provider/base_url combos that look like
 a stale default. Do together with issue 11.
 
-### 11. [SEC] API keys attached to any configured `base_url`, incl. plain HTTP (orig #27)
+### 11. [SEC] API keys attached to any configured `base_url`, incl. plain HTTP (orig #27) — ✅ DONE
 
 **Problem:** claude/openai adapters set `x-api-key` / `Authorization: Bearer`
 on requests to whatever `base_url` config supplies, no scheme/host check.

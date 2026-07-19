@@ -32,6 +32,9 @@ func newOpenAIProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}
+	if err := config.ValidateKeyedBaseURL(baseURL); err != nil {
+		return nil, fmt.Errorf("llm openai: %w", err)
+	}
 	return &openAIProvider{
 		name:      "openai",
 		baseURL:   baseURL,
