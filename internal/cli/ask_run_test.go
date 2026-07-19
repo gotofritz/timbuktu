@@ -298,6 +298,65 @@ func TestRunAsk_badVarFormat(t *testing.T) {
 	}
 }
 
+// With no retrieved chunks, ask must warn to the error writer that it is
+// answering from model priors, then still call the LLM.
+func TestRunAsk_emptyContext_warns(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out, errBuf bytes.Buffer
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil), // zero chunks
+		mockChat([]string{"from priors"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errBuf),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(errBuf.String()), "no relevant context") {
+		t.Errorf("want empty-context warning on errOut, got: %q", errBuf.String())
+	}
+	if !strings.Contains(out.String(), "from priors") {
+		t.Errorf("LLM should still be called; out = %q", out.String())
+	}
+}
+
+// --require-context must abort before the LLM call when retrieval is empty.
+func TestRunAsk_requireContext_aborts(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out bytes.Buffer
+	chatCalled := false
+	spyChat := func(ctx context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		chatCalled = true
+		return mockChat([]string{"x"}, nil)(ctx, nil)
+	}
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		spyChat,
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+		cli.WithRequireContext(true),
+	)
+	if err == nil {
+		t.Fatal("expected abort error when --require-context and no chunks")
+	}
+	if chatCalled {
+		t.Error("LLM must not be called when aborting on empty context")
+	}
+}
+
 func TestRunAsk_retrieveError(t *testing.T) {
 	tmpl := buildQATemplate(t)
 	var out bytes.Buffer

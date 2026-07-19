@@ -135,7 +135,7 @@ elsewhere.
 **Fix:** `NormalizePath` in both commands; branch on
 `errors.Is(err, storage.ErrNotFound)`, propagate other errors as-is.
 
-### 8. [PROD] `tbuk ask` silently answers from model priors when retrieval returns nothing (orig #45)
+### 8. [PROD] `tbuk ask` silently answers from model priors when retrieval returns nothing (orig #45) — ✅ DONE
 
 **Problem:** Retrieval yields zero chunks — empty knowledge base (default
 first-run state) or no matches — `RunAsk` renders the template with no context
