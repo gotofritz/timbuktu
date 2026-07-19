@@ -851,3 +851,138 @@ AGENTS.md defer to it; when fixing issue 11, remove the stale line from
   cache, but CI does the same and the suite is fast; not worth churn.
 - **No issue/feature templates** under `.github/ISSUE_TEMPLATE`: fine for a
   single-maintainer project at this stage.
+
+---
+
+# Additions — user impact / product assessment (2026-07-19)
+
+Findings from a product-engineering pass over the CLI and docs from a real
+user's point of view: first-run experience, everyday workflows, and places
+where the documentation promises behaviour the tool doesn't deliver. Overlaps
+found on the same pass are not repeated — the broken `template edit` is
+issue 22, the `meta set`/`meta list` path-normalization failure is issue 16,
+and the hardcoded prompts dir is issue 7 (note it also affects
+`internal/cli/template.go:111-114`, not just `ask`). Roadmap items in
+`docs/plans/next-steps.md` are likewise excluded. Numbering continues.
+
+## Medium priority
+
+### 41. `tbuk delete` confirmation hangs on plain Enter — the advertised `[y/N]` default is unreachable
+
+**Problem:** The prompt is `Delete <path> (N chunks)? [y/N]`, which by
+convention means plain Enter = No. But the reply is read with
+`fmt.Fscan(os.Stdin, &answer)`, and `Fscan` skips newlines while waiting for
+a token — so pressing Enter does nothing and the command sits there looking
+frozen until the user types a non-whitespace character. Every interactive
+delete hits this.
+
+**Evidence:** `internal/cli/delete.go:49-54`.
+
+**Fix:** Read a full line (`bufio.NewReader(os.Stdin).ReadString('\n')`),
+trim it, and treat an empty line as the default No.
+
+### 42. No way to list the documents in the knowledge base
+
+**Problem:** There is no `tbuk list` (or `tbuk docs`) command. `tbuk stats`
+gives only counts; `tbuk find` requires a metadata filter — so "show me
+everything I have indexed" has no answer, and the user guide's "Checking Your
+Knowledge Base" section can only offer stats. Users need this constantly:
+verifying an ingest worked, spotting renamed/stale files, deciding what to
+delete. (`tbuk find extension=md` is the closest workaround and only works
+per-extension.)
+
+**Evidence:** `internal/cli/root.go:47-59` (command roster);
+`docs/user-guide.md` §8.
+
+**Fix:** Add `tbuk list [--format text|json]` reading straight from the
+`documents` table (path, title, chunk count, updated_at) with the usual
+`--limit`. Low effort — the repos and the text/JSON printing patterns already
+exist. Complements the richer-doctor roadmap item rather than duplicating it
+(doctor diagnoses; this is an everyday query).
+
+### 43. Single-file `tbuk ingest` succeeds silently — and the user guide shows output that doesn't exist
+
+**Problem:** For a single file, `PrintFileResult` prints nothing on success,
+and a dedup skip prints nothing without `--verbose`. The guide's very first
+ingest walkthrough promises `Ingesting … chunks: 1 … Done.` and says a repeat
+run prints `Skipped … (unchanged)` — but the real command returns to the
+shell with zero output in all three cases (ingested, skipped, or `--verbose`
+absent). A first-time user cannot tell success from a no-op, and the
+guide-vs-reality gap undermines trust at the most sensitive point of the
+funnel (first ingest). Directory ingest already prints per-file progress and
+a summary; single-file is the inconsistent case.
+
+**Evidence:** `internal/cli/ingest.go:84-93`; `docs/user-guide.md` §6
+(promised output blocks).
+
+**Fix:** Print a one-line result unconditionally for single-file ingest
+(`<path> → N chunks embedded` / `<path> → skipped (unchanged)`), then align
+the user guide's sample output with what the command actually prints.
+
+### 44. Following the user guide's `--min-score` advice returns zero results in the default search mode
+
+**Problem:** `docs/user-guide.md` §10 says "Scores range from 0 (unrelated)
+to 1 (identical). A threshold of 0.6–0.7 is a reasonable starting point" —
+directly under examples using the **default hybrid mode**. Hybrid scores are
+RRF sums (maximum ≈ 2/61 ≈ 0.033 with k=60 over two lists), so
+`tbuk search --top 10 --min-score 0.7 "project deadlines"` — the guide's own
+example — filters out every result and prints "No results found." with no
+hint why. The README documents the scale difference; the guide, aimed at
+non-experts, actively misleads. This poisons the guide's own debugging
+advice too ("run `tbuk search` to inspect retrieval").
+
+**Evidence:** `docs/user-guide.md` §10 ("Controlling result count and
+minimum score"); `internal/search/hybrid.go` (RRF k=60);
+`README.md:57` (documents the differing scale).
+
+**Fix:** Fix the guide first (scope the 0–1 advice to `--mode vector`; give
+a hybrid-scale example or omit `--min-score` from hybrid examples). Then
+make the flag usable without reading internals: either normalize hybrid
+scores to 0–1 before `MinScore` is applied, or warn when `--min-score`
+exceeds the achievable hybrid maximum for the given `--top`.
+
+### 45. `tbuk ask` silently answers from model priors when retrieval returns nothing
+
+**Problem:** When retrieval yields zero chunks — empty knowledge base (the
+default first-run state) or simply no matches — `RunAsk` proceeds to render
+the template with no context and streams whatever the LLM says. The guide
+promises "the model cannot invent facts that are not in your documents — its
+answer is grounded in what you have written"; with an empty context the
+answer is pure model prior delivered with identical confidence, and the only
+clue is the absent `Sources:` section. This is precisely the user who most
+needs a signal (they likely forgot to ingest, or their query missed).
+
+**Evidence:** `internal/cli/ask.go:150-176` (no empty-chunks branch);
+`internal/cli/ask.go:207-212` (`Sources:` printed only when chunks exist);
+`docs/user-guide.md` §9.
+
+**Fix:** On zero retrieved chunks, print a clear warning to stderr before
+(or instead of) calling the LLM — e.g. "no relevant chunks found in your
+knowledge base; the answer below is NOT grounded in your documents. Check
+`tbuk stats` or try `tbuk search '<query>'`" — and consider a
+`--require-context` flag (or template-manifest option) that aborts instead.
+Keep the qa template's "say so clearly" instruction as backstop, not as the
+only defence.
+
+## Low priority
+
+### 46. `tbuk update` fails obscurely on directories
+
+`ingest` accepts a file or directory, but `update` calls `IngestFile`
+unconditionally, so the natural `tbuk update ~/notes/` fails with a
+low-level extraction error instead of either working or explaining itself.
+Either support directories (delegate to the `IngestDir` loop — `update` is
+already just "ingest unless unchanged") or stat the path and return
+"update takes a single file; use `tbuk ingest <dir>` for folders".
+Evidence: `internal/cli/update.go:60-77` vs `internal/cli/ingest.go:65-70`.
+
+## Noted, no action needed (product review)
+
+- **`tbuk preprocess` is single-file only**: acceptable — `ingest` handles
+  directories and auto-preprocesses; the two-step flow exists for inspecting
+  individual extractions.
+- **Guide §6 says preprocess "splits it into chunks"**: chunking actually
+  happens at ingest; worth a one-word docs fix whenever §6 is touched for
+  issue 43, not a separate issue.
+- **`stats` guide output matches implementation** (modulo issue 43's
+  neighbouring sections). Fine as-is.
