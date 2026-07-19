@@ -914,3 +914,75 @@ unchanged") or stat path, return "update takes a single file; use
   separate issue.
 - **`stats` guide output matches implementation** (modulo issue 43
   neighbouring sections). Fine.
+
+---
+
+# Additions — project health / maintainer assessment (2026-07-19)
+
+OSS-maintainer pass: licensing, releases, install funnel, disclosure policy,
+backlog hygiene, community files. Much healthy — MIT license committed,
+release automation works end to end (v0.1.0 + v0.1.1 published with grouped
+changelog, version stamped via ldflags, `tbuk version` wired), plan-archive
+discipline followed (20 archived plans, naming convention respected), PR
+template with TDD checklist in place, CI runs on PRs. Release-pipeline gaps =
+issues 28/29/31, contributor-setup gaps = issues 38/39/40, not repeated.
+Numbering continues.
+
+## Medium priority
+
+### 47. README recommended install downloads a 404 — asset name has no `v` prefix
+
+**Problem:** README "Pre-built binary (recommended)" example sets
+`VERSION=v0.1.0` and builds
+`tbuk_${VERSION}_${OS}_${ARCH}.tar.gz` → `tbuk_v0.1.0_linux_amd64.tar.gz`.
+GoReleaser `{{ .Version }}` strips the leading `v`: real assets are
+`tbuk_0.1.1_linux_amd64.tar.gz` (verified against published v0.1.1 release
+assets). Copy-pasting the recommended install = 404 for every user on every
+release — same trust-killing funnel class as issue 43, but earlier: before
+first run. Minor sibling: README says Windows = `_windows_amd64.zip` only;
+`_windows_arm64.zip` also published.
+
+**Evidence:** `README.md:22-30` (`VERSION=v0.1.0` used in asset filename);
+`.goreleaser.yml:27-29` (`name_template` uses `{{ .Version }}`, no `v`);
+live v0.1.1 asset list (`tbuk_0.1.1_*`).
+
+**Fix:** Use `${VERSION#v}` in the filename (keep `v` in the
+`/releases/download/${VERSION}/` path segment, which *does* need it), or set
+tag and version as separate vars. Mention arm64 Windows asset. Ideally verify
+the snippet once against a real release after edit.
+
+## Low priority
+
+### 48. No SECURITY.md / vulnerability disclosure channel
+
+Issues 28/29 cover *detecting* vulns (govulncheck) and *signing* releases;
+nothing tells an outside reporter where to send one. Project parses untrusted
+input (PDFs, issue 26) and ships binaries — the case where private disclosure
+matters. GitHub private vulnerability reporting works best advertised via
+`SECURITY.md` (supported versions + "use GitHub advisories / email"). Few
+lines, standard template. Evidence: no `SECURITY.md` in repo root or
+`.github/`.
+
+### 49. Findings backlog has no lifecycle — nothing marks issues resolved
+
+This file now holds 49 findings from ten assessment passes; GitHub Issues
+never used (0 issues total, tracker idle). No status marker per finding — as
+fixes land in PRs, nothing records which findings are done; file drifts
+stale, and every future assessment pass re-spends effort manually
+dedup-checking against all of it. Also `01-issues.original.md` (pre-compress
+backup) sits in `docs/plans/` — convention says active plans only. Fix:
+triage high/medium findings into GitHub issues (free, closable by PR
+keywords) keeping this file as source index, or add per-finding status
+markers and archive resolved sections per the existing plan-archive
+convention; move the `.original.md` backup to `docs/archive/` or delete it.
+
+## Noted, no action needed (maintainer review)
+
+- **License:** MIT, committed, copyright line present. Fine.
+- **Release cadence/automation:** two releases first two days, changelog
+  grouped by type, conventional commits feeding it. Healthy.
+- **CODE_OF_CONDUCT / issue templates:** single-maintainer stage; already
+  noted under DX review. Skip until outside contributors appear.
+- **Docs volume:** README + user guide + initial-context + roadmap all
+  current-ish (drift tracked as issues 11/40/43/44). Unusually good for
+  project age.
