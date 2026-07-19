@@ -48,7 +48,7 @@ make test          # run all tests
 make test-race     # tests with race detector
 make lint          # golangci-lint
 make coverage      # total coverage percentage
-make check-ci      # full CI gate: lint + build + coverage ≥ 85%
+make check-ci      # full CI gate: lint + build + coverage ≥ 85% (total and per package)
 ```
 
 ## Configuration
@@ -85,7 +85,7 @@ internal/
   config/           Config struct, Load(), Defaults()
   storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
-  chunking/         Chunker.Split — greedy sentence accumulation, configurable size/overlap
+  chunking/         Chunker.Split — sentence-boundary search, rune-safe, configurable size/overlap
   embeddings/       Embedder interface; llama.cpp, Ollama, OpenAI adapters
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline
   llm/              LLM interface; Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
