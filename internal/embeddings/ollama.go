@@ -20,8 +20,12 @@ type ollamaEmbedder struct {
 }
 
 func newOllamaEmbedder(cfg config.EmbeddingConfig) *ollamaEmbedder {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
 	return &ollamaEmbedder{
-		baseURL:   cfg.BaseURL,
+		baseURL:   baseURL,
 		model:     cfg.Model,
 		dimension: cfg.Dimension,
 		client:    &http.Client{},
