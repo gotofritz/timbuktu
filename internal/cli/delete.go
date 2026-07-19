@@ -31,9 +31,13 @@ func newDeleteCmd() *cobra.Command {
 			docs := storage.NewDocumentRepo(sqlDB)
 
 			if !yes {
-				doc, lookupErr := docs.GetByPath(cmd.Context(), args[0])
+				path, err := NormalizePath(args[0])
+				if err != nil {
+					return fmt.Errorf("resolve path %s: %w", args[0], err)
+				}
+				doc, lookupErr := docs.GetByPath(cmd.Context(), path)
 				if lookupErr != nil {
-					return fmt.Errorf("document not found: %s", args[0])
+					return fmt.Errorf("document not found: %s", path)
 				}
 				var n int
 				_ = sqlDB.QueryRowContext(cmd.Context(), `SELECT COUNT(*) FROM chunks WHERE document_id=?`, doc.ID).Scan(&n)
@@ -56,6 +60,11 @@ func newDeleteCmd() *cobra.Command {
 // RunDelete removes a document (and its chunks via CASCADE) from the DB.
 // Exported for testing.
 func RunDelete(ctx context.Context, out io.Writer, db *sql.DB, docs *storage.DocumentRepo, path string) error {
+	path, err := NormalizePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve path %s: %w", path, err)
+	}
+
 	doc, err := docs.GetByPath(ctx, path)
 	if err != nil {
 		return fmt.Errorf("document not found: %s", path)
