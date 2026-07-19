@@ -152,7 +152,7 @@ of) LLM call; consider `--require-context` flag (or template-manifest option)
 that aborts instead. Keep qa template's "say so clearly" instruction as
 backstop, not only defence.
 
-### 9. [SEC] Malformed PDF can panic + kill entire ingest run (orig #26; dup: ECO-4)
+### 9. [SEC] Malformed PDF can panic + kill entire ingest run (orig #26; dup: ECO-4) — ✅ DONE
 
 **Problem:** Primary untrusted-input surface = ingestion, and PDFs are exactly
 what users download from elsewhere. Extraction delegates to
