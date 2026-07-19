@@ -286,3 +286,74 @@ the docs.
   doctor check proposed there should count undecodable embeddings too.
 - `tbuk stats --format banana` silently falls back to text output while
   `search`/`find` validate the flag. Cosmetic inconsistency.
+
+---
+
+# Additions — long-term evolution assessment (2026-07-19)
+
+Findings from an architecture review focused on how the repo will evolve —
+schema growth, config growth, and the concurrency surface the roadmap
+(`docs/plans/next-steps.md`) will add. Nothing here is broken *today*; each
+item is a latent cost that gets paid the first time the relevant area changes.
+Numbering continues from the reviews above.
+
+## Medium priority
+
+### 23. Migration runner is not ready for a second migration
+
+**Problem:** The whole schema lives in one migration whose statements are all
+`IF NOT EXISTS`, which masks three weaknesses in `RunMigrations` that will bite
+as soon as migration v2 lands (the roadmap's embedding-provenance and
+conversational-session work both imply schema changes):
+
+1. The applied-version check swallows its error
+   (`_ = db.QueryRow(...).Scan(&exists)`), so any transient failure reads as
+   "not applied" and the migration is re-run. Harmless for idempotent
+   `IF NOT EXISTS` DDL; a future `ALTER TABLE ... ADD COLUMN` re-applied this
+   way fails hard or corrupts.
+2. A migration's SQL and its `schema_migrations` record are executed as two
+   separate `Exec` calls, not one transaction. A crash between them leaves the
+   schema changed but unrecorded — the next run re-applies it (same hazard as
+   above).
+3. There is no guard for a database *newer* than the binary. An older `tbuk`
+   opening a DB whose `schema_migrations` max version exceeds what it knows
+   silently reads/writes a schema it doesn't understand. For a local-first
+   tool where users up/downgrade standalone binaries against one long-lived
+   `~/.tbuk/tbuk.sqlite`, this is the realistic failure mode.
+
+**Evidence:** `internal/storage/migrate.go:79-94` (swallowed Scan at 81,
+two-step apply at 85-93); no max-version check anywhere in `storage`.
+
+**Fix:** Before the second migration is ever written: wrap each migration's
+SQL + version record in one transaction; propagate the version-check error;
+error out (with a clear "this database was created by a newer tbuk" message)
+when the recorded max version exceeds the binary's. Optionally copy the DB
+file aside before applying pending migrations — cheap insurance for personal
+data with no other backup story until export/import ships.
+
+### 24. Unknown config keys are silently ignored
+
+**Problem:** `Load` uses plain `yaml.Unmarshal`, which drops unknown fields.
+A typo (`chunk_size:` for `size:`, `baseurl:` for `base_url:`) or a key from a
+newer tbuk version is silently ignored and the default silently wins — the
+config *looks* applied but isn't. Issue 6 covers validating *values*; this is
+the complementary gap: detecting keys that don't exist at all. It grows worse
+as the config schema grows (collections, `prompts.dir`, retrieval settings are
+all on the roadmap).
+
+**Evidence:** `internal/config/config.go:100` (`yaml.Unmarshal(data, &cfg)`).
+
+**Fix:** Decode via `yaml.Decoder` with `KnownFields(true)` and fail with the
+offending key name. Fold into the same `Config.Validate()` effort as issue 6
+so all config errors surface together at startup.
+
+## Low priority
+
+### 25. CI never runs the race detector
+
+`make test-race` exists but no workflow invokes it — CI runs plain `go test`
+(`.github/workflows/ci.yml`). The `llm` package is goroutine + channel heavy
+(streaming adapters, `sendToken`/`ctx.Done()` selects), and the roadmap's
+multi-turn `ask` adds more concurrency. Races regress silently until a user
+hits them. Add `-race` to the CI test step (or a parallel job if runtime
+matters).
