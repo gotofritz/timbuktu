@@ -32,6 +32,36 @@ func TestDeleteCommand_notFoundWithConfig(t *testing.T) {
 	}
 }
 
+func TestConfirmYes(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"plain enter defaults to no", "\n", false},
+		{"empty EOF defaults to no", "", false},
+		{"lowercase y", "y\n", true},
+		{"uppercase Y", "Y\n", true},
+		{"full yes", "yes\n", true},
+		{"padded y", "  y  \n", true},
+		{"explicit n", "n\n", false},
+		{"no", "no\n", false},
+		{"garbage", "maybe\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			got := cli.ConfirmYes(strings.NewReader(tc.input), &out, "Delete? [y/N] ")
+			if got != tc.want {
+				t.Errorf("ConfirmYes(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+			if !strings.Contains(out.String(), "Delete?") {
+				t.Errorf("prompt not written, out = %q", out.String())
+			}
+		})
+	}
+}
+
 func TestRunDelete_found(t *testing.T) {
 	db := openMemoryDB(t)
 	docs := storage.NewDocumentRepo(db)

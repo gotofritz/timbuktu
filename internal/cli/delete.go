@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -46,9 +48,8 @@ func newDeleteCmd() *cobra.Command {
 				}
 				var n int
 				_ = sqlDB.QueryRowContext(cmd.Context(), `SELECT COUNT(*) FROM chunks WHERE document_id=?`, doc.ID).Scan(&n)
-				fmt.Fprintf(out, "Delete %s (%d chunks)? [y/N] ", args[0], n) //nolint:errcheck
-				var answer string
-				if _, err := fmt.Fscan(os.Stdin, &answer); err != nil || (answer != "y" && answer != "Y") {
+				prompt := fmt.Sprintf("Delete %s (%d chunks)? [y/N] ", args[0], n)
+				if !ConfirmYes(cmd.InOrStdin(), out, prompt) {
 					fmt.Fprintln(out, "Aborted.") //nolint:errcheck
 					return nil
 				}
@@ -60,6 +61,25 @@ func newDeleteCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation prompt")
 	return cmd
+}
+
+// ConfirmYes writes prompt to out and reads a full line from in, returning true
+// only for an explicit "y"/"yes" (case-insensitive, surrounding whitespace
+// trimmed). A blank line — plain Enter — or EOF returns false, matching the
+// [y/N] default. Reading a whole line (not a whitespace-skipping token scan)
+// is what makes plain Enter register instead of hanging.
+func ConfirmYes(in io.Reader, out io.Writer, prompt string) bool {
+	fmt.Fprint(out, prompt) //nolint:errcheck
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && line == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // RunDelete removes a document (and its chunks via CASCADE) from the DB, and
