@@ -13,16 +13,18 @@ func (s *Searcher) Keyword(ctx context.Context, query string, opts Options) ([]S
 		return nil, nil
 	}
 
+	joinSQL, metaArgs := metadataFilterJoins(opts.Metadata, "d")
+	args := append(metaArgs, match, opts.topK())
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, c.document_id, c.chunk_index, c.text,
 		       bm25(chunks_fts) AS bm25score,
 		       d.path, d.title
 		FROM chunks_fts
 		JOIN chunks   c ON chunks_fts.rowid = c.id
-		JOIN documents d ON d.id = c.document_id
+		JOIN documents d ON d.id = c.document_id `+joinSQL+`
 		WHERE chunks_fts MATCH ?
 		ORDER BY bm25score
-		LIMIT ?`, match, opts.topK())
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("keyword search: %w", err)
 	}
