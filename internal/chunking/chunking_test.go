@@ -146,6 +146,49 @@ func TestChunker_accented_utf8_chunks_valid(t *testing.T) {
 	}
 }
 
+func TestChunker_boundary_picks_latest_separator(t *testing.T) {
+	// Mixed separator types: an early "! " must not win over the many later
+	// ". " breaks. With Size=800 (sizeBytes=3200) the first chunk should snap
+	// to a sentence break near 3200 bytes, not to the "! " at byte 7.
+	text := "Hello! " + strings.Repeat("This is a normal sentence. ", 300)
+
+	c := &chunking.Chunker{Size: 800, Overlap: 100}
+	chunks := c.Split(text)
+
+	if len(chunks) == 0 {
+		t.Fatal("got 0 chunks")
+	}
+	first := chunks[0]
+	if first.EndByte < 3000 {
+		t.Errorf("first chunk EndByte = %d, want near sizeBytes (3200); "+
+			"boundary search picked an early separator", first.EndByte)
+	}
+	if first.EndByte > 3200 {
+		t.Errorf("first chunk EndByte = %d, want <= sizeBytes 3200", first.EndByte)
+	}
+	// Boundary must land right after a separator (a "sentence. ").
+	if !strings.HasSuffix(first.Text, ". ") && !strings.HasSuffix(first.Text, ".") {
+		t.Errorf("first chunk does not end on a sentence break: %q",
+			first.Text[max(0, len(first.Text)-20):])
+	}
+}
+
+func TestChunker_boundary_falls_back_to_maxEnd_when_no_separator(t *testing.T) {
+	// No separators at all: boundary should fall back to maxEnd (sizeBytes),
+	// producing a full-size first chunk rather than a degenerate one.
+	text := strings.Repeat("abcdefghij", 400) // 4000 bytes, no separators
+	c := &chunking.Chunker{Size: 800, Overlap: 100}
+	chunks := c.Split(text)
+
+	if len(chunks) == 0 {
+		t.Fatal("got 0 chunks")
+	}
+	if chunks[0].EndByte != 3200 {
+		t.Errorf("first chunk EndByte = %d, want 3200 (maxEnd fallback)",
+			chunks[0].EndByte)
+	}
+}
+
 func TestChunker_last_chunk_covers_remainder(t *testing.T) {
 	sentence := strings.Repeat("z", 1596) + ". "
 	text := sentence + sentence + sentence

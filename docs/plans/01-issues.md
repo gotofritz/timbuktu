@@ -46,7 +46,7 @@ before first run. Minor sibling: README lists only `_windows_amd64.zip`;
 `/releases/download/${VERSION}/` path segment). Mention arm64 Windows asset.
 Verify snippet once against a real release after edit.
 
-### 2. [CORR] Chunker boundary search picks *earliest* separator → tiny chunks (orig #14)
+### 2. [CORR] Chunker boundary search picks *earliest* separator → tiny chunks (orig #14) — ✅ DONE
 
 **Problem:** `findBoundary` should return best sentence break at or before
 `maxEnd`; instead takes *minimum* over last occurrences of each separator type
