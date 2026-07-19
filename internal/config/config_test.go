@@ -26,6 +26,14 @@ func TestDefaults(t *testing.T) {
 	if cfg.Embedding.Dimension != 768 {
 		t.Errorf("embedding.dimension: want 768, got %d", cfg.Embedding.Dimension)
 	}
+	// base_url must be empty in defaults so each provider factory resolves its
+	// own default — otherwise switching provider silently keeps localhost:8080.
+	if cfg.LLM.BaseURL != "" {
+		t.Errorf("llm.base_url: want empty (provider resolves), got %q", cfg.LLM.BaseURL)
+	}
+	if cfg.Embedding.BaseURL != "" {
+		t.Errorf("embedding.base_url: want empty (provider resolves), got %q", cfg.Embedding.BaseURL)
+	}
 }
 
 func TestLoad_missingFile(t *testing.T) {

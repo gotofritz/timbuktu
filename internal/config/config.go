@@ -66,13 +66,17 @@ func Defaults() Config {
 			Provider:  "llama",
 			Model:     "",
 			MaxTokens: 4096,
-			BaseURL:   "http://localhost:8080",
+			// BaseURL intentionally empty: each provider factory resolves its
+			// own default (llama/openai-compatible → :8080, ollama → :11434,
+			// claude → api.anthropic.com, openai → api.openai.com), so
+			// switching provider doesn't silently target a stale localhost URL.
+			BaseURL: "",
 		},
 		Embedding: EmbeddingConfig{
 			Provider:  "llama",
 			Model:     "",
 			Dimension: 768,
-			BaseURL:   "http://localhost:8080",
+			BaseURL:   "",
 		},
 		Chunking: ChunkingConfig{
 			Size:    800,
@@ -114,13 +118,19 @@ llm:
   provider: llama
   model: ""
   max_tokens: 4096
-  base_url: http://localhost:8080
+  # base_url: leave empty to use the provider default
+  #   llama/openai-compatible → http://localhost:8080
+  #   ollama                  → http://localhost:11434
+  #   claude                  → https://api.anthropic.com
+  #   openai                  → https://api.openai.com
+  base_url: ""
 
 embedding:
   provider: llama
   model: ""
   dimension: 768
-  base_url: http://localhost:8080
+  # base_url: leave empty to use the provider default (see llm above)
+  base_url: ""
 
 chunking:
   size: 800

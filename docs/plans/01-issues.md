@@ -173,7 +173,7 @@ max-file-size guard (stat before read; generous default ~100 MB). Folds into
 error-surfacing work, issue 15. Longer term, evaluate a maintained alternative
 (e.g. `pdfcpu`) if PDF coverage grows.
 
-### 10. [CORR] Provider `base_url` defaults unreachable — provider switch silently targets `localhost:8080` (orig #17)
+### 10. [CORR] Provider `base_url` defaults unreachable — provider switch silently targets `localhost:8080` (orig #17) — ✅ DONE
 
 **Problem:** Every adapter has an in-code fallback base URL (claude →
 `api.anthropic.com`, openai → `api.openai.com`, ollama → `:11434`) triggering
