@@ -106,7 +106,7 @@ read it. Caller passing filter gets unfiltered results, no error.
 `metadata` table before scoring), or remove field + `meta` parameter chain so
 the API stops advertising behaviour it lacks.
 
-### 6. [PROD] `tbuk delete` confirmation hangs on plain Enter (orig #41)
+### 6. [PROD] `tbuk delete` confirmation hangs on plain Enter (orig #41) — ✅ DONE
 
 **Problem:** Prompt is `Delete <path> (N chunks)? [y/N]` — convention: plain
 Enter = No. But reply read with `fmt.Fscan(os.Stdin, &answer)`; `Fscan` skips
