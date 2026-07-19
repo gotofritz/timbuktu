@@ -118,7 +118,7 @@ user types non-whitespace. Every interactive delete hits this.
 **Fix:** Read full line (`bufio.NewReader(os.Stdin).ReadString('\n')`), trim,
 empty line = default No.
 
-### 7. [CORR] `tbuk meta set` / `meta list` don't normalize path argument (orig #16)
+### 7. [CORR] `tbuk meta set` / `meta list` don't normalize path argument (orig #16) — ✅ DONE
 
 **Problem:** `ingest`/`update`/`delete` resolve CLI paths via `NormalizePath`
 before DB; documents keyed by canonical path. `RunMetaSet`/`RunMetaList` pass
