@@ -3,6 +3,7 @@ package chunking_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
 )
@@ -89,6 +90,50 @@ func TestChunker_chunks_indexed_sequentially(t *testing.T) {
 	for i, ch := range chunks {
 		if ch.Index != i {
 			t.Errorf("chunks[%d].Index = %d, want %d", i, ch.Index, i)
+		}
+	}
+}
+
+func TestChunker_multibyte_utf8_chunks_valid(t *testing.T) {
+	// CJK text (3 bytes/rune) with no sentence separators forces the
+	// byte-offset boundary logic to fall back to maxEnd, which can land
+	// mid-rune. Every chunk must still be valid UTF-8.
+	text := strings.Repeat("世界你好乾坤", 60) // 360 runes, 1080 bytes
+	c := &chunking.Chunker{Size: 10, Overlap: 2}
+	chunks := c.Split(text)
+
+	if len(chunks) < 2 {
+		t.Fatalf("got %d chunks, want ≥2", len(chunks))
+	}
+	var reassembledFirst string
+	for i, ch := range chunks {
+		if !utf8.ValidString(ch.Text) {
+			t.Errorf("chunk[%d] is not valid UTF-8: %q", i, ch.Text)
+		}
+		if !utf8.RuneStart(text[ch.StartByte]) {
+			t.Errorf("chunk[%d].StartByte=%d lands mid-rune", i, ch.StartByte)
+		}
+		if ch.EndByte < len(text) && !utf8.RuneStart(text[ch.EndByte]) {
+			t.Errorf("chunk[%d].EndByte=%d lands mid-rune", i, ch.EndByte)
+		}
+		if i == 0 {
+			reassembledFirst = ch.Text
+		}
+	}
+	// Sanity: first chunk starts at the document start.
+	if !strings.HasPrefix(text, reassembledFirst) {
+		t.Errorf("first chunk is not a prefix of the source text")
+	}
+}
+
+func TestChunker_accented_utf8_chunks_valid(t *testing.T) {
+	// Accented Latin (2 bytes/rune) with sentence separators.
+	sentence := strings.Repeat("café résumé naïve ", 5) + ". "
+	text := strings.Repeat(sentence, 4)
+	c := &chunking.Chunker{Size: 20, Overlap: 5}
+	for _, ch := range c.Split(text) {
+		if !utf8.ValidString(ch.Text) {
+			t.Errorf("chunk not valid UTF-8: %q", ch.Text)
 		}
 	}
 }

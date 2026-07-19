@@ -1,6 +1,9 @@
 package chunking
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Chunk is a slice of text with position metadata.
 type Chunk struct {
@@ -53,8 +56,9 @@ func (c *Chunker) Split(text string) []Chunk {
 			break
 		}
 
-		// Find a sentence boundary at or before end.
-		boundary := findBoundary(text, start, end)
+		// Find a sentence boundary at or before end, snapped to a rune start
+		// so we never slice through a multi-byte UTF-8 rune.
+		boundary := snapRuneStart(text, findBoundary(text, start, end))
 
 		ch := Chunk{
 			Index:      len(chunks),
@@ -65,8 +69,9 @@ func (c *Chunker) Split(text string) []Chunk {
 		}
 		chunks = append(chunks, ch)
 
-		// Next chunk starts overlapBytes before the boundary.
-		next := boundary - overlapBytes
+		// Next chunk starts overlapBytes before the boundary, snapped to a
+		// rune start so overlap never begins mid-rune.
+		next := snapRuneStart(text, boundary-overlapBytes)
 		if next <= start {
 			next = boundary // no progress guard
 		}
@@ -95,6 +100,22 @@ func findBoundary(text string, minStart, maxEnd int) int {
 		}
 	}
 	return best
+}
+
+// snapRuneStart moves i backwards to the nearest UTF-8 rune boundary so a
+// byte offset never falls in the middle of a multi-byte rune. Offsets at or
+// past the end of s, and offsets already on a rune start, are returned as-is.
+func snapRuneStart(s string, i int) int {
+	if i >= len(s) {
+		return len(s)
+	}
+	if i < 0 {
+		return 0
+	}
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
 }
 
 // splitSentences splits text on sentence delimiters, preserving delimiters.

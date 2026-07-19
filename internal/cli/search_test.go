@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/gotofritz/timbuktu/internal/cli"
 )
 
 func TestSearchCommand_missingArg(t *testing.T) {
@@ -87,6 +90,29 @@ func TestFindCommand_badFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "format") {
 		t.Errorf("error should mention 'format', got: %v", err)
+	}
+}
+
+func TestTruncatePreview_shortUnchanged(t *testing.T) {
+	s := "café"
+	if got := cli.TruncatePreview(s, 120); got != s {
+		t.Errorf("TruncatePreview(%q) = %q, want unchanged", s, got)
+	}
+}
+
+func TestTruncatePreview_multibyteStaysValid(t *testing.T) {
+	// 200 accented runes; byte length far exceeds 120, so naive text[:120]
+	// would slice mid-rune. Truncation must stay valid UTF-8.
+	s := strings.Repeat("é", 200)
+	got := cli.TruncatePreview(s, 120)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncated preview is not valid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("expected ellipsis suffix, got %q", got)
+	}
+	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "...")); n != 120 {
+		t.Errorf("truncated to %d runes, want 120", n)
 	}
 }
 
