@@ -20,19 +20,20 @@ Download the archive for your platform, extract `tbuk`, and put it on your
 
 ```bash
 # pick the asset matching your OS/arch from the latest release
-VERSION=v0.1.0          # replace with the latest tag
+VERSION=v0.1.1          # replace with the latest tag
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # linux or darwin
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
+# the download path keeps the leading "v"; the asset filename drops it
 curl -sSL -o tbuk.tar.gz \
-  "https://github.com/gotofritz/timbuktu/releases/download/${VERSION}/tbuk_${VERSION}_${OS}_${ARCH}.tar.gz"
+  "https://github.com/gotofritz/timbuktu/releases/download/${VERSION}/tbuk_${VERSION#v}_${OS}_${ARCH}.tar.gz"
 tar -xzf tbuk.tar.gz tbuk
 sudo mv tbuk /usr/local/bin/     # or any dir on your PATH
 tbuk version
 ```
 
-On Windows, download the `_windows_amd64.zip` asset, unzip it, and move
-`tbuk.exe` to a folder on your `PATH`.
+On Windows, download the `_windows_amd64.zip` (or `_windows_arm64.zip`)
+asset, unzip it, and move `tbuk.exe` to a folder on your `PATH`.
 
 ### From source
 

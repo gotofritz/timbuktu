@@ -30,7 +30,7 @@ traceability; duplicates note every reviewer that independently found them.
 Broken install funnel, silent corruption of the core retrieval pipeline,
 hangs, and the one realistic key-leak path. Fix all of these before alpha.
 
-### 1. [MAINT] README recommended install downloads a 404 (orig #47)
+### 1. [MAINT] README recommended install downloads a 404 (orig #47) — ✅ DONE
 
 **Problem:** README "Pre-built binary (recommended)" sets `VERSION=v0.1.0` and
 builds `tbuk_${VERSION}_${OS}_${ARCH}.tar.gz` → `tbuk_v0.1.0_linux_amd64.tar.gz`.
