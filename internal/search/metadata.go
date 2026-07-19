@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -17,9 +18,9 @@ func (s *Searcher) Metadata(ctx context.Context, filters map[string]string) ([]S
 	args := make([]any, 0, len(filters)*2+1)
 	i := 0
 	for k, v := range filters {
-		alias := strings.NewReplacer("-", "_", ".", "_").Replace(k)
-		joins = append(joins, "JOIN metadata m"+string(rune('0'+i))+" ON m"+string(rune('0'+i))+".document_id = d.id AND m"+string(rune('0'+i))+".key = ? AND m"+string(rune('0'+i))+".value = ?")
-		_ = alias
+		alias := fmt.Sprintf("m%d", i)
+		joins = append(joins, fmt.Sprintf(
+			"JOIN metadata %[1]s ON %[1]s.document_id = d.id AND %[1]s.key = ? AND %[1]s.value = ?", alias))
 		args = append(args, k, v)
 		i++
 	}

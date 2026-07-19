@@ -57,7 +57,7 @@ FROM (
         d.id,
         COUNT(c.id)        AS chunk_count,
         COUNT(c.embedding) AS embedded_count,
-        COALESCE(LENGTH(GROUP_CONCAT(c.text)), 0) AS size_bytes
+        COALESCE(SUM(LENGTH(c.text)), 0) AS size_bytes
     FROM documents d
     LEFT JOIN chunks c ON c.document_id = d.id
     GROUP BY d.id

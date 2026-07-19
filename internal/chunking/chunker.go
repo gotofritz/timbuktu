@@ -30,8 +30,7 @@ func (c *Chunker) Split(text string) []Chunk {
 		return nil
 	}
 
-	sentences := splitSentences(text)
-	if len(sentences) == 0 {
+	if strings.TrimSpace(text) == "" {
 		return nil
 	}
 
@@ -116,13 +115,4 @@ func snapRuneStart(s string, i int) int {
 		i--
 	}
 	return i
-}
-
-// splitSentences splits text on sentence delimiters, preserving delimiters.
-func splitSentences(text string) []string {
-	// Simple split; used only to confirm text is non-empty.
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	return []string{text}
 }

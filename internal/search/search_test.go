@@ -318,6 +318,30 @@ func TestMetadataSearch_multiFilter(t *testing.T) {
 	}
 }
 
+func TestMetadataSearch_manyFilters(t *testing.T) {
+	// More than 10 filters previously produced non-alphanumeric JOIN aliases
+	// (rune('0'+10) == ':'), yielding a SQL syntax error.
+	db := openTestDB(t)
+
+	doc := seedDoc(t, db, "/many.txt", "Doc Many")
+	filters := make(map[string]string, 12)
+	for i := 0; i < 12; i++ {
+		key := fmt.Sprintf("k%d", i)
+		seedMeta(t, db, doc, key, "v")
+		filters[key] = "v"
+	}
+	seedChunk(t, db, doc, 0, "body", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Metadata(context.Background(), filters)
+	if err != nil {
+		t.Fatalf("Metadata: %v", err)
+	}
+	if len(results) == 0 || results[0].DocumentID != doc {
+		t.Errorf("want Doc Many matched by all 12 filters, got %+v", results)
+	}
+}
+
 func TestMetadataSearch_noFilters(t *testing.T) {
 	db := openTestDB(t)
 	s := search.New(db, nil)
