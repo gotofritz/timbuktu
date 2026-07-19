@@ -62,7 +62,7 @@ the core pipeline.
 **Fix:** Track *maximum* candidate (`candidate > best`, sentinel init, fall
 back to `maxEnd` when none). Table-driven tests with mixed separators.
 
-### 3. [CORR] `Chunker.Split` hangs forever when `Size <= 0` (orig #15)
+### 3. [CORR] `Chunker.Split` hangs forever when `Size <= 0` (orig #15) — ✅ DONE
 
 **Problem:** With `Size: 0` (hand-edited config — nothing validates, see
 issue 17), `end == start`, boundary resolves to `start`, no-progress guard sets
