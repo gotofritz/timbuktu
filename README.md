@@ -22,6 +22,7 @@ tbuk doctor              # check config, database, LLM connectivity, and extract
 tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extracted/ (--dry-run, --output-dir)
 tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose)
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
+                         #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
 tbuk meta set <path> k=v # attach metadata to a document (repeatable key=value pairs)
 tbuk meta list <path>    # list all metadata for a document
