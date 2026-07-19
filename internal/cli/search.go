@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -135,11 +136,16 @@ func printSearchResults(results []search.SearchResult, format string) error {
 	}
 	for i, r := range results {
 		fmt.Printf("[%d] score=%.4f  %s §%d\n", i+1, r.Score, r.Path, r.ChunkIndex)
-		text := r.Text
-		if len(text) > 120 {
-			text = text[:120] + "..."
-		}
-		fmt.Printf("    %q\n\n", text)
+		fmt.Printf("    %q\n\n", TruncatePreview(r.Text, 120))
 	}
 	return nil
+}
+
+// TruncatePreview shortens s to at most n runes, appending "..." when it was
+// longer. It truncates on rune boundaries so multi-byte text stays valid UTF-8.
+func TruncatePreview(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + "..."
 }

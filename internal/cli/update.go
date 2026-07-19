@@ -58,6 +58,10 @@ func newUpdateCmd() *cobra.Command {
 // RunUpdate re-ingests a single file if its SHA256 has changed (or force=true).
 // Exported for testing.
 func RunUpdate(ctx context.Context, out io.Writer, ing *ingest.Ingester, _ *storage.DocumentRepo, path string, force bool) error {
+	path, err := NormalizePath(path)
+	if err != nil {
+		return fmt.Errorf("resolve path %s: %w", path, err)
+	}
 	res := ing.IngestFile(ctx, path, ingest.Options{Force: force})
 	if res.Err != nil {
 		return res.Err

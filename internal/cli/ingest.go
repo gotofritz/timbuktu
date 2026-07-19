@@ -52,7 +52,10 @@ func newIngestCmd() *cobra.Command {
 				os.Stdout,
 			)
 
-			path := args[0]
+			path, err := NormalizePath(args[0])
+			if err != nil {
+				return fmt.Errorf("resolve path %s: %w", args[0], err)
+			}
 			fi, err := os.Stat(path)
 			if err != nil {
 				return fmt.Errorf("stat %s: %w", path, err)
