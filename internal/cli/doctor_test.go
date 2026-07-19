@@ -288,6 +288,65 @@ func TestRunDoctorTo_fts5CheckedWhenEmbedderDown(t *testing.T) {
 	}
 }
 
+// ── CheckEmbeddingDimension ───────────────────────────────────────────────────
+
+func seedEmbeddedChunk(t *testing.T, path string, dim int) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := t.Context()
+	docRepo := storage.NewDocumentRepo(db.DB())
+	chunkRepo := storage.NewChunkRepo(db.DB())
+	doc := &storage.Document{Path: "/d.txt", SHA256: "s", Title: "t", MimeType: "text/plain"}
+	if err := docRepo.Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	emb := make([]float32, dim)
+	if err := chunkRepo.BulkInsert(ctx, []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "x", Embedding: emb},
+	}); err != nil {
+		t.Fatalf("bulk insert: %v", err)
+	}
+}
+
+func TestCheckEmbeddingDimension_matches(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+	seedEmbeddedChunk(t, dbPath, 768)
+
+	msg, status := cli.CheckEmbeddingDimension(dbPath, 768)
+	if status != "✓" {
+		t.Errorf("status = %q, want ✓ (msg %q)", status, msg)
+	}
+}
+
+func TestCheckEmbeddingDimension_mismatch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+	seedEmbeddedChunk(t, dbPath, 384)
+
+	msg, status := cli.CheckEmbeddingDimension(dbPath, 768)
+	if status != "✗" {
+		t.Errorf("status = %q, want ✗", status)
+	}
+	if !strings.Contains(msg, "384") || !strings.Contains(msg, "768") {
+		t.Errorf("msg = %q, want it to show both stored (384) and config (768)", msg)
+	}
+}
+
+func TestCheckEmbeddingDimension_noEmbeddings(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	msg, status := cli.CheckEmbeddingDimension(dbPath, 768)
+	if status == "✗" {
+		t.Errorf("empty KB should not report a mismatch, got ✗ (msg %q)", msg)
+	}
+}
+
 // seedDB creates a schema-initialized database file at path.
 func seedDB(t *testing.T, path string) {
 	t.Helper()

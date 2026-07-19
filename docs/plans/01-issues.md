@@ -77,7 +77,7 @@ repro test.
 belt-and-braces with `Config.Validate()` (issue 17), since `Chunker` is also
 constructed directly in code.
 
-### 4. [ARCH] Embedding dimension mismatch fails silent (orig #2)
+### 4. [ARCH] Embedding dimension mismatch fails silent (orig #2) — ✅ DONE
 
 **Problem:** `cosineSimilarity` returns `0` when vector lengths differ. User
 changes embedding model or `embedding.dimension` after ingest → every stored

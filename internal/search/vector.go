@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 
@@ -42,6 +43,16 @@ func (s *Searcher) Vector(ctx context.Context, query string, opts Options) ([]Se
 		emb, err := storage.BlobToFloat32Slice(blob)
 		if err != nil {
 			continue
+		}
+		if len(emb) != len(queryVec) {
+			// A stored vector whose dimension differs from the query embedding
+			// means the embedding model or config changed since ingest. Cosine
+			// similarity would silently score every such chunk 0, so fail loud.
+			return nil, fmt.Errorf(
+				"vector search: query embedding has %d dimensions but stored vectors have %d — "+
+					"the embedding model/config changed since ingest; re-ingest the corpus or "+
+					"restore the previous embedding configuration",
+				len(queryVec), len(emb))
 		}
 		score := cosineSimilarity(queryVec, emb)
 		if score >= opts.MinScore {

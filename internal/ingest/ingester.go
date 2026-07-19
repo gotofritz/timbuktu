@@ -137,6 +137,28 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		}
 	}
 
+	// Guard against a changed embedding model/config silently corrupting the
+	// index: new vectors must match the dimension of the rest of the KB. The
+	// document's own soon-to-be-replaced chunks are excluded so a full re-ingest
+	// of a single-document base still works.
+	if newDim := firstEmbeddingDim(storageChunks); newDim > 0 {
+		var excludeID int64
+		if existing != nil {
+			excludeID = existing.ID
+		}
+		existingDim, found, err := ing.chunks.EmbeddingDimension(ctx, excludeID)
+		if err != nil {
+			return Result{Path: path, Err: fmt.Errorf("ingest: check embedding dimension: %w", err)}
+		}
+		if found && existingDim != newDim {
+			return Result{Path: path, Err: fmt.Errorf(
+				"ingest: %s: embedding dimension mismatch: knowledge base uses %d-dim vectors "+
+					"but the current embedding model/config produces %d — clear the database and "+
+					"re-ingest, or restore the previous embedding configuration",
+				path, existingDim, newDim)}
+		}
+	}
+
 	mime := preprocess.DetectMIME(path)
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 
@@ -177,6 +199,17 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 
 	_, _ = fmt.Fprintf(ing.progress, "%s → %d chunks embedded\n", path, len(storageChunks))
 	return Result{Path: path, Chunks: len(storageChunks)}
+}
+
+// firstEmbeddingDim returns the length of the first non-empty embedding, or 0
+// if none of the chunks carry an embedding.
+func firstEmbeddingDim(chunks []*storage.Chunk) int {
+	for _, c := range chunks {
+		if len(c.Embedding) > 0 {
+			return len(c.Embedding)
+		}
+	}
+	return 0
 }
 
 // writeAutoMetadata (re)writes the automatic per-document metadata keys.

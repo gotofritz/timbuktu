@@ -244,9 +244,14 @@ func TestDocumentRepo_List(t *testing.T) {
 
 func seedDocument(t *testing.T, ctx context.Context, repo *storage.DocumentRepo) *storage.Document {
 	t.Helper()
-	doc := makeDoc("/seed.txt")
+	return seedDocumentAt(t, ctx, repo, "/seed.txt")
+}
+
+func seedDocumentAt(t *testing.T, ctx context.Context, repo *storage.DocumentRepo, path string) *storage.Document {
+	t.Helper()
+	doc := makeDoc(path)
 	if err := repo.Create(ctx, doc); err != nil {
-		t.Fatalf("seed document: %v", err)
+		t.Fatalf("seed document %s: %v", path, err)
 	}
 	return doc
 }
@@ -474,6 +479,90 @@ func TestChunkRepo_WithEmbedding(t *testing.T) {
 	if len(got[0].Embedding) != 3 {
 		t.Errorf("embedding not persisted: got %v", got[0].Embedding)
 	}
+}
+
+func TestChunkRepo_EmbeddingDimension(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty knowledge base returns not found", func(t *testing.T) {
+		db := openTestDB(t)
+		chunkRepo := storage.NewChunkRepo(db.DB())
+		_, found, err := chunkRepo.EmbeddingDimension(ctx, 0)
+		if err != nil {
+			t.Fatalf("EmbeddingDimension: %v", err)
+		}
+		if found {
+			t.Errorf("found = true, want false for empty KB")
+		}
+	})
+
+	t.Run("consistent dimension reported", func(t *testing.T) {
+		db := openTestDB(t)
+		docRepo := storage.NewDocumentRepo(db.DB())
+		chunkRepo := storage.NewChunkRepo(db.DB())
+		doc := seedDocument(t, ctx, docRepo)
+		chunks := []*storage.Chunk{
+			{DocumentID: doc.ID, ChunkIndex: 0, Text: "a", Embedding: []float32{1, 2, 3, 4}},
+			{DocumentID: doc.ID, ChunkIndex: 1, Text: "b", Embedding: []float32{5, 6, 7, 8}},
+		}
+		if err := chunkRepo.BulkInsert(ctx, chunks); err != nil {
+			t.Fatalf("BulkInsert: %v", err)
+		}
+		dim, found, err := chunkRepo.EmbeddingDimension(ctx, 0)
+		if err != nil {
+			t.Fatalf("EmbeddingDimension: %v", err)
+		}
+		if !found || dim != 4 {
+			t.Errorf("dim=%d found=%v, want dim=4 found=true", dim, found)
+		}
+	})
+
+	t.Run("inconsistent dimensions error", func(t *testing.T) {
+		db := openTestDB(t)
+		docRepo := storage.NewDocumentRepo(db.DB())
+		chunkRepo := storage.NewChunkRepo(db.DB())
+		d1 := seedDocumentAt(t, ctx, docRepo, "/one.txt")
+		d2 := seedDocumentAt(t, ctx, docRepo, "/two.txt")
+		if err := chunkRepo.BulkInsert(ctx, []*storage.Chunk{
+			{DocumentID: d1.ID, ChunkIndex: 0, Text: "a", Embedding: []float32{1, 2, 3}},
+		}); err != nil {
+			t.Fatalf("BulkInsert d1: %v", err)
+		}
+		if err := chunkRepo.BulkInsert(ctx, []*storage.Chunk{
+			{DocumentID: d2.ID, ChunkIndex: 0, Text: "b", Embedding: []float32{1, 2, 3, 4}},
+		}); err != nil {
+			t.Fatalf("BulkInsert d2: %v", err)
+		}
+		if _, _, err := chunkRepo.EmbeddingDimension(ctx, 0); err == nil {
+			t.Error("expected error for inconsistent stored dimensions")
+		}
+	})
+
+	t.Run("excludes given document", func(t *testing.T) {
+		db := openTestDB(t)
+		docRepo := storage.NewDocumentRepo(db.DB())
+		chunkRepo := storage.NewChunkRepo(db.DB())
+		d1 := seedDocumentAt(t, ctx, docRepo, "/keep.txt")
+		d2 := seedDocumentAt(t, ctx, docRepo, "/exclude.txt")
+		if err := chunkRepo.BulkInsert(ctx, []*storage.Chunk{
+			{DocumentID: d1.ID, ChunkIndex: 0, Text: "a", Embedding: []float32{1, 2, 3}},
+		}); err != nil {
+			t.Fatalf("BulkInsert d1: %v", err)
+		}
+		if err := chunkRepo.BulkInsert(ctx, []*storage.Chunk{
+			{DocumentID: d2.ID, ChunkIndex: 0, Text: "b", Embedding: []float32{1, 2, 3, 4, 5}},
+		}); err != nil {
+			t.Fatalf("BulkInsert d2: %v", err)
+		}
+		// Excluding d2 leaves only the 3-dim chunk → no mismatch, dim=3.
+		dim, found, err := chunkRepo.EmbeddingDimension(ctx, d2.ID)
+		if err != nil {
+			t.Fatalf("EmbeddingDimension: %v", err)
+		}
+		if !found || dim != 3 {
+			t.Errorf("dim=%d found=%v, want dim=3 found=true", dim, found)
+		}
+	})
 }
 
 // ── error / constraint paths ──────────────────────────────────────────────────
