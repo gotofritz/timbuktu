@@ -55,7 +55,7 @@ func TestRunDelete_normalizesRelativeToAbsolute(t *testing.T) {
 	// Delete using the relative spelling from the file's directory.
 	t.Chdir(dir)
 	var out bytes.Buffer
-	if err := cli.RunDelete(ctx, &out, sqlDB, docs, "notes.md"); err != nil {
+	if err := cli.RunDelete(ctx, &out, sqlDB, docs, "", "notes.md"); err != nil {
 		t.Fatalf("RunDelete(relative): %v", err)
 	}
 	if _, err := docs.GetByPath(ctx, abs); err == nil {

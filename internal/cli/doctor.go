@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -15,6 +16,15 @@ import (
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
+const hostedNotProbed = "hosted API — not probed; set ANTHROPIC_API_KEY/OPENAI_API_KEY"
+
+// isHostedProvider reports whether a provider is a hosted API (claude/openai)
+// whose endpoints don't follow the llama.cpp/ollama /health & /v1/models
+// conventions, so probing them yields misleading results.
+func isHostedProvider(provider string) bool {
+	return provider == "claude" || provider == "openai"
+}
+
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -24,7 +34,7 @@ func newDoctorCmd() *cobra.Command {
 }
 
 func makeDoctorRunner(client *http.Client) func(*cobra.Command, []string) error {
-	return func(_ *cobra.Command, _ []string) error {
+	return func(cmd *cobra.Command, _ []string) error {
 		if client == nil {
 			client = &http.Client{Timeout: 3 * time.Second}
 		}
@@ -33,64 +43,79 @@ func makeDoctorRunner(client *http.Client) func(*cobra.Command, []string) error 
 		if cfgPath == "" {
 			cfgPath = config.DefaultPath()
 		}
-		return runDoctor(client, cfg, cfgPath)
+		return runDoctor(cmd.OutOrStdout(), client, cfg, cfgPath)
 	}
 }
 
-// RunDoctor executes the doctor checks. Exported for testing.
+// RunDoctor executes the doctor checks, writing to stdout. Exported for testing.
 func RunDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
-	return runDoctor(client, cfg, cfgPath)
+	return runDoctor(os.Stdout, client, cfg, cfgPath)
 }
 
-func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
-	printSection("Config")
-	printCheck("path", cfgPath, "")
-	msg, ok := CheckConfig(cfgPath)
-	printCheck("status", msg, boolToStatus(ok))
+// RunDoctorTo executes the doctor checks, writing the report to w.
+// Exported for testing.
+func RunDoctorTo(w io.Writer, client *http.Client, cfg config.Config, cfgPath string) error {
+	return runDoctor(w, client, cfg, cfgPath)
+}
 
-	printSection("Database")
-	printCheck("path", cfg.Database.Path, "")
-	msg, ok = CheckDB(cfg.Database.Path)
-	printCheck("status", msg, boolToStatus(ok))
-	if ok {
+func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath string) error {
+	printSection(w, "Config")
+	printCheck(w, "path", cfgPath, "")
+	msg, ok := CheckConfig(cfgPath)
+	printCheck(w, "status", msg, boolToStatus(ok))
+
+	printSection(w, "Database")
+	printCheck(w, "path", cfg.Database.Path, "")
+	msg, dbOK := CheckDB(cfg.Database.Path)
+	printCheck(w, "status", msg, boolToStatus(dbOK))
+	if dbOK {
 		db, err := storage.Open(cfg.Database.Path)
 		if err == nil {
 			sqlDB := db.DB()
 			if n, err := CountDocuments(sqlDB); err == nil {
-				printCheck("documents", fmt.Sprintf("%d", n), "")
+				printCheck(w, "documents", fmt.Sprintf("%d", n), "")
 			}
 			if n, err := CountChunks(sqlDB); err == nil {
-				printCheck("chunks", fmt.Sprintf("%d", n), "")
+				printCheck(w, "chunks", fmt.Sprintf("%d", n), "")
 			}
 			_ = db.Close()
 		}
 		if info, err := os.Stat(cfg.Database.Path); err == nil {
-			printCheck("size", humanBytes(info.Size()), "")
+			printCheck(w, "size", humanBytes(info.Size()), "")
 		}
 	}
 
-	printSection("LLM (" + cfg.LLM.Provider + ")")
-	printCheck("url", cfg.LLM.BaseURL, "")
-	msg, ok = CheckHTTP(cfg.LLM.BaseURL+"/health", client)
-	printCheck("status", msg, boolToStatus(ok))
-	printCheck("model", CheckLLMModel(cfg.LLM.BaseURL, cfg.LLM.Model, client), "")
-	printCheck("max_tokens", fmt.Sprintf("%d", cfg.LLM.MaxTokens), "")
-
-	printSection("Embedding (" + cfg.Embedding.Provider + ")")
-	printCheck("url", cfg.Embedding.BaseURL, "")
-	if cfg.Embedding.BaseURL == cfg.LLM.BaseURL {
-		printCheck("status", "same server as LLM", "✓")
+	printSection(w, "LLM ("+cfg.LLM.Provider+")")
+	printCheck(w, "url", cfg.LLM.BaseURL, "")
+	if isHostedProvider(cfg.LLM.Provider) {
+		printCheck(w, "status", hostedNotProbed, "")
+		printCheck(w, "model", cfg.LLM.Model, "")
 	} else {
+		msg, ok = CheckHTTP(cfg.LLM.BaseURL+"/health", client)
+		printCheck(w, "status", msg, boolToStatus(ok))
+		printCheck(w, "model", CheckLLMModel(cfg.LLM.BaseURL, cfg.LLM.Model, client), "")
+	}
+	printCheck(w, "max_tokens", fmt.Sprintf("%d", cfg.LLM.MaxTokens), "")
+
+	printSection(w, "Embedding ("+cfg.Embedding.Provider+")")
+	printCheck(w, "url", cfg.Embedding.BaseURL, "")
+	switch {
+	case isHostedProvider(cfg.Embedding.Provider):
+		printCheck(w, "status", hostedNotProbed, "")
+	case cfg.Embedding.BaseURL == cfg.LLM.BaseURL && !isHostedProvider(cfg.LLM.Provider):
+		printCheck(w, "status", "same server as LLM", "✓")
+	default:
 		msg, ok = CheckHTTP(cfg.Embedding.BaseURL+"/health", client)
-		printCheck("status", msg, boolToStatus(ok))
+		printCheck(w, "status", msg, boolToStatus(ok))
 	}
 
-	printSection("Preprocessing")
-	printCheck("extractors", "markdown, text, html, pdf", "✓")
+	printSection(w, "Preprocessing")
+	printCheck(w, "extractors", "markdown, text, html, pdf", "✓")
 
-	printSection("Search")
+	printSection(w, "Search")
+	// FTS5 health depends only on the database, not on any embedding server.
 	ftsStatus := "✓"
-	if ok {
+	if dbOK {
 		if db2, err2 := storage.Open(cfg.Database.Path); err2 == nil {
 			if err3 := search.CheckFTS5(db2.DB()); err3 != nil {
 				ftsStatus = "✗"
@@ -98,21 +123,21 @@ func runDoctor(client *http.Client, cfg config.Config, cfgPath string) error {
 			_ = db2.Close()
 		}
 	}
-	printCheck("fts5", "available", ftsStatus)
-	printCheck("vector", "available (cosine, in-process)", "✓")
-	printCheck("hybrid", "available (RRF)", "✓")
+	printCheck(w, "fts5", "available", ftsStatus)
+	printCheck(w, "vector", "available (cosine, in-process)", "✓")
+	printCheck(w, "hybrid", "available (RRF)", "✓")
 
-	printSection("Prompts")
-	printCheck("dir", promptsRoot(), "")
+	printSection(w, "Prompts")
+	printCheck(w, "dir", promptsRoot(), "")
 	manifests, listErr := promptsDir().List()
 	if listErr != nil || len(manifests) == 0 {
-		printCheck("templates", "none", "")
+		printCheck(w, "templates", "none", "")
 	} else {
 		names := make([]string, len(manifests))
 		for i, m := range manifests {
 			names[i] = m.Name
 		}
-		printCheck("templates", strings.Join(names, ", "), "✓")
+		printCheck(w, "templates", strings.Join(names, ", "), "✓")
 	}
 
 	return nil
@@ -178,15 +203,15 @@ func CheckHTTP(url string, client *http.Client) (string, bool) {
 	return fmt.Sprintf("healthy (HTTP %d)", resp.StatusCode), true
 }
 
-func printSection(name string) {
-	fmt.Printf("\n%s\n", name)
+func printSection(w io.Writer, name string) {
+	fmt.Fprintf(w, "\n%s\n", name) //nolint:errcheck
 }
 
-func printCheck(key, val, status string) {
+func printCheck(w io.Writer, key, val, status string) {
 	if status != "" {
-		fmt.Printf("  %-10s %s %s\n", key+":", status, val)
+		fmt.Fprintf(w, "  %-10s %s %s\n", key+":", status, val) //nolint:errcheck
 	} else {
-		fmt.Printf("  %-10s %s\n", key+":", val)
+		fmt.Fprintf(w, "  %-10s %s\n", key+":", val) //nolint:errcheck
 	}
 }
 

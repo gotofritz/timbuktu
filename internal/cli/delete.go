@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -53,7 +54,7 @@ func newDeleteCmd() *cobra.Command {
 				}
 			}
 
-			return RunDelete(cmd.Context(), out, sqlDB, docs, args[0])
+			return RunDelete(cmd.Context(), out, sqlDB, docs, cfg.Preprocess.OutputDir, args[0])
 		},
 	}
 
@@ -61,9 +62,10 @@ func newDeleteCmd() *cobra.Command {
 	return cmd
 }
 
-// RunDelete removes a document (and its chunks via CASCADE) from the DB.
-// Exported for testing.
-func RunDelete(ctx context.Context, out io.Writer, db *sql.DB, docs *storage.DocumentRepo, path string) error {
+// RunDelete removes a document (and its chunks via CASCADE) from the DB, and
+// removes its extracted-text cache file (extractedDir/<sha>.txt) so no orphan
+// lineage is left behind. Exported for testing.
+func RunDelete(ctx context.Context, out io.Writer, db *sql.DB, docs *storage.DocumentRepo, extractedDir, path string) error {
 	path, err := NormalizePath(path)
 	if err != nil {
 		return fmt.Errorf("resolve path %s: %w", path, err)
@@ -82,6 +84,14 @@ func RunDelete(ctx context.Context, out io.Writer, db *sql.DB, docs *storage.Doc
 
 	if err := docs.Delete(ctx, doc.ID); err != nil {
 		return fmt.Errorf("delete: %w", err)
+	}
+
+	// Best-effort cache cleanup: a missing file is not an error.
+	if extractedDir != "" && doc.SHA256 != "" {
+		cachePath := filepath.Join(extractedDir, doc.SHA256+".txt")
+		if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove extracted cache %s: %w", cachePath, err)
+		}
 	}
 
 	fmt.Fprintf(out, "Deleted %s (%d chunks removed)\n", path, chunkCount) //nolint:errcheck
