@@ -105,7 +105,11 @@ _bump:
 	@branch=$$(git rev-parse --abbrev-ref HEAD); \
 	if [ "$$branch" != "main" ]; then \
 	  echo "releases must be cut from main (on '$$branch')"; exit 1; fi
-	@v=$${LATEST_TAG#v}; \
+	@cur='$(LATEST_TAG)'; v=$${cur#v}; \
+	case "$$v" in \
+	  [0-9]*.[0-9]*.[0-9]*) ;; \
+	  *) echo "cannot parse latest tag '$$cur' as vMAJOR.MINOR.PATCH"; exit 1;; \
+	esac; \
 	major=$$(echo "$$v" | cut -d. -f1); \
 	minor=$$(echo "$$v" | cut -d. -f2); \
 	patch=$$(echo "$$v" | cut -d. -f3); \
@@ -116,9 +120,9 @@ _bump:
 	  *) echo "BUMP must be patch|minor|major"; exit 1;; \
 	esac; \
 	next="v$$major.$$minor.$$patch"; \
-	echo "Current: $(LATEST_TAG)  ->  Next: $$next"; \
+	echo "Current: $$cur  ->  Next: $$next"; \
 	printf "Tag and push %s? [y/N] " "$$next"; read ans; \
 	[ "$$ans" = "y" ] || { echo "aborted"; exit 1; }; \
-	git tag -a "$$next" -m "Release $$next"; \
-	git push origin "$$next"; \
+	git tag -a "$$next" -m "Release $$next" && \
+	git push origin "$$next" && \
 	echo "Pushed $$next — the Release workflow will build and publish it."
