@@ -285,6 +285,13 @@ ambiguous).
 
 ### 12. Doctor inaccuracies
 
+> **DONE (PR 8).** Archived to
+> `docs/archive/2026-07-19-0850-d5f5095-11-p1-12-doctor-delete-cache.md`. FTS5
+> health is gated on database health (own `dbOK` flag), not the embedding
+> server; hosted providers (`claude`/`openai`) skip the `/health` & `/v1/models`
+> probes and print `hosted API — not probed`; `RunDelete` removes the
+> extracted-text cache file (`extractedDir/<sha>.txt`, best-effort).
+
 - The FTS5 check is gated on the *embedding server's* health flag (`ok` from
   the previous section), so a down embedding server hides FTS corruption and
   prints `fts5: ✓ available` unchecked.
@@ -368,7 +375,7 @@ aspirational.
 | 5 | P0-6 hybrid MinScore + FTS5 query sanitizing ✅ done | — |
 | 6 | P1-7 UTF-8 chunking + P1-11 path normalization ✅ done | 1 |
 | 7 | P1-8 stream cancellation + P1-9 error bodies + P1-10 ErrNotFound ✅ done | — |
-| 8 | P1-12 doctor fixes + delete cache cleanup | — |
+| 8 | P1-12 doctor fixes + delete cache cleanup ✅ done | — |
 | 9 | P2 cleanups + per-package coverage gate + perms hardening | 1–8 |
 
 Every PR: failing test first (TDD hook enforces), `make check-ci` green,

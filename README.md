@@ -30,7 +30,7 @@ tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template
 tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR
-tbuk delete <path>       # remove a document and all its chunks (--yes skips prompt)
+tbuk delete <path>       # remove a document, its chunks, and its extracted-text cache (--yes skips prompt)
 tbuk update <path>       # re-ingest if SHA256 changed, skip otherwise (--force)
 tbuk stats               # knowledge base summary: doc/chunk counts, size (--format text|json)
 ```
@@ -148,6 +148,7 @@ text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 |---------|--------------|-----|
 | `tbuk` command not found after install | Go bin dir not in PATH | Add `export PATH="$PATH:$(go env GOPATH)/bin"` to shell profile and restart terminal |
 | `tbuk doctor` shows LLM or embedding unreachable | llama.cpp not running, or wrong port | Start llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` |
+| `tbuk doctor` shows `hosted API — not probed` | Provider is `claude`/`openai` (no `/health` endpoint) | Expected — hosted APIs aren't probed; set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and use `tbuk ask` to verify connectivity |
 | `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, context too long, rate limit) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens` |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
 | `tbuk ask` returns irrelevant or vague answers | Low retrieval quality or document not ingested | Run `tbuk search <query>` to inspect retrieved chunks; run `tbuk update <path>` if the file changed |
