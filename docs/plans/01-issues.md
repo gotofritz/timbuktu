@@ -986,3 +986,111 @@ convention; move the `.original.md` backup to `docs/archive/` or delete it.
 - **Docs volume:** README + user guide + initial-context + roadmap all
   current-ish (drift tracked as issues 11/40/43/44). Unusually good for
   project age.
+
+---
+
+## Engineering Sustainability Assessment — 2026-07-19 (Technical Debt Auditor)
+
+### ES-1: CI coverage gate weaker than local `make check-ci` (per-package rule unenforced)
+
+- **Where:** `.github/workflows/quality-check.yml` (coverage job) vs `Makefile` `check-ci`
+- **Problem:** AGENTS.md and `make check-ci` require ≥85% coverage *per package* (and fail on
+  packages with no test files). The CI coverage job only checks the *total* (currently 86.7%).
+  A PR can drop a single package well below 85% (or add an untested package), pass CI, and merge —
+  then every developer's local `make check-ci` fails on an inherited problem.
+- **Fix:** Make the CI coverage step run the same per-package check as the Makefile — simplest is
+  to have CI invoke `make check-ci` (or extract the awk gate into a script both call), so local
+  and CI gates cannot drift again.
+- **Effort:** Small.
+
+### ES-2: Race detector never runs in CI
+
+- **Where:** `.github/workflows/ci.yml`; `internal/llm/claude.go:113`, `ollama.go:79`, `openai.go:126`
+- **Problem:** The LLM streaming adapters spawn goroutines, but `go test -race` exists only as a
+  local `make test-race` target nobody is forced to run. Data races in the streaming path would
+  ship undetected.
+- **Fix:** Run tests with `-race` in the CI test step (suite takes ~3s, race overhead is trivial),
+  or add a dedicated race job.
+- **Effort:** Trivial.
+
+### ES-3: Lint config not committed + README installs the wrong golangci-lint major version
+
+- **Where:** repo root (no `.golangci.yml`); `README.md` "From source" section;
+  `.github/workflows/quality-check.yml`
+- **Problem:** Two related drifts:
+  1. No `.golangci.yml` is committed, so lint behavior is whatever the tool's defaults are for the
+     version that happens to run — it can change silently when CI bumps the pinned version.
+  2. README tells contributors to `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`,
+     which installs **v1** (the v2 module path is `github.com/golangci/golangci-lint/v2/cmd/golangci-lint`).
+     CI pins v2.5.0. Local lint and CI lint therefore run different major versions with
+     incompatible configs and different default linters — "passes locally, fails in CI" (or worse,
+     the reverse).
+- **Fix:** Commit a minimal `.golangci.yml` (`version: "2"` plus the intended linter set); fix the
+  README install command to the `/v2/` path pinned to the same version CI uses.
+- **Effort:** Small.
+
+### ES-4: No automated dependency updates
+
+- **Where:** `.github/` (no `dependabot.yml`, no renovate config)
+- **Problem:** Five direct deps (cobra, yaml.v3, modernc sqlite, x/net, ledongthuc/pdf) plus four
+  GitHub Actions go stale silently. `x/net` in particular carries regular security fixes, and the
+  pdf lib is a pseudo-versioned snapshot. For a low-touch personal project, unpatched deps are the
+  main way the repo rots between active periods.
+- **Fix:** Add `.github/dependabot.yml` with `gomod` + `github-actions` ecosystems, weekly or
+  monthly interval. CI (tidy-diff, tests, lint) already gates the update PRs.
+- **Effort:** Trivial.
+
+### ES-5: Architecture docs describe a package that doesn't exist
+
+- **Where:** `README.md` (Architecture section) and `docs/initial-context.md` both list
+  `internal/metadata/ — stub (not yet active)`
+- **Problem:** There is no `internal/metadata/` directory. Metadata functionality actually lives in
+  `internal/storage/metadata.go` (repo) and `internal/search/metadata.go` (search). AGENTS.md
+  designates `docs/initial-context.md` as the architecture source of truth agents read first —
+  a phantom package sends every new session/contributor looking for code that isn't there.
+- **Fix:** Delete the `metadata/` line from both files (or note where metadata actually lives).
+- **Effort:** Trivial.
+
+### ES-6: Dead `make serve` target from another project
+
+- **Where:** `Makefile` (`serve: cd output && python3 -m http.server 8080`)
+- **Problem:** References an `output/` directory that doesn't exist and "local feed testing" that
+  has no meaning in this codebase — copy-paste leftover. It appears in `make help` as if it were a
+  real workflow, fails when run, and adds a python3 implication to a pure-Go project.
+- **Fix:** Delete the target (and its `.PHONY` entry).
+- **Effort:** Trivial.
+
+### ES-7: Contributor toolchain undocumented (pre-commit + commitizen)
+
+- **Where:** `.pre-commit-config.yaml`; `README.md` Development section
+- **Problem:** AGENTS.md states "Pre-commit enabled" and the commit-msg hook runs `cz check`
+  (commitizen, a Python tool, `language: system` — must be preinstalled). Neither README nor any
+  CONTRIBUTING.md mentions installing `pre-commit` or `commitizen`, and no commitizen config is
+  committed. A fresh clone either silently skips the hooks (never ran `pre-commit install`) or
+  fails commits with a missing-`cz` error. Conventional-commit discipline also feeds the
+  GoReleaser changelog grouping, so unenforced commits degrade release notes.
+- **Fix:** Add a short "Contributing / setup" subsection to README: `pip install pre-commit
+  commitizen && pre-commit install --install-hooks`. Optionally commit a `.cz.toml` to pin the
+  convention explicitly.
+- **Effort:** Small.
+
+### ES-8: Go version stated inconsistently across docs
+
+- **Where:** `go.mod` (`go 1.25.0`), `README.md` ("Go 1.25+"), `AGENTS.md` ("go (1.24+)")
+- **Problem:** AGENTS.md promises Go 1.24+ works, but `go.mod` demands 1.25.0 — a 1.24 toolchain
+  will refuse to build (or auto-download 1.25, surprising offline/CI environments). Minor, but
+  AGENTS.md is the instructions file agents follow verbatim.
+- **Fix:** Update AGENTS.md to `go (1.25+)`.
+- **Effort:** Trivial.
+
+### ES-9: Test suite runs twice on every push/PR
+
+- **Where:** `.github/workflows/ci.yml` (Test step, `-v`) and
+  `.github/workflows/quality-check.yml` (coverage job)
+- **Problem:** Both workflows trigger on the same events and both run the full test suite; ci.yml
+  additionally uses `-v`, which buries failures in per-test noise. Low cost today (fast suite) but
+  it's structural duplication that grows with the suite, and two workflows must now be kept in
+  sync with any test-invocation change (see ES-1 for the same drift pattern).
+- **Fix:** Drop the Test step from ci.yml (coverage job already runs everything with `-count=1`),
+  or merge the two workflows; drop `-v` either way.
+- **Effort:** Small. Priority: low.
