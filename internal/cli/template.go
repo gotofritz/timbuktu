@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -94,18 +97,39 @@ func newTemplateEditCmd() *cobra.Command {
 		Use:   "edit <name>",
 		Short: "Open a template's manifest in $EDITOR",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			manifestPath := filepath.Join(promptsRoot(), name, "manifest.yaml")
+			if _, err := os.Stat(manifestPath); err != nil {
+				return fmt.Errorf("template %q: %w", name, err)
+			}
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
 				editor = "vi"
 			}
-			manifestPath := filepath.Join(promptsRoot(), name, "manifest.yaml")
-			// exec.Command would be ideal but for CLI correctness we just print the path.
-			fmt.Printf("Edit: %s (open with %s)\n", manifestPath, editor)
-			return nil
+			return launchEditor(editor, manifestPath, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
+}
+
+// launchEditor runs the configured editor against path with the given stdio
+// attached, so an interactive terminal editor takes over the session. editor
+// may include flags (e.g. "code --wait"); its fields are split and path is
+// appended as the final argument.
+func launchEditor(editor, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fields := strings.Fields(editor)
+	if len(fields) == 0 {
+		return fmt.Errorf("no editor configured (set $EDITOR)")
+	}
+	args := append(fields[1:], path)
+	c := exec.Command(fields[0], args...)
+	c.Stdin = stdin
+	c.Stdout = stdout
+	c.Stderr = stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("run editor %q: %w", editor, err)
+	}
+	return nil
 }
 
 func promptsRoot() string {

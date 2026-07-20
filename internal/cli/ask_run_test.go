@@ -501,24 +501,20 @@ func TestAskCommand_templateEditCommand(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+	t.Setenv("EDITOR", fakeEditor(t, "# edited"))
 
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := runCLI("--config", cfgPath, "template", "edit", "qa")
-
-	_ = w.Close()
-	os.Stdout = oldStdout
-
-	buf := make([]byte, 4096)
-	n, _ := r.Read(buf)
-	output := string(buf[:n])
-
-	if err != nil {
+	if err := runCLI("--config", cfgPath, "template", "edit", "qa"); err != nil {
 		t.Fatalf("template edit: %v", err)
 	}
-	if !strings.Contains(output, "manifest.yaml") {
-		t.Errorf("template edit should mention manifest.yaml, got: %q", output)
+
+	// The shipped qa template is a real manifest; editing it must launch the
+	// editor against that file, not merely print its path.
+	manifest := filepath.Join(home, ".tbuk", "prompts", "qa", "manifest.yaml")
+	got, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "# edited") {
+		t.Errorf("template edit did not run editor on manifest; content = %q", got)
 	}
 }
