@@ -388,7 +388,7 @@ out with a clear "database created by newer tbuk" message when recorded max
 version exceeds the binary's. Optionally copy the DB file aside before
 applying pending migrations.
 
-### 23. [PROD] No way to list documents in the knowledge base (orig #42)
+### 23. [PROD] No way to list documents in the knowledge base (orig #42) — ✅ DONE
 
 **Problem:** No `tbuk list` (or `tbuk docs`). `tbuk stats` = counts only;
 `tbuk find` requires a metadata filter — "show me everything indexed" has no
