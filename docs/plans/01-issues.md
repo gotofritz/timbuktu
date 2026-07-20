@@ -627,7 +627,7 @@ promise an editor session; implementation prints `Edit: <path> (open with vi)`
 and exits (`internal/cli/template.go:92-109`). Launch `$EDITOR` via
 `exec.Command` with stdio attached, or rename/re-describe command + fix docs.
 
-### 37. [SEC] Ingested documents can smuggle terminal escapes through `ask` output (orig #30)
+### 37. [SEC] Ingested documents can smuggle terminal escapes through `ask` output (orig #30) — ✅ DONE
 
 `tbuk search` escapes previews with `%q` (`internal/cli/search.go:139`), but
 `tbuk ask` streams LLM output verbatim (`internal/cli/ask.go:193-205`).

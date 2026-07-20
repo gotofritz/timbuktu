@@ -93,7 +93,7 @@ ORDER BY d.id`
 	tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "PATH\tTITLE\tCHUNKS\tUPDATED") //nolint:errcheck
 	for _, it := range items {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", it.Path, it.Title, it.Chunks, it.UpdatedAt) //nolint:errcheck
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", stripControl(it.Path), stripControl(it.Title), it.Chunks, it.UpdatedAt) //nolint:errcheck
 	}
 	return tw.Flush()
 }
