@@ -275,6 +275,43 @@ func TestRunAsk_printsCitations(t *testing.T) {
 	}
 }
 
+func TestRunAsk_stripsTerminalEscapesFromOutput(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out bytes.Buffer
+	// A chunk whose citation carries an OSC 52 clipboard-write escape, and a
+	// model stream that echoes an ESC-based CSI sequence: both are
+	// document-derived and must not reach the terminal raw.
+	chunks := []retrieval.RetrievedChunk{
+		{Citation: "/docs/a.md\x1b]52;c;cHduZWQ\x07 §1", Text: "ctx", Path: "/docs/a.md", ChunkIndex: 1},
+	}
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(chunks, nil),
+		mockChat([]string{"ans\x1b[31mwer", "\x1b]0;pwned\x07"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	got := out.String()
+	if strings.ContainsAny(got, "\x1b\x07") {
+		t.Errorf("output leaked terminal control chars: %q", got)
+	}
+	// The visible text survives, only the control introducers are gone.
+	if !strings.Contains(got, "ans[31mwer") {
+		t.Errorf("stream text mangled: %q", got)
+	}
+	if !strings.Contains(got, "/docs/a.md]52;c;cHduZWQ §1") {
+		t.Errorf("citation text mangled: %q", got)
+	}
+}
+
 func TestRunAsk_badVarFormat(t *testing.T) {
 	tmpl := buildQATemplate(t)
 	var out bytes.Buffer

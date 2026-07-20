@@ -143,7 +143,7 @@ func printSearchResults(results []search.SearchResult, format string) error {
 		return nil
 	}
 	for i, r := range results {
-		fmt.Printf("[%d] score=%.4f  %s §%d\n", i+1, r.Score, r.Path, r.ChunkIndex)
+		fmt.Printf("[%d] score=%.4f  %s §%d\n", i+1, r.Score, stripControl(r.Path), r.ChunkIndex)
 		fmt.Printf("    %q\n\n", TruncatePreview(r.Text, 120))
 	}
 	return nil

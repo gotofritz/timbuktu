@@ -144,6 +144,11 @@ func RunAsk(
 		o(&cfg)
 	}
 
+	// Retrieved document text is echoed by the model and printed in citations;
+	// route everything written to the terminal through a control-char filter so
+	// ingested ANSI/OSC escapes can't reach it raw.
+	out = newSanitizeWriter(out)
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

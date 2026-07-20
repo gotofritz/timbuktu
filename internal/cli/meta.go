@@ -117,7 +117,7 @@ func RunMetaList(ctx context.Context, out io.Writer, docs *storage.DocumentRepo,
 		return nil
 	}
 	for _, m := range entries {
-		fmt.Fprintf(out, "%s=%s\n", m.Key, m.Value) //nolint:errcheck
+		fmt.Fprintf(out, "%s=%s\n", stripControl(m.Key), stripControl(m.Value)) //nolint:errcheck
 	}
 	return nil
 }
