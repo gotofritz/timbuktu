@@ -11,12 +11,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
-	"github.com/gotofritz/timbuktu/internal/embeddings"
 	"github.com/gotofritz/timbuktu/internal/llm"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
 	"github.com/gotofritz/timbuktu/internal/search"
-	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
 // retrieverFn is the signature used for testable dependency injection.
@@ -51,23 +49,22 @@ func newAskCmd() *cobra.Command {
 				return fmt.Errorf("load template %q: %w", templateName, err)
 			}
 
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(cfg)
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
+			defer func() { _ = app.Close() }()
 
-			emb, err := embeddings.NewEmbedder(cfg.Embedding)
+			emb, err := app.Embedder()
 			if err != nil {
-				return fmt.Errorf("create embedder: %w", err)
+				return err
 			}
 
-			searcher := search.New(db.DB(), emb)
-			ret := retrieval.New(searcher)
+			ret := retrieval.New(search.New(app.DB(), emb))
 
-			l, err := llm.NewLLM(&cfg.LLM)
+			l, err := app.LLM()
 			if err != nil {
-				return fmt.Errorf("create LLM: %w", err)
+				return err
 			}
 
 			return RunAsk(

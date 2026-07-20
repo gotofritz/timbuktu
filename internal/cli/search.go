@@ -10,7 +10,6 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/embeddings"
 	"github.com/gotofritz/timbuktu/internal/search"
-	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
 func newSearchCmd() *cobra.Command {
@@ -29,18 +28,17 @@ func newSearchCmd() *cobra.Command {
 			if format != "text" && format != "json" {
 				return fmt.Errorf("invalid format %q: must be text or json", format)
 			}
-			cfg := configFrom(cmd)
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(configFrom(cmd))
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
+			defer func() { _ = app.Close() }()
 
 			var emb embeddings.Embedder
 			if mode == "vector" || mode == "hybrid" {
-				emb, err = embeddings.NewEmbedder(cfg.Embedding)
+				emb, err = app.Embedder()
 				if err != nil {
-					return fmt.Errorf("embedder: %w", err)
+					return err
 				}
 			}
 
@@ -55,7 +53,7 @@ func newSearchCmd() *cobra.Command {
 						"like %g will filter out every result\n", mode, minScore)
 			}
 
-			s := search.New(db.DB(), emb)
+			s := search.New(app.DB(), emb)
 			opts := search.Options{TopK: topK, MinScore: minScore}
 
 			var results []search.SearchResult
@@ -107,14 +105,13 @@ func newFindCmd() *cobra.Command {
 				filters[parts[0]] = parts[1]
 			}
 
-			cfg := configFrom(cmd)
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(configFrom(cmd))
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
+			defer func() { _ = app.Close() }()
 
-			s := search.New(db.DB(), nil)
+			s := search.New(app.DB(), nil)
 			results, err := s.Metadata(cmd.Context(), filters)
 			if err != nil {
 				return fmt.Errorf("find: %w", err)

@@ -446,7 +446,7 @@ duplicated shell/awk → keep diverging.
 `make check-ci` (or extract the coverage-gate script to one file both invoke)
 so local + CI gates can't drift again.
 
-### 26. [ARCH] Composition root scattered across CLI commands (orig #3)
+### 26. [ARCH] Composition root scattered across CLI commands (orig #3) — ✅ DONE
 
 **Problem:** Every command hand-wires its own dependency graph — open DB,
 repos, embedder, chunker, searcher — duplicated open/close + error wrapping.
