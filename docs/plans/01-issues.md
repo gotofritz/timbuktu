@@ -298,7 +298,7 @@ issues 3 and 10.
 **Fix:** Add `Config.Validate()` called from root `PersistentPreRunE` — every
 command fails fast, clear message.
 
-### 18. [EVOL] Unknown config keys silently ignored (orig #24)
+### 18. [EVOL] Unknown config keys silently ignored (orig #24) — ✅ DONE
 
 **Problem:** `Load` uses plain `yaml.Unmarshal` — drops unknown fields. Typo
 (`chunk_size:` for `size:`, `baseurl:` for `base_url:`) or key from a newer

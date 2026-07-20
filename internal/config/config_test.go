@@ -72,6 +72,25 @@ func TestLoad_partialYAML(t *testing.T) {
 	}
 }
 
+// A typo'd or unknown config key must fail loudly rather than being silently
+// dropped so the default quietly wins (P1-18).
+func TestLoad_unknownKeyRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	// chunk_size is a typo for chunking.size — must not be silently ignored.
+	if err := os.WriteFile(path, []byte("chunking:\n  chunk_size: 512\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("expected error for unknown config key, got nil")
+	}
+	if !strings.Contains(err.Error(), "chunk_size") {
+		t.Errorf("error should name the offending key, got: %v", err)
+	}
+}
+
 func TestLoad_directoryPath(t *testing.T) {
 	dir := t.TempDir()
 	_, err := config.Load(dir) // passing a directory, not a file
