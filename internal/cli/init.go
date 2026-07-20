@@ -18,14 +18,16 @@ func newInitCmd() *cobra.Command {
 	}
 }
 
-func runInit(_ *cobra.Command, _ []string) error {
+func runInit(cmd *cobra.Command, _ []string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 
 	tbukDir := filepath.Join(home, ".tbuk")
-	promptsDir := filepath.Join(tbukDir, "prompts", "qa")
+	// Seed the built-in template under the configured prompts root so init and
+	// the ask/template commands agree on where templates live.
+	promptsDir := filepath.Join(configFrom(cmd).Prompts.Dir, "qa")
 
 	for _, dir := range []string{tbukDir, promptsDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {

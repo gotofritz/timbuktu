@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -40,9 +39,7 @@ func newAskCmd() *cobra.Command {
 			question := strings.Join(args, " ")
 			cfg := configFrom(cmd)
 
-			home, _ := os.UserHomeDir()
-			promptsRoot := filepath.Join(home, ".tbuk", "prompts")
-			td := prompts.NewTemplateDir(promptsRoot)
+			td := prompts.NewTemplateDir(cfg.Prompts.Dir)
 
 			tmpl, err := td.Load(templateName)
 			if err != nil {
