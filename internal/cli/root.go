@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -77,9 +79,16 @@ func configPathFrom(cmd *cobra.Command) string {
 	return path
 }
 
-// Execute runs the CLI and exits on error.
+// Execute runs the CLI and exits on error. It installs a signal-aware context
+// so Ctrl-C (SIGINT) or SIGTERM cancels the root context, unwinding the
+// ctx-plumbed pipeline cleanly — deferred cleanup runs, in-flight transactions
+// roll back, and a partial directory-ingest summary still prints. A second
+// signal restores the default handler and force-quits.
 func Execute() {
-	if err := New().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := New().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

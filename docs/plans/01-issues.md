@@ -311,7 +311,7 @@ config schema grows.
 **Fix:** Decode via `yaml.Decoder` with `KnownFields(true)`, fail with the
 offending key name. Fold into the same `Config.Validate()` effort as issue 17.
 
-### 19. [SRE] No signal handling — Ctrl-C not the clean cancel README claims (orig #32)
+### 19. [SRE] No signal handling — Ctrl-C not the clean cancel README claims (orig #32) — ✅ DONE
 
 **Problem:** README says "Press `Ctrl-C` to cancel — retrieval and streaming
 are interrupted cleanly"; code is carefully context-plumbed end to end, but
