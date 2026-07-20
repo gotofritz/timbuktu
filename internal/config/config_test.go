@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -130,9 +131,14 @@ func TestDefaultYAML_isValidYAML(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
+	yamlStr, err := config.DefaultYAML()
+	if err != nil {
+		t.Fatalf("DefaultYAML: %v", err)
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte(config.DefaultYAML()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(yamlStr), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(path)
@@ -141,6 +147,50 @@ func TestDefaultYAML_isValidYAML(t *testing.T) {
 	}
 	if cfg.Chunking.Size != 800 {
 		t.Errorf("want default size 800, got %d", cfg.Chunking.Size)
+	}
+}
+
+// TestDefaultYAML_roundTripsDefaults is the anti-drift guard: the emitted YAML,
+// loaded back, must reproduce Defaults() exactly. Because DefaultYAML now
+// marshals Defaults() instead of hand-building the string, the two can no
+// longer diverge — a new default field is covered automatically.
+func TestDefaultYAML_roundTripsDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	yamlStr, err := config.DefaultYAML()
+	if err != nil {
+		t.Fatalf("DefaultYAML: %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(yamlStr), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := config.Defaults(); !reflect.DeepEqual(loaded, want) {
+		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", loaded, want)
+	}
+}
+
+// TestDefaultYAML_keepsComments guards the explanatory comments so switching to
+// a marshalled node tree does not silently drop the base_url / concurrency help.
+func TestDefaultYAML_keepsComments(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	yamlStr, err := config.DefaultYAML()
+	if err != nil {
+		t.Fatalf("DefaultYAML: %v", err)
+	}
+	for _, want := range []string{"provider default", "embed_concurrency", "1 = fully serial"} {
+		if !strings.Contains(yamlStr, want) {
+			t.Errorf("DefaultYAML missing comment %q", want)
+		}
 	}
 }
 

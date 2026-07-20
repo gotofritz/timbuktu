@@ -600,7 +600,7 @@ OpenAI degrades into several manual re-runs.
 around the `Embed` call. Don't retry LLM streaming (`ask` interactive; fail
 fast).
 
-### 34. [ARCH] `DefaultYAML` duplicates `Defaults()` by hand (orig #5)
+### 34. [ARCH] `DefaultYAML` duplicates `Defaults()` by hand (orig #5) — ✅ DONE
 
 **Problem:** Default config exists twice — struct literal in `Defaults()`,
 hand-built YAML string in `DefaultYAML()`. Two sources of truth drift.
