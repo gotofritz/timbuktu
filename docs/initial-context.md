@@ -264,14 +264,14 @@ type Options struct {
 type Searcher struct { /* db, embedder */ }
 
 func New(db *sql.DB, emb embeddings.Embedder) *Searcher
-func (s *Searcher) Vector(ctx, query, opts)   ([]SearchResult, error) // cosine, full table scan
+func (s *Searcher) Vector(ctx, query, opts)   ([]SearchResult, error) // cosine, two-phase: rank (id,embedding) then hydrate top-K
 func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25 (query sanitized to quoted phrases)
 func (s *Searcher) Metadata(ctx, filters)     ([]SearchResult, error) // AND-joined metadata keys
 func (s *Searcher) Hybrid(ctx, query, opts)   ([]SearchResult, error) // RRF k=60 over vector+keyword
 func CheckFTS5(db *sql.DB) error                                       // probes chunks_fts index
 ```
 
-Vector: full table scan acceptable for < 100k chunks; swap sqlite-vec later without interface change.
+Vector: O(n) embedding scan acceptable for < 100k chunks; swap sqlite-vec later without interface change. Runs two-phase — phase 1 scans only `(id, embedding)` and keeps a bounded min-heap of the top-K ids (O(n log K) time, O(K) memory, never touches chunk text); phase 2 hydrates text/path/title for just those K ids. Peak memory is O(K), not O(corpus).
 Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK then fuses.
 `Options.MinScore` filters the fused RRF sums (a different scale from vector cosine),
 applied before truncating to TopK.
