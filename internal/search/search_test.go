@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -531,5 +532,27 @@ func TestCheckFTS5_healthy(t *testing.T) {
 	db := openTestDB(t)
 	if err := search.CheckFTS5(db); err != nil {
 		t.Fatalf("CheckFTS5: %v", err)
+	}
+}
+
+// TestCheckFTS5_releasesConnection pins the pool to a single connection and
+// calls CheckFTS5 repeatedly. The old implementation discarded the *sql.Rows
+// without closing it, so the one connection stayed checked out and the second
+// call blocked forever waiting for the pool. Each call must return promptly.
+func TestCheckFTS5_releasesConnection(t *testing.T) {
+	db := openTestDB(t)
+	db.SetMaxOpenConns(1)
+
+	for i := 0; i < 3; i++ {
+		done := make(chan error, 1)
+		go func() { done <- search.CheckFTS5(db) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("CheckFTS5 call %d: %v", i, err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("CheckFTS5 call %d blocked — connection leaked", i)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/gotofritz/timbuktu/internal/embeddings"
 )
@@ -45,9 +46,12 @@ func New(db *sql.DB, emb embeddings.Embedder) *Searcher {
 }
 
 // CheckFTS5 runs a trivial FTS5 query to verify the index is intact.
+// QueryRowContext scans (and so closes) the single row, releasing the pooled
+// connection; an empty index (no rows) is healthy, so sql.ErrNoRows is tolerated.
 func CheckFTS5(db *sql.DB) error {
-	_, err := db.QueryContext(context.Background(), `SELECT rowid FROM chunks_fts LIMIT 1`)
-	if err != nil {
+	var rowid int64
+	err := db.QueryRowContext(context.Background(), `SELECT rowid FROM chunks_fts LIMIT 1`).Scan(&rowid)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	return nil
