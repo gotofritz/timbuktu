@@ -81,14 +81,14 @@ FROM (
 		embPct = fmt.Sprintf("%d%%", s.EmbeddedChunks*100/s.TotalChunks)
 	}
 
-	fmt.Fprintf(out, "\nKnowledge Base Stats\n")                                                                          //nolint:errcheck
-	fmt.Fprintf(out, "────────────────────\n")                                                                            //nolint:errcheck
-	fmt.Fprintf(out, "Documents   : %d\n", s.TotalDocuments)                                                              //nolint:errcheck
-	fmt.Fprintf(out, "Chunks      : %d\n", s.TotalChunks)                                                                 //nolint:errcheck
-	fmt.Fprintf(out, "Embedded    : %d / %d (%s)\n", s.EmbeddedChunks, s.TotalChunks, embPct)                            //nolint:errcheck
-	fmt.Fprintf(out, "Approx size : %s\n", humanBytes(s.TotalSizeBytes))                                                  //nolint:errcheck
-	fmt.Fprintf(out, "DB path     : %s\n", s.DBPath)                                                                      //nolint:errcheck
-	fmt.Fprintf(out, "DB size     : %s\n", humanBytes(s.DBSizeBytes))                                                     //nolint:errcheck
+	fmt.Fprintf(out, "\nKnowledge Base Stats\n")                                              //nolint:errcheck
+	fmt.Fprintf(out, "────────────────────\n")                                                //nolint:errcheck
+	fmt.Fprintf(out, "Documents   : %d\n", s.TotalDocuments)                                  //nolint:errcheck
+	fmt.Fprintf(out, "Chunks      : %d\n", s.TotalChunks)                                     //nolint:errcheck
+	fmt.Fprintf(out, "Embedded    : %d / %d (%s)\n", s.EmbeddedChunks, s.TotalChunks, embPct) //nolint:errcheck
+	fmt.Fprintf(out, "Approx size : %s\n", humanBytes(s.TotalSizeBytes))                      //nolint:errcheck
+	fmt.Fprintf(out, "DB path     : %s\n", s.DBPath)                                          //nolint:errcheck
+	fmt.Fprintf(out, "DB size     : %s\n", humanBytes(s.DBSizeBytes))                         //nolint:errcheck
 	return nil
 }
 

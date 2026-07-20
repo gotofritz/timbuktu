@@ -211,4 +211,3 @@ func TestRunStats_embeddedPctCalculation(t *testing.T) {
 		t.Errorf("expected '50%%' in output, got: %s", output)
 	}
 }
-

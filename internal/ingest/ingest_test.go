@@ -382,7 +382,7 @@ func TestIngester_embeddingCountMismatch_errorsNotPanics(t *testing.T) {
 	db := openTestDB(t)
 	extractedDir := t.TempDir()
 	ext := &mockExtractor{text: strings.Repeat("word ", 200)} // many chunks
-	emb := &miscountEmbedder{dim: 4, count: 1}                 // returns 1 vector per batch
+	emb := &miscountEmbedder{dim: 4, count: 1}                // returns 1 vector per batch
 	ing := newIngester(t, db, ext, emb, extractedDir)
 
 	dir := t.TempDir()

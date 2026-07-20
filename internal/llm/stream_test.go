@@ -6,10 +6,10 @@ import (
 
 func TestParseSSELine(t *testing.T) {
 	tests := []struct {
-		name       string
-		line       string
-		wantField  string
-		wantValue  string
+		name      string
+		line      string
+		wantField string
+		wantValue string
 	}{
 		{"blank", "", "", ""},
 		{"comment", ":this is a comment", "", ""},

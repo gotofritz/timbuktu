@@ -150,10 +150,10 @@ func (s *Searcher) hydrateVector(ctx context.Context, ranked []scoredID) ([]Sear
 // current lowest-scoring candidate and can be evicted when a better one arrives.
 type minScoreHeap []scoredID
 
-func (h minScoreHeap) Len() int            { return len(h) }
-func (h minScoreHeap) Less(i, j int) bool  { return h[i].score < h[j].score }
-func (h minScoreHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *minScoreHeap) Push(x any)         { *h = append(*h, x.(scoredID)) }
+func (h minScoreHeap) Len() int           { return len(h) }
+func (h minScoreHeap) Less(i, j int) bool { return h[i].score < h[j].score }
+func (h minScoreHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *minScoreHeap) Push(x any)        { *h = append(*h, x.(scoredID)) }
 func (h *minScoreHeap) Pop() any {
 	old := *h
 	n := len(old)
