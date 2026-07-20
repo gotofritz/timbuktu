@@ -23,7 +23,7 @@ engineering cost against the current architecture.
            │    collections)                │    multi-turn ask              │
            │  • Context-window budget       │  • sqlite-vec ANN index        │
            │    guard on ask                │  • Ingestor framework +        │
-           │  • Export / import / backup    │    Joplin / email / YouTube    │
+           │  • Export / import / backup    │    Joplin / Evernote / YouTube │
            │  • More extractors (docx,      │  • Retrieval-quality cluster   │
            │    epub, code)                 │    (eval, HyDE, re-rank,       │
            │  • Document cleaning pass      │    parent-child, agentic)      │
@@ -152,12 +152,12 @@ the extractor.
     notebook + tags → metadata. Joplin notes are Markdown, so this rides the
     Markdown-aware cleaning/chunking paths (#22, #29).
 
-20. **Email-archive ingestor.** *(user-requested — confirm format)* One message
-    = one document; `Message-ID` → `source_uri`, subject → title, from/date →
-    metadata (stdlib `net/mail`, `mime/multipart`). *"emex" is ambiguous —
-    most likely Apple Mail `.emlx`, possibly `.mbox`/`.eml`. Confirm the exact
-    format before this gets its own subplan.* Depends on the cleaning pass
-    (#22) to strip quoted replies and signatures.
+20. **Evernote-archive ingestor.** *(user-requested)* Parse `.enex` export
+    files (XML: a `<note>` per entry). One note = one document; note title →
+    title, note GUID/title → `source_uri`, `<created>`/`<updated>` + `<tag>`s →
+    metadata. Note bodies are ENML (an HTML-ish markup), so this rides the
+    HTML/Markdown cleaning path (#22) to reach plain text; attachments
+    (`<resource>`) are out of scope for a first cut.
 
 21. **YouTube-transcript ingestor.** *(user-requested)* Fetch transcripts
     (timedtext / `yt-dlp --write-auto-subs`). Video URL → `source_uri`; keep
@@ -249,8 +249,8 @@ cluster too.
    inline cites (#23). Small, high-value, and they make every later change
    legible.
 3. **Feed real work:** the `Source` abstraction (#18), then the Joplin
-   ingestor (#19) — user-blocking; email (#20, once the format is confirmed)
-   and YouTube (#21) follow the same seam.
+   ingestor (#19) — user-blocking; Evernote `.enex` (#20) and YouTube (#21)
+   follow the same seam.
 4. **Then measure, then tune:** land the eval split (#30) before touching the
    **Retrieval Quality** cluster, and take that cluster in dependency order —
    cheap query-side wins (#24–#26) → re-ranking (#8) / parent-child (#27) →
