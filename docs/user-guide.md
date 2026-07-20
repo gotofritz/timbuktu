@@ -618,12 +618,29 @@ document.
 
 ### Controlling result count and minimum score
 
+Use `--top` to cap how many results come back:
+
 ```bash
-tbuk search --top 10 --min-score 0.7 "project deadlines"
+tbuk search --top 10 "project deadlines"
 ```
 
-Scores range from 0 (unrelated) to 1 (identical). A threshold of 0.6–0.7 is
-a reasonable starting point; lower it if you are getting too few results.
+`--min-score` filters out low-scoring results, but the score scale depends on
+the search mode — **only `--mode vector` uses a 0–1 scale**:
+
+```bash
+tbuk search --mode vector --min-score 0.7 "project deadlines"
+```
+
+In vector mode, scores range from 0 (unrelated) to 1 (identical), and a
+threshold of 0.6–0.7 is a reasonable starting point; lower it if you get too
+few results.
+
+> **Do not use a 0–1 threshold in hybrid or keyword mode.** Hybrid (the
+> default) fuses results with Reciprocal Rank Fusion, whose scores are tiny
+> sums (roughly 0.03 at most), and keyword mode uses full-text ranks on their
+> own scale. A value like `--min-score 0.7` in these modes filters out
+> *every* result and prints "No results found." The command warns you if you
+> try. To threshold on a 0–1 scale, switch to `--mode vector`.
 
 ### JSON output for scripting
 

@@ -269,7 +269,7 @@ entry errors. Unreadable dir/file skipped invisibly — no `Result`, not in
 **Fix:** Record entry errors as error `Result`s → surface in output + non-zero
 exit path.
 
-### 16. [PROD] Guide's `--min-score` advice returns zero results in default search mode (orig #44)
+### 16. [PROD] Guide's `--min-score` advice returns zero results in default search mode (orig #44) — ✅ DONE
 
 **Problem:** `docs/user-guide.md` §10 recommends thresholds of 0.6–0.7
 directly under examples using **default hybrid mode**. Hybrid scores are RRF
