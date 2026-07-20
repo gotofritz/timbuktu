@@ -97,7 +97,9 @@ If an open PR exists that covers the same area, commit directly to its branch in
 
 - `go` (1.24+)
 - `gofmt` / `goimports`
-- `golangci-lint`
+- `golangci-lint` — config committed at `.golangci.yml` (`version: "2"`); the
+  binary version is pinned only in `.github/workflows/quality-check.yml` (single
+  source of truth). Install that same version locally (see README).
 - `go test`
 
 ### Rules

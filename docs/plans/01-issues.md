@@ -515,7 +515,7 @@ test files).
 + `Execute`). Also pins exit-code behaviour before issue 19 signal work; same
 test in a small OS matrix gives issue 20's platform gap runtime coverage.
 
-### 30. [ARCH+DX] No committed golangci-lint config; README installs wrong lint major version (orig #12 + #38; dup: ES-3, ECO-3, AR-4, AR-5)
+### 30. [ARCH+DX] No committed golangci-lint config; README installs wrong lint major version (orig #12 + #38; dup: ES-3, ECO-3, AR-4, AR-5) — ✅ DONE
 
 **Problem:** Two related drifts that together mean local lint and CI lint
 share almost nothing:

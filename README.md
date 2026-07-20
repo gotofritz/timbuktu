@@ -40,7 +40,11 @@ asset, unzip it, and move `tbuk.exe` to a folder on your `PATH`.
 Requires:
 
 - Go 1.25+
-- `golangci-lint` v2 (`go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`)
+- `golangci-lint` v2 — needed only for `make lint` / `check` / `check-ci`.
+  Install the version CI uses (build from source with your Go toolchain):
+  `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
+  (note the `/v2` in the path — the bare path is v1). Keep the version in sync
+  with `.github/workflows/quality-check.yml`, which is the single source of truth.
 
 ```bash
 make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin
