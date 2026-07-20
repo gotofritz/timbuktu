@@ -307,6 +307,58 @@ func TestIngester_reindexChanged(t *testing.T) {
 	}
 }
 
+// If chunk replacement fails during a re-ingest, the document's SHA256 must
+// NOT advance — otherwise the new hash is recorded while the old chunks remain,
+// and every later ingest sees "unchanged" and skips, stranding a stale index.
+func TestIngester_reingestChunkStoreFailure_keepsOldSHA(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	dir := t.TempDir()
+	ctx := context.Background()
+	emb := &mockEmbedder{dim: 4}
+	ext := &mockExtractor{text: "first version of the document body here"}
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	path := writeTempFile(t, dir, "doc.md", "original content")
+	if res := ing.IngestFile(ctx, path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("first ingest: %v", res.Err)
+	}
+	sqlDB := db.DB()
+	var oldSHA string
+	if err := sqlDB.QueryRow(`SELECT sha256 FROM documents WHERE path=?`, path).Scan(&oldSHA); err != nil {
+		t.Fatalf("read sha: %v", err)
+	}
+
+	// Make any INSERT into chunks fail, so ReplaceForDocument fails after the
+	// DELETE — the atomic transaction rolls back, but the document upsert must
+	// not have already recorded the new SHA.
+	if _, err := sqlDB.Exec(
+		`CREATE TRIGGER fail_chunk_insert BEFORE INSERT ON chunks BEGIN SELECT RAISE(ABORT,'boom'); END;`,
+	); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	// Change the file so the re-ingest is not skipped by dedup.
+	if err := os.WriteFile(path, []byte("changed content now"), 0o644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	ext.text = "second version of the document body here"
+
+	res := ing.IngestFile(ctx, path, ingest.Options{})
+	if res.Err == nil {
+		t.Fatal("expected chunk-store failure, got nil error")
+	}
+
+	var newSHA string
+	if err := sqlDB.QueryRow(`SELECT sha256 FROM documents WHERE path=?`, path).Scan(&newSHA); err != nil {
+		t.Fatalf("read sha after: %v", err)
+	}
+	if newSHA != oldSHA {
+		t.Errorf("document SHA advanced to %q despite chunk-store failure (was %q) — "+
+			"a later ingest would skip and strand the stale index", newSHA, oldSHA)
+	}
+}
+
 func TestIngester_forceFlag(t *testing.T) {
 	db := openTestDB(t)
 	extractedDir := t.TempDir()

@@ -230,7 +230,7 @@ sample output with actual.
 
 ## P1 — High (fix before or immediately after alpha)
 
-### 13. [CORR] Document row updated before chunks replaced — failed re-ingest strands stale chunks forever (orig #20)
+### 13. [CORR] Document row updated before chunks replaced — failed re-ingest strands stale chunks forever (orig #20) — ✅ DONE
 
 **Problem:** On re-ingest, `IngestFile` writes the new SHA256 to `documents`
 *before* `ReplaceForDocument` swaps chunks. If chunk replacement fails (disk
