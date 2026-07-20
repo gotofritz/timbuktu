@@ -1,0 +1,18 @@
+# golangci-lint configuration (schema v2).
+#
+# Committed so local `make lint` / the pre-commit hook and the CI lint job
+# enforce the *same* rules — without this file each runs whatever the installed
+# version defaults to, and the gate drifts silently when the pinned action
+# version bumps.
+#
+# The linter binary version is pinned in exactly one place:
+# .github/workflows/quality-check.yml (golangci-lint-action `version:`). Install
+# that same version locally (see README) so results match CI.
+version: "2"
+
+linters:
+  # The "standard" set — errcheck, govet, ineffassign, staticcheck, unused —
+  # is what CI already enforces green. Pinning it explicitly means a future
+  # golangci-lint release that changes its default set can't shift the gate
+  # underneath us without a visible change to this file.
+  default: standard
