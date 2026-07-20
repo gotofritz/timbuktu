@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # modernc.org/* (pure-Go SQLite stack) release together; group their
+      # bumps into one PR to avoid churn.
+      modernc:
+        patterns:
+          - "modernc.org/*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10

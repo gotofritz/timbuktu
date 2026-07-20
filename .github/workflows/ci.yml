@@ -32,6 +32,25 @@ jobs:
       - name: Build
         run: go build -o /dev/null ./...
 
+  govulncheck:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    # The project ships standalone binaries; scan the dependency tree for known
+    # CVEs (e.g. in the PDF parser that handles untrusted input) on every PR.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
   cross-compile:
     name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
