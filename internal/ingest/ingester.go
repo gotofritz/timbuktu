@@ -155,39 +155,43 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	mime := preprocess.DetectMIME(path)
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 
-	var docID int64
+	// Establish the document row and ID WITHOUT recording the new SHA256 yet.
+	// The SHA is written only after chunks are stored (below), so a failed chunk
+	// replacement can never leave the document marked "up to date" while the
+	// index still holds the old chunks — which would make every later ingest
+	// skip and strand the stale index. A brand-new document gets an empty SHA
+	// placeholder, which never matches a real hash, so a failed first ingest is
+	// always retried rather than skipped.
+	var doc *storage.Document
 	if existing != nil {
-		existing.SHA256 = sha
-		existing.MimeType = mime
-		if err := ing.docs.Update(ctx, existing); err != nil {
-			return Result{Path: path, Err: fmt.Errorf("ingest: update doc: %w", err)}
-		}
-		docID = existing.ID
+		doc = existing
 	} else {
-		doc := &storage.Document{
-			Path:     path,
-			SHA256:   sha,
-			Title:    title,
-			MimeType: mime,
-		}
+		doc = &storage.Document{Path: path, SHA256: "", Title: title, MimeType: mime}
 		if err := ing.docs.Create(ctx, doc); err != nil {
 			return Result{Path: path, Err: fmt.Errorf("ingest: create doc: %w", err)}
 		}
-		docID = doc.ID
 	}
 	for _, c := range storageChunks {
-		c.DocumentID = docID
+		c.DocumentID = doc.ID
 	}
 
 	// Replace old chunks with the new ones atomically: delete + insert in one
 	// transaction, only after extraction and embedding have succeeded, so a
 	// failed re-ingest never destroys the previous index.
-	if err := ing.chunks.ReplaceForDocument(ctx, docID, storageChunks); err != nil {
+	if err := ing.chunks.ReplaceForDocument(ctx, doc.ID, storageChunks); err != nil {
 		return Result{Path: path, Err: fmt.Errorf("ingest: store chunks: %w", err)}
 	}
 
-	if err := ing.writeAutoMetadata(ctx, docID, path, mime); err != nil {
+	if err := ing.writeAutoMetadata(ctx, doc.ID, path, mime); err != nil {
 		return Result{Path: path, Err: err}
+	}
+
+	// Chunks are stored; now commit the new SHA256 (and mime). Only at this
+	// point is the document considered up to date.
+	doc.SHA256 = sha
+	doc.MimeType = mime
+	if err := ing.docs.Update(ctx, doc); err != nil {
+		return Result{Path: path, Err: fmt.Errorf("ingest: update doc: %w", err)}
 	}
 
 	return Result{Path: path, Chunks: len(storageChunks)}
