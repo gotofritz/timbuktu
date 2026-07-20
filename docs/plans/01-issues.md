@@ -458,7 +458,7 @@ similar in `search.go`, `update.go`, `delete.go`, `stats.go`.
 **Fix:** Shared builder, e.g. `cli.openApp(cfg) (*App, error)` returning
 repos/searcher/ingester + closer. Commands consume App.
 
-### 27. [PERF] Vector search materialises full text of every chunk per query + full-sorts all candidates (orig #36)
+### 27. [PERF] Vector search materialises full text of every chunk per query + full-sorts all candidates (orig #36) — ✅ DONE
 
 **Problem:** Accepted design = O(n) scan over embeddings; implementation does
 strictly more. Scan query selects `c.text`, `d.path`, `d.title` for *every*
