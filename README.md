@@ -185,6 +185,9 @@ embedding:
 chunking:
   size: 800          # tokens (approximated as chars/4)
   overlap: 100
+
+ingest:
+  embed_concurrency: 4   # embed batches in flight per file (>=1; 1 = serial)
 ```
 
 Override config file: `tbuk --config /path/to/config.yaml <cmd>`

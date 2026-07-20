@@ -59,7 +59,7 @@ type Config struct {
 
 Defaults: llm.provider=`llama`, embedding.provider=`llama`, dimension=768, chunk size=800, overlap=100.
 
-`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, empty db path, or an unknown llm/embedding provider) instead of crashing deep inside a provider factory.
+`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, empty db path, an unknown llm/embedding provider, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
 
 ---
 
@@ -225,6 +225,7 @@ func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
 ```
 
 Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc → `ChunkRepo.ReplaceForDocument` → write automatic metadata.
+Embed batches within a file run through a bounded worker pool (`ingest.embed_concurrency`, default 4; `WithEmbedConcurrency` option) so embedder round-trips — the latency bottleneck — overlap. Results are reassembled in chunk order and the per-file DB write stays serial, so `ReplaceForDocument` atomicity is untouched; the first batch error cancels the rest.
 Re-index is atomic: extraction and embedding run *first*, then `ReplaceForDocument` deletes old chunks and inserts new ones in a single transaction. A failed re-ingest (embedding error) leaves the previous chunks intact rather than destroying the index.
 
 Automatic metadata written per document: `filename`, `extension` (lowercased, no leading dot), `mime`, `dir`. Refreshed on every ingest via `MetadataRepo.Set` upsert; user-set keys are left intact. Makes `tbuk find filename=README.md` work after plain ingest.

@@ -50,6 +50,9 @@ func (c Config) Validate() error {
 	if !validEmbeddingProviders[c.Embedding.Provider] {
 		return fmt.Errorf("config: unknown embedding provider %q (want llama, openai, or ollama)", c.Embedding.Provider)
 	}
+	if c.Ingest.EmbedConcurrency < 1 {
+		return fmt.Errorf("config: ingest embed_concurrency must be at least 1, got %d", c.Ingest.EmbedConcurrency)
+	}
 	return nil
 }
 
@@ -60,6 +63,15 @@ type Config struct {
 	Embedding  EmbeddingConfig  `yaml:"embedding"`
 	Chunking   ChunkingConfig   `yaml:"chunking"`
 	Preprocess PreprocessConfig `yaml:"preprocess"`
+	Ingest     IngestConfig     `yaml:"ingest"`
+}
+
+// IngestConfig controls ingestion throughput.
+type IngestConfig struct {
+	// EmbedConcurrency bounds how many embed batches run concurrently within a
+	// single file. 1 = fully serial. Kept low by default so it composes with
+	// provider rate limits.
+	EmbedConcurrency int `yaml:"embed_concurrency"`
 }
 
 // PreprocessConfig controls where extracted text files are stored.
@@ -130,6 +142,9 @@ func Defaults() Config {
 		Preprocess: PreprocessConfig{
 			OutputDir: filepath.Join(home, ".tbuk", "extracted"),
 		},
+		Ingest: IngestConfig{
+			EmbedConcurrency: 4,
+		},
 	}
 }
 
@@ -188,5 +203,10 @@ chunking:
 
 preprocess:
   output_dir: ` + filepath.Join(home, ".tbuk", "extracted") + `
+
+ingest:
+  # max embed batches processed concurrently within one file (keep low to
+  # respect provider rate limits; 1 = fully serial)
+  embed_concurrency: 4
 `
 }

@@ -477,7 +477,7 @@ memory); second query hydrates text/path/title for just those K chunk IDs. No
 `Searcher` API change. Benchmark before/after with a synthetic 50–100k-chunk
 DB.
 
-### 28. [PERF] Bulk ingest fully serial — embedding round-trip latency = wall clock (orig #37)
+### 28. [PERF] Bulk ingest fully serial — embedding round-trip latency = wall clock (orig #37) — ✅ DONE
 
 **Problem:** `IngestDir` processes one file at a time; within a file, the
 embed loop is one blocking `Embed` call per 16-chunk batch. The Ollama adapter

@@ -79,6 +79,7 @@ func (a *App) Ingester() (*ingest.Ingester, error) {
 		&chunking.Chunker{Size: a.cfg.Chunking.Size, Overlap: a.cfg.Chunking.Overlap},
 		emb,
 		a.cfg.Preprocess.OutputDir,
+		ingest.WithEmbedConcurrency(a.cfg.Ingest.EmbedConcurrency),
 	), nil
 }
 

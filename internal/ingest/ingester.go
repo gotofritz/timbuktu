@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/preprocess"
@@ -48,6 +49,19 @@ type Ingester struct {
 	chunker      *chunking.Chunker
 	embedder     Embedder
 	extractedDir string // directory for extracted text files (<sha256>.txt)
+
+	// embedConcurrency bounds how many embed batches within a single file are
+	// in flight at once. 1 (the default) means the old fully-serial behaviour.
+	embedConcurrency int
+}
+
+// Option configures optional Ingester behaviour.
+type Option func(*Ingester)
+
+// WithEmbedConcurrency sets the maximum number of embed batches processed
+// concurrently within a single file. Values < 1 are treated as 1 (serial).
+func WithEmbedConcurrency(n int) Option {
+	return func(ing *Ingester) { ing.embedConcurrency = n }
 }
 
 // NewIngester constructs an Ingester with the given dependencies.
@@ -59,16 +73,25 @@ func NewIngester(
 	chunker *chunking.Chunker,
 	embedder Embedder,
 	extractedDir string,
+	opts ...Option,
 ) *Ingester {
-	return &Ingester{
-		docs:         docs,
-		chunks:       chunks,
-		meta:         meta,
-		extractor:    extractor,
-		chunker:      chunker,
-		embedder:     embedder,
-		extractedDir: extractedDir,
+	ing := &Ingester{
+		docs:             docs,
+		chunks:           chunks,
+		meta:             meta,
+		extractor:        extractor,
+		chunker:          chunker,
+		embedder:         embedder,
+		extractedDir:     extractedDir,
+		embedConcurrency: 1,
 	}
+	for _, o := range opts {
+		o(ing)
+	}
+	if ing.embedConcurrency < 1 {
+		ing.embedConcurrency = 1
+	}
+	return ing
 }
 
 const embedBatchSize = 16
@@ -105,35 +128,9 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 
 	rawChunks := ing.chunker.Split(text)
 
-	var storageChunks []*storage.Chunk
-	for i := 0; i < len(rawChunks); i += embedBatchSize {
-		end := i + embedBatchSize
-		if end > len(rawChunks) {
-			end = len(rawChunks)
-		}
-		batch := rawChunks[i:end]
-		texts := make([]string, len(batch))
-		for j, c := range batch {
-			texts[j] = c.Text
-		}
-		vecs, err := ing.embedder.Embed(ctx, texts)
-		if err != nil {
-			return Result{Path: path, Err: fmt.Errorf("ingest: embed batch %d: %w", i/embedBatchSize, err)}
-		}
-		if len(vecs) != len(texts) {
-			return Result{Path: path, Err: fmt.Errorf(
-				"ingest: %s: embedding count mismatch: sent %d texts but embedder "+
-					"returned %d vectors (partial or malformed response)",
-				path, len(texts), len(vecs))}
-		}
-		for j, c := range batch {
-			storageChunks = append(storageChunks, &storage.Chunk{
-				ChunkIndex: c.Index,
-				Text:       c.Text,
-				TokenCount: c.TokenCount,
-				Embedding:  vecs[j],
-			})
-		}
+	storageChunks, err := ing.embedChunks(ctx, path, rawChunks)
+	if err != nil {
+		return Result{Path: path, Err: err}
 	}
 
 	// Guard against a changed embedding model/config silently corrupting the
@@ -201,6 +198,100 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	}
 
 	return Result{Path: path, Chunks: len(storageChunks)}
+}
+
+// embedChunks embeds rawChunks in fixed-size batches, running up to
+// embedConcurrency batches concurrently, and returns storage chunks in the
+// original chunk order. Concurrency overlaps embedder round-trips (the
+// bottleneck) while the per-file DB write downstream stays serial, so
+// ReplaceForDocument atomicity is unaffected. The first batch error cancels the
+// rest and is returned.
+func (ing *Ingester) embedChunks(ctx context.Context, path string, rawChunks []chunking.Chunk) ([]*storage.Chunk, error) {
+	type batch struct{ start, end int }
+	var batches []batch
+	for i := 0; i < len(rawChunks); i += embedBatchSize {
+		end := i + embedBatchSize
+		if end > len(rawChunks) {
+			end = len(rawChunks)
+		}
+		batches = append(batches, batch{start: i, end: end})
+	}
+	if len(batches) == 0 {
+		return nil, nil
+	}
+
+	// One result slot per batch preserves order regardless of completion order.
+	perBatch := make([][]*storage.Chunk, len(batches))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	fail := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		mu.Unlock()
+	}
+
+	sem := make(chan struct{}, ing.embedConcurrency)
+	for bi, b := range batches {
+		if ctx.Err() != nil {
+			break
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(bi int, b batch) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			slice := rawChunks[b.start:b.end]
+			texts := make([]string, len(slice))
+			for j, c := range slice {
+				texts[j] = c.Text
+			}
+			vecs, err := ing.embedder.Embed(ctx, texts)
+			if err != nil {
+				fail(fmt.Errorf("ingest: embed batch %d: %w", bi, err))
+				return
+			}
+			if len(vecs) != len(texts) {
+				fail(fmt.Errorf(
+					"ingest: %s: embedding count mismatch: sent %d texts but embedder "+
+						"returned %d vectors (partial or malformed response)",
+					path, len(texts), len(vecs)))
+				return
+			}
+			out := make([]*storage.Chunk, len(slice))
+			for j, c := range slice {
+				out[j] = &storage.Chunk{
+					ChunkIndex: c.Index,
+					Text:       c.Text,
+					TokenCount: c.TokenCount,
+					Embedding:  vecs[j],
+				}
+			}
+			perBatch[bi] = out
+		}(bi, b)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	storageChunks := make([]*storage.Chunk, 0, len(rawChunks))
+	for _, b := range perBatch {
+		storageChunks = append(storageChunks, b...)
+	}
+	return storageChunks, nil
 }
 
 // firstEmbeddingDim returns the length of the first non-empty embedding, or 0
