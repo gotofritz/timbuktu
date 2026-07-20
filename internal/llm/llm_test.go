@@ -847,6 +847,94 @@ func TestOllamaProvider_callOptions(t *testing.T) {
 	}
 }
 
+// Ollama must forward max_tokens (as options.num_predict) and temperature
+// (as options.temperature) instead of silently dropping them (P1-21).
+func TestOllamaProvider_forwardsMaxTokensAndTemperature(t *testing.T) {
+	var gotBody map[string]any
+	lines := []string{
+		`{"message":{"content":"ok"},"done":false}`,
+		`{"message":{"content":""},"done":true}`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		for _, l := range lines {
+			fmt.Fprintln(w, l) //nolint:errcheck
+		}
+	}))
+	defer srv.Close()
+
+	cfg := &config.LLMConfig{
+		Provider:  "ollama",
+		Model:     "llama3",
+		MaxTokens: 256,
+		BaseURL:   srv.URL,
+	}
+	provider, err := llm.NewLLM(cfg)
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+
+	temp := 0.3
+	opts := llm.CallOptions{Temperature: &temp, MaxTokens: 128}
+	ch, err := provider.Chat(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Content: "hi"},
+	}, opts)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	collectTokens(ch)
+
+	options, ok := gotBody["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("request missing options object, body=%v", gotBody)
+	}
+	if options["num_predict"] != float64(128) {
+		t.Errorf("num_predict: want 128 (CallOptions override), got %v", options["num_predict"])
+	}
+	if options["temperature"] != float64(0.3) {
+		t.Errorf("temperature: want 0.3, got %v", options["temperature"])
+	}
+}
+
+// With no CallOptions, ollama falls back to the configured max_tokens and
+// omits temperature entirely (never sends 0).
+func TestOllamaProvider_temperatureUnsetOmitted(t *testing.T) {
+	var gotBody map[string]any
+	lines := []string{`{"message":{"content":""},"done":true}`}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		for _, l := range lines {
+			fmt.Fprintln(w, l) //nolint:errcheck
+		}
+	}))
+	defer srv.Close()
+
+	provider, err := llm.NewLLM(&config.LLMConfig{
+		Provider: "ollama", Model: "llama3", MaxTokens: 256, BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	ch, err := provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	collectTokens(ch)
+
+	options, ok := gotBody["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("request missing options object, body=%v", gotBody)
+	}
+	if options["num_predict"] != float64(256) {
+		t.Errorf("num_predict: want 256 (config fallback), got %v", options["num_predict"])
+	}
+	if _, ok := options["temperature"]; ok {
+		t.Errorf("temperature should be omitted when unset, got %v", options["temperature"])
+	}
+}
+
 // --- Claude HTTP error test ---
 
 func TestClaudeProvider_serverError(t *testing.T) {

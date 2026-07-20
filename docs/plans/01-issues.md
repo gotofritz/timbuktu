@@ -351,7 +351,7 @@ prerequisite of the goreleaser job. In `ci.yml`, cheap cross-compile check
 (`GOOS=darwin`/`windows` `go build ./...` matrix, or
 `goreleaser release --snapshot` smoke job).
 
-### 21. [CORR] Ollama LLM adapter silently ignores `max_tokens` + `temperature` (orig #18)
+### 21. [CORR] Ollama LLM adapter silently ignores `max_tokens` + `temperature` (orig #18) — ✅ DONE
 
 **Problem:** `ollamaProvider.Chat` reads only `Model` from `CallOptions`,
 sends just `model`/`messages`/`stream`; the provider's `maxTokens` field is

@@ -33,8 +33,19 @@ func newOllamaProvider(cfg *config.LLMConfig) *ollamaProvider {
 
 func (p *ollamaProvider) Chat(ctx context.Context, messages []Message, opts ...CallOptions) (<-chan Token, error) {
 	model := p.model
-	if len(opts) > 0 && opts[0].Model != "" {
-		model = opts[0].Model
+	maxTokens := p.maxTokens
+	var temperature *float64
+	if len(opts) > 0 {
+		o := opts[0]
+		if o.Model != "" {
+			model = o.Model
+		}
+		if o.MaxTokens > 0 {
+			maxTokens = o.MaxTokens
+		}
+		if o.Temperature != nil {
+			temperature = o.Temperature
+		}
 	}
 
 	type apiMsg struct {
@@ -46,11 +57,28 @@ func (p *ollamaProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		apiMessages = append(apiMessages, apiMsg{Role: string(m.Role), Content: m.Content})
 	}
 
-	body, err := json.Marshal(map[string]any{
+	// Ollama takes generation parameters in a nested "options" object, not as
+	// top-level fields (num_predict is its name for max output tokens). Without
+	// this, config llm.max_tokens and manifest temperature/max_tokens are silent
+	// no-ops on ollama while working for claude/openai/llama.
+	options := map[string]any{}
+	if maxTokens > 0 {
+		options["num_predict"] = maxTokens
+	}
+	if temperature != nil {
+		options["temperature"] = *temperature
+	}
+
+	reqBody := map[string]any{
 		"model":    model,
 		"messages": apiMessages,
 		"stream":   true,
-	})
+	}
+	if len(options) > 0 {
+		reqBody["options"] = options
+	}
+
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("ollama: marshal request: %w", err)
 	}
