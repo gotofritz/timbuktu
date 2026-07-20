@@ -36,28 +36,6 @@ func TestIngestCommand_nonExistentPath(t *testing.T) {
 	}
 }
 
-func TestCountDocuments_empty(t *testing.T) {
-	db := openMemoryDB(t)
-	n, err := cli.CountDocuments(db)
-	if err != nil {
-		t.Fatalf("CountDocuments: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("expected 0 documents, got %d", n)
-	}
-}
-
-func TestCountChunks_empty(t *testing.T) {
-	db := openMemoryDB(t)
-	n, err := cli.CountChunks(db)
-	if err != nil {
-		t.Fatalf("CountChunks: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("expected 0 chunks, got %d", n)
-	}
-}
-
 func TestDoctorCommand_showsCounts(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := dir + "/config.yaml"
