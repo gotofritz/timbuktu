@@ -120,6 +120,12 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		if err != nil {
 			return Result{Path: path, Err: fmt.Errorf("ingest: embed batch %d: %w", i/embedBatchSize, err)}
 		}
+		if len(vecs) != len(texts) {
+			return Result{Path: path, Err: fmt.Errorf(
+				"ingest: %s: embedding count mismatch: sent %d texts but embedder "+
+					"returned %d vectors (partial or malformed response)",
+				path, len(texts), len(vecs))}
+		}
 		for j, c := range batch {
 			storageChunks = append(storageChunks, &storage.Chunk{
 				ChunkIndex: c.Index,
