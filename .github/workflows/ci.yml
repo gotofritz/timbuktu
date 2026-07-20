@@ -38,8 +38,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # -race: the llm streaming adapters are goroutine + channel heavy
+      # (sendToken / ctx.Done selects) and the ingest embed pool runs batches
+      # concurrently; the race detector catches data races that plain go test
+      # misses. Overhead is trivial at this suite size.
       - name: Test
-        run: go test ./... -count=1
+        run: go test -race ./... -count=1
 
       - name: Build
         run: go build -o /dev/null ./...

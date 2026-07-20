@@ -570,7 +570,7 @@ AGENTS.md; optionally commit `.cz.toml` and/or add a commit-lint CI step.
 Alternatively, if the commitizen gate is unwanted, drop the hook rather than
 leave it half-enforced.
 
-### 32. [EVOL] CI never runs race detector (orig #25; dup: ES-2)
+### 32. [EVOL] CI never runs race detector (orig #25; dup: ES-2) — ✅ DONE
 
 **Problem:** `make test-race` exists but no workflow invokes it — CI runs
 plain `go test`. The `llm` package is goroutine + channel heavy (streaming
