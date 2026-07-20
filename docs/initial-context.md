@@ -361,6 +361,7 @@ tbuk stats                     knowledge base summary: documents, chunks, embedd
 - `fmt.Errorf("context: %w", err)` for error wrapping
 - Sentinel errors (e.g. `storage.ErrNotFound`) matched with `errors.Is`, not string comparison
 - No `init()`, no global mutable state, no `interface{}` — CLI config is loaded in the root `PersistentPreRunE` and threaded through the cobra command context (`configFrom`/`configPathFrom`), not package-level vars
+- `Execute()` builds a `signal.NotifyContext` (SIGINT/SIGTERM) and runs `root.ExecuteContext(ctx)`, so Ctrl-C cancels the ctx-plumbed pipeline cleanly (deferred cleanup runs, transactions roll back, `IngestDir` stops the walk via `filepath.SkipAll` and still prints its partial summary); a second signal force-quits
 - Data files are owner-only: `~/.tbuk` dirs `0o700`; config, extracted text and DB files `0o600`
 - `defer func() { _ = resp.Body.Close() }()` for HTTP responses
 - HTTP error responses surface the provider's body (bounded read), not just the status text

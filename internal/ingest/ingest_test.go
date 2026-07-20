@@ -569,6 +569,29 @@ func TestIngester_dirWalkError_surfaced(t *testing.T) {
 	}
 }
 
+// A cancelled context (e.g. Ctrl-C) must stop the directory walk promptly
+// rather than plough through every remaining file (P1-19).
+func TestIngester_dirWalkStopsOnCancel(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: "content for the document body"}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	dir := t.TempDir()
+	for _, n := range []string{"a.md", "b.md", "c.md", "d.md"} {
+		writeTempFile(t, dir, n, "body of "+n)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before walking
+
+	results := ing.IngestDir(ctx, dir, ingest.Options{})
+	if len(results) == len([]string{"a.md", "b.md", "c.md", "d.md"}) {
+		t.Errorf("cancelled walk processed all %d files, want early stop", len(results))
+	}
+}
+
 func TestIngester_writesAutomaticMetadata(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
