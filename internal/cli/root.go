@@ -35,6 +35,9 @@ func New() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config %s: %w", path, err)
 			}
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("invalid config %s: %w", path, err)
+			}
 			ctx := context.WithValue(cmd.Context(), cfgKey, cfg)
 			ctx = context.WithValue(ctx, cfgPathKey, path)
 			cmd.SetContext(ctx)

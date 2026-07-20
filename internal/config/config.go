@@ -2,11 +2,54 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
+
+// validLLMProviders and validEmbeddingProviders mirror the factory switches in
+// internal/llm and internal/embeddings. Kept here so a bad provider fails fast
+// at config load with a clear message, rather than deep inside a factory.
+var (
+	validLLMProviders       = map[string]bool{"claude": true, "llama": true, "openai": true, "ollama": true}
+	validEmbeddingProviders = map[string]bool{"llama": true, "openai": true, "ollama": true}
+)
+
+// Validate reports the first configuration error, or nil if the config is
+// internally consistent. It checks value sanity (positive sizes, overlap
+// smaller than chunk size) and known provider names, so every command can fail
+// fast with a clear message instead of crashing deep inside a factory.
+func (c Config) Validate() error {
+	if c.Database.Path == "" {
+		return fmt.Errorf("config: database path must not be empty")
+	}
+	if c.Chunking.Size <= 0 {
+		return fmt.Errorf("config: chunking size must be positive, got %d", c.Chunking.Size)
+	}
+	if c.Chunking.Overlap < 0 {
+		return fmt.Errorf("config: chunking overlap must not be negative, got %d", c.Chunking.Overlap)
+	}
+	if c.Chunking.Overlap >= c.Chunking.Size {
+		return fmt.Errorf(
+			"config: chunking overlap (%d) must be smaller than size (%d), otherwise chunks never advance",
+			c.Chunking.Overlap, c.Chunking.Size)
+	}
+	if c.LLM.MaxTokens <= 0 {
+		return fmt.Errorf("config: llm max_tokens must be positive, got %d", c.LLM.MaxTokens)
+	}
+	if c.Embedding.Dimension <= 0 {
+		return fmt.Errorf("config: embedding dimension must be positive, got %d", c.Embedding.Dimension)
+	}
+	if !validLLMProviders[c.LLM.Provider] {
+		return fmt.Errorf("config: unknown llm provider %q (want claude, llama, openai, or ollama)", c.LLM.Provider)
+	}
+	if !validEmbeddingProviders[c.Embedding.Provider] {
+		return fmt.Errorf("config: unknown embedding provider %q (want llama, openai, or ollama)", c.Embedding.Provider)
+	}
+	return nil
+}
 
 // Config holds all application settings.
 type Config struct {
