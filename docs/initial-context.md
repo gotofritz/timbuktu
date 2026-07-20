@@ -1,6 +1,6 @@
 # Timbuktu — Initial Context
 
-Local-first CLI RAG knowledge base. Go 1.25+, SQLite, no web UI, no frameworks.
+Local-first CLI RAG knowledge base. Go 1.26+, SQLite, no web UI, no frameworks.
 
 Module: `github.com/gotofritz/timbuktu`
 
@@ -23,7 +23,6 @@ internal/
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
-  metadata/         STUB
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces.

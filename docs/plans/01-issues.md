@@ -668,13 +668,13 @@ extracted dir are configurable. Move to config (e.g. `prompts.dir`).
 `CountDocuments` / `CountChunks` in `internal/cli/ingest.go:128-139` are
 storage concerns. Move to `internal/storage`.
 
-### 42. [ARCH] Dead `sseScanner` wrapper (orig #9)
+### 42. [ARCH] Dead `sseScanner` wrapper (orig #9) — ✅ DONE
 
 `internal/llm/stream.go:39-42` claims to strip trailing carriage returns but
 just returns `bufio.NewScanner(r)`. Implement CR stripping or delete wrapper
 + comment.
 
-### 43. [ARCH] Makefile `serve` target leftover cruft (orig #10; dup: ES-6, AR-8)
+### 43. [ARCH] Makefile `serve` target leftover cruft (orig #10; dup: ES-6, AR-8) — ✅ DONE
 
 `make serve` does `cd output && python3 -m http.server 8080` "for local feed
 testing" — no `output/` exists, no feed anywhere in this project; copy-paste
@@ -682,7 +682,7 @@ leftover from another repo. Appears in `make help` as if real, fails when
 run, adds a python3 implication to a pure-Go project. Delete the target (and
 its `.PHONY` entry).
 
-### 44. [ARCH] Stale architecture docs advertise nonexistent `metadata` package (orig #11; dup: ES-5, part of #40)
+### 44. [ARCH] Stale architecture docs advertise nonexistent `metadata` package (orig #11; dup: ES-5, part of #40) — ✅ DONE
 
 `docs/initial-context.md` **and** `README.md:206` both list
 `internal/metadata/ — stub (not yet active)` — the package doesn't exist;
@@ -692,7 +692,7 @@ the architecture source of truth — a phantom package misdirects every new
 session/contributor. Delete the line from both files (or note where metadata
 actually lives).
 
-### 45. [DX] Contributor docs disagree on Go version (part of orig #40; dup: ES-8, part of AR-9)
+### 45. [DX] Contributor docs disagree on Go version (part of orig #40; dup: ES-8, part of AR-9) — ✅ DONE
 
 AGENTS.md tooling says "go (1.24+)" while README requires "Go 1.25+" and
 `go.mod` pins `go 1.25.0` — a 1.24 toolchain refuses to build (or

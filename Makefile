@@ -1,4 +1,4 @@
-.PHONY: help build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci serve release release-snapshot release-patch release-minor release-major _bump
+.PHONY: help build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump
 
 .DEFAULT_GOAL := help
 
@@ -60,10 +60,6 @@ check: fmt vet lint test ## Format, vet, lint, and test (run before committing)
 check-ci: lint ## Full CI gate: lint + build + coverage >= 85%
 	go build ./...
 	@./scripts/check-coverage.sh
-
-# Serve output/ over HTTP for local feed testing (install python3 if needed)
-serve: ## Serve output/ over HTTP for local feed testing
-	cd output && python3 -m http.server 8080
 
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and

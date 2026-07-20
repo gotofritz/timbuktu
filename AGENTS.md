@@ -102,7 +102,7 @@ If an open PR exists that covers the same area, commit directly to its branch in
 
 ### Tooling
 
-- `go` (1.24+)
+- `go` — see the required version in `README.md` (single source of truth; matches `go.mod`)
 - `gofmt` / `goimports`
 - `golangci-lint` — config committed at `.golangci.yml` (`version: "2"`); the
   binary version is pinned only in `.github/workflows/quality-check.yml` (single
