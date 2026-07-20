@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -144,7 +146,12 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	// Decode with KnownFields(true) so a typo'd or unknown key (e.g. chunk_size
+	// for size, baseurl for base_url) fails loudly instead of being silently
+	// dropped while the default quietly wins.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, err
 	}
 
