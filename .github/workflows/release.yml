@@ -42,7 +42,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           # Pin to the v2 line so a GoReleaser major bump can't break the v2
           # config, or ship from a compromised upstream release, at publish time.
