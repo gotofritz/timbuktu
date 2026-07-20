@@ -16,3 +16,11 @@ linters:
   # golangci-lint release that changes its default set can't shift the gate
   # underneath us without a visible change to this file.
   default: standard
+
+# Formatters run as a gate too (v2 keeps them separate from linters). Without
+# this block gofmt drift accumulated silently — misaligned struct tags and
+# method columns slipped past CI because nothing checked formatting. `gofmt`
+# alone (not goimports/gofumpt) matches the toolchain's own `gofmt -l`.
+formatters:
+  enable:
+    - gofmt

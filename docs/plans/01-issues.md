@@ -614,7 +614,7 @@ wanted).
 
 ## P3 — Low
 
-### 35. [CORR] `CheckFTS5` leaks `sql.Rows` (orig #21)
+### 35. [CORR] `CheckFTS5` leaks `sql.Rows` (orig #21) — ✅ DONE
 
 `internal/search/search.go:48-54` discards `*sql.Rows` from `QueryContext`
 without closing — holds a pooled connection until GC. Use

@@ -244,7 +244,7 @@ func TestClaudeProvider_callOptions(t *testing.T) {
 func TestClaudeProvider_temperatureUnsetOmitted(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+		json.NewDecoder(r.Body).Decode(&gotBody)                                    //nolint:errcheck
 		fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
 	}))
 	defer srv.Close()

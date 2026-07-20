@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/gotofritz/timbuktu/internal/embeddings"
 )
@@ -21,8 +22,8 @@ type SearchResult struct {
 
 // Options controls search behaviour.
 type Options struct {
-	TopK     int            // default 5
-	MinScore float64        // skip results below this threshold
+	TopK     int               // default 5
+	MinScore float64           // skip results below this threshold
 	Metadata map[string]string // AND-combined metadata pre-filter, applied by Vector/Keyword/Hybrid
 }
 
@@ -35,7 +36,7 @@ func (o *Options) topK() int {
 
 // Searcher runs vector, keyword, metadata, and hybrid searches.
 type Searcher struct {
-	db      *sql.DB
+	db       *sql.DB
 	embedder embeddings.Embedder
 }
 
@@ -45,9 +46,12 @@ func New(db *sql.DB, emb embeddings.Embedder) *Searcher {
 }
 
 // CheckFTS5 runs a trivial FTS5 query to verify the index is intact.
+// QueryRowContext scans (and so closes) the single row, releasing the pooled
+// connection; an empty index (no rows) is healthy, so sql.ErrNoRows is tolerated.
 func CheckFTS5(db *sql.DB) error {
-	_, err := db.QueryContext(context.Background(), `SELECT rowid FROM chunks_fts LIMIT 1`)
-	if err != nil {
+	var rowid int64
+	err := db.QueryRowContext(context.Background(), `SELECT rowid FROM chunks_fts LIMIT 1`).Scan(&rowid)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	return nil
