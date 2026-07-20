@@ -360,6 +360,7 @@ tbuk list                      list indexed documents: path, title, chunk count,
 - Table-driven tests with `testing` stdlib only
 - HTTP providers mocked with `net/http/httptest`
 - In-memory SQLite (`:memory:`) for storage tests
+- Unit tests inject fakes at package seams; one CLI end-to-end test (`internal/cli/integration_test.go`) drives the real root command (`init → ingest → search → meta → stats → delete`) with only the embedding server faked, so the production wiring — `DefaultFileExtractor`, composition root, exit codes — is exercised assembled. `Execute`'s non-zero exit is checked via a re-exec-self subprocess (it calls `os.Exit`)
 - `fmt.Errorf("context: %w", err)` for error wrapping
 - Sentinel errors (e.g. `storage.ErrNotFound`) matched with `errors.Is`, not string comparison
 - No `init()`, no global mutable state, no `interface{}` — CLI config is loaded in the root `PersistentPreRunE` and threaded through the cobra command context (`configFrom`/`configPathFrom`), not package-level vars

@@ -495,7 +495,7 @@ workers) over embed batches within a file; per-file DB writes stay serial so
 ingester/adapter batch sizes so one batch = one request. Keep the limit low +
 configurable — must compose with 429/5xx retry work (issue 33).
 
-### 29. [QA] No test exercises real wiring — production extractor, root command, exit codes at 0% (orig #35)
+### 29. [QA] No test exercises real wiring — production extractor, root command, exit codes at 0% (orig #35) — ✅ DONE
 
 **Problem:** Every test injects fakes at package seams; nothing runs the
 assembled pipeline. `DefaultFileExtractor.ExtractFile` — the only production
