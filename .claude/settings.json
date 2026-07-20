@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "echo 'IMPORTANT: Before any work, ask the user which git branch to work on. Do not use the session-start branch. Wait for the answer, then checkout that branch.'"
+            "command": "echo 'IMPORTANT: Work on the branch the user specifies. If their prompt already names a branch, use it without asking. Otherwise, before any work, ask which git branch to work on and wait for the answer. Either way, do not default to the session-start branch.'"
           }
         ]
       }

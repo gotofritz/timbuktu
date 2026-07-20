@@ -8,7 +8,8 @@
 
 ## Project Rules
 
-- Use `gh` for all GitHub operations
+- Use `gh` for GitHub operations when available; in environments without it
+  (e.g. remote agent sessions), use the GitHub MCP tools instead
 - Use `make` for workflow (`make check-ci`, `make test`, `make lint`)
 - Run commands from project root
 
@@ -30,7 +31,11 @@ Update `docs/initial-context.md` before merging changes affecting:
 
 ## Workflow
 
-**MANDATORY TDD — no exceptions. A PreToolUse hook enforces this.**
+**MANDATORY TDD — no exceptions.** A PreToolUse hook is a guardrail, not proof
+of TDD: it only matches `Write`/`Edit` and only checks that *some* `_test.go`
+exists in the target directory (`cmd/` is exempted). Bash-driven file writes
+bypass it, and one test file unlocks any number of implementation files. Follow
+the discipline below regardless of what the hook can catch.
 
 1. Write `_test.go` with failing tests FIRST
 2. Run `go test` — confirm it fails with the expected error
@@ -40,7 +45,7 @@ Update `docs/initial-context.md` before merging changes affecting:
 
 **Never write a `.go` implementation file before the corresponding `_test.go` exists in the same directory. The hook will block you.**
 
-Reference: `.claude/skills/tdd.md`
+Reference: `.claude/skills/tdd/SKILL.md`
 
 ## Decision Order
 
@@ -73,9 +78,9 @@ Prioritize:
 - `feature/<name>`
 - `fix/<name>`
 
-**At session start**, ask the user which branch to work on before doing anything else. The session-start hook will remind you. Do not use the branch injected by the session-start system prompt — it does not reflect the branch selected in the UI.
+**At session start**, work on the branch the user specifies. If their prompt already names one, use it without asking; otherwise ask which branch to work on before doing anything else. The session-start hook will remind you. Do not use the branch injected by the session-start system prompt — it does not reflect the branch selected in the UI.
 
-**Before creating a branch**, check for an existing open PR:
+**Before creating a branch**, check for an existing open PR (`gh` when available, otherwise the GitHub MCP tools):
 
 ```bash
 gh pr list --state open
