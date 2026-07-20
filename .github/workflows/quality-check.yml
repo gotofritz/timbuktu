@@ -23,7 +23,13 @@ jobs:
       - name: Run lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.5.0
+          version: v2.12.2
+          # Build golangci-lint from source with the job's Go toolchain
+          # (go 1.26, from go.mod). The prebuilt binaries are compiled with an
+          # older Go and refuse to target a newer module: "the Go language
+          # version used to build golangci-lint is lower than the targeted
+          # version". goinstall compiles it with 1.26 so it can lint 1.26 code.
+          install-mode: goinstall
 
   coverage:
     name: Test Coverage
