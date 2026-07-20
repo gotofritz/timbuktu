@@ -258,7 +258,7 @@ sent without a count check — partial or malformed response crashes
 **Fix:** In each adapter (or once in `IngestFile`), verify
 `len(vectors) == len(texts)`, descriptive error on mismatch.
 
-### 15. [ARCH] `IngestDir` swallows walk errors (orig #4)
+### 15. [ARCH] `IngestDir` swallows walk errors (orig #4) — ✅ DONE
 
 **Problem:** `filepath.WalkDir` return discarded; callback returns `nil` on
 entry errors. Unreadable dir/file skipped invisibly — no `Result`, not in

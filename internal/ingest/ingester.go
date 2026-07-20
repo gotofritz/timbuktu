@@ -261,7 +261,14 @@ func (ing *Ingester) readOrExtract(ctx context.Context, path, sha string) (strin
 func (ing *Ingester) IngestDir(ctx context.Context, dir string, opts Options) []Result {
 	var results []Result
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			// Record the entry error instead of skipping it silently, so an
+			// unreadable directory or file appears in the results and the
+			// "N errors" summary rather than vanishing.
+			results = append(results, Result{Path: path, Err: fmt.Errorf("ingest: walk %s: %w", path, err)})
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !supportedExts[strings.ToLower(filepath.Ext(path))] {
