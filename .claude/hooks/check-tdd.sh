@@ -11,6 +11,12 @@ FILE=$(jq -r '.tool_input.file_path // empty' 2>/dev/null)
 
 DIR=$(dirname "$FILE")
 
+# cmd/ packages (e.g. cmd/tbuk/main.go) are thin entrypoints with no unit tests
+# by design — don't force a throwaway _test.go just to edit main.go.
+case "$DIR" in
+  cmd | cmd/* | */cmd | */cmd/*) exit 0 ;;
+esac
+
 # If a _test.go already exists in that dir, allow
 ls "$DIR"/*_test.go &>/dev/null && exit 0
 

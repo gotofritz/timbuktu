@@ -734,14 +734,14 @@ keeping this file as source index, or add per-finding status markers and
 archive resolved sections per the plan-archive convention; move the
 `.original.md` backup to `docs/archive/` or delete it.
 
-### 49. [AGENT] AGENTS.md mandates `gh` CLI, but remote agent sessions have no `gh` (AR-1)
+### 49. [AGENT] AGENTS.md mandates `gh` CLI, but remote agent sessions have no `gh` (AR-1) — ✅ DONE
 
 AGENTS.md says "Use `gh` for all GitHub operations" and the branch workflow
 requires `gh pr list --state open`. Remote Claude Code sessions have no `gh`
 binary — GitHub access goes through MCP tools. Reword to "use `gh` when
 available; in environments without it, use the GitHub MCP tools instead."
 
-### 50. [AGENT] TDD hook blocks all edits to `cmd/tbuk/main.go` (AR-2)
+### 50. [AGENT] TDD hook blocks all edits to `cmd/tbuk/main.go` (AR-2) — ✅ DONE
 
 `.claude/hooks/check-tdd.sh` blocks Write/Edit of any non-test `.go` file when
 the directory has no `*_test.go`. `cmd/tbuk/` contains only `main.go` (by
@@ -749,7 +749,7 @@ design). An agent cannot make even a trivial edit without creating a
 throwaway test file, contradicting "minimal diffs". Allowlist `cmd/` (or
 `main.go`) in the hook, or add a minimal smoke test to `cmd/tbuk/`.
 
-### 51. [AGENT] Session-start "ask which branch" hook stalls autonomous sessions (AR-3)
+### 51. [AGENT] Session-start "ask which branch" hook stalls autonomous sessions (AR-3) — ✅ DONE
 
 The SessionStart hook demands the agent ask the user for a branch and wait. In
 autonomous/remote runs the user isn't watching, and task prompts often already
@@ -757,13 +757,13 @@ name the branch — forcing either a stalled session or a rule violation. Amend
 to "if the user's prompt already specifies a branch, use it without asking;
 otherwise ask."
 
-### 52. [AGENT] Broken skill reference in AGENTS.md (part of AR-9)
+### 52. [AGENT] Broken skill reference in AGENTS.md (part of AR-9) — ✅ DONE
 
 AGENTS.md points to `.claude/skills/tdd.md`; actual path is
 `.claude/skills/tdd/SKILL.md`. Correct the path. (Go-version half of AR-9 is
 issue 45.)
 
-### 53. [AGENT] TDD enforcement weaker than AGENTS.md claims (AR-11)
+### 53. [AGENT] TDD enforcement weaker than AGENTS.md claims (AR-11) — ✅ DONE
 
 AGENTS.md states "MANDATORY TDD — no exceptions. A PreToolUse hook enforces
 this," but the hook only matches Write/Edit and only checks that *some*
