@@ -12,7 +12,7 @@ Module: `github.com/gotofritz/timbuktu`
 cmd/tbuk/           cobra entry point
 
 internal/
-  config/           Config struct, Load(), Defaults(), DefaultYAML()
+  config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML()
   cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
@@ -58,6 +58,8 @@ type Config struct {
 ```
 
 Defaults: llm.provider=`llama`, embedding.provider=`llama`, dimension=768, chunk size=800, overlap=100.
+
+`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, empty db path, or an unknown llm/embedding provider) instead of crashing deep inside a provider factory.
 
 ---
 

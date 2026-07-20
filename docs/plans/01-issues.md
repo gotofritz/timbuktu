@@ -286,7 +286,7 @@ flag usable without reading internals: normalize hybrid scores to 0–1 before
 `MinScore` applies, or warn when `--min-score` exceeds the achievable hybrid
 max for the given `--top`.
 
-### 17. [ARCH] Config has no validation (orig #6)
+### 17. [ARCH] Config has no validation (orig #6) — ✅ DONE
 
 **Problem:** No check for `overlap >= size`, negative chunk sizes, nonsense
 values; unknown providers fail deep inside factories. Root cause enabler for

@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/config"
@@ -165,6 +166,44 @@ chunking:
 	}
 	if cfg.Chunking.Size != 600 {
 		t.Errorf("chunking.size: want 600, got %d", cfg.Chunking.Size)
+	}
+}
+
+func TestConfig_Validate(t *testing.T) {
+	base := config.Defaults()
+
+	cases := []struct {
+		name    string
+		mutate  func(*config.Config)
+		wantErr string // substring; "" means expect no error
+	}{
+		{"defaults valid", func(*config.Config) {}, ""},
+		{"zero chunk size", func(c *config.Config) { c.Chunking.Size = 0 }, "size"},
+		{"negative chunk size", func(c *config.Config) { c.Chunking.Size = -1 }, "size"},
+		{"negative overlap", func(c *config.Config) { c.Chunking.Overlap = -5 }, "overlap"},
+		{"overlap equals size", func(c *config.Config) { c.Chunking.Size = 200; c.Chunking.Overlap = 200 }, "overlap"},
+		{"overlap exceeds size", func(c *config.Config) { c.Chunking.Size = 100; c.Chunking.Overlap = 150 }, "overlap"},
+		{"zero max_tokens", func(c *config.Config) { c.LLM.MaxTokens = 0 }, "max_tokens"},
+		{"zero dimension", func(c *config.Config) { c.Embedding.Dimension = 0 }, "dimension"},
+		{"unknown llm provider", func(c *config.Config) { c.LLM.Provider = "gpt5" }, "llm provider"},
+		{"unknown embedding provider", func(c *config.Config) { c.Embedding.Provider = "word2vec" }, "embedding provider"},
+		{"claude not valid embedder", func(c *config.Config) { c.Embedding.Provider = "claude" }, "embedding provider"},
+		{"empty db path", func(c *config.Config) { c.Database.Path = "" }, "database"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("Validate() = %v, want nil", err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("Validate() = nil, want error mentioning %q", tc.wantErr)
+			case tc.wantErr != "" && err != nil && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("Validate() = %v, want it to mention %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 
