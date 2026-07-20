@@ -365,7 +365,7 @@ claude/openai/llama.
 **Fix:** Map into ollama's `options` object (`num_predict`, `temperature`) in
 the request body.
 
-### 22. [EVOL] Migration runner not ready for second migration (orig #23)
+### 22. [EVOL] Migration runner not ready for second migration (orig #23) — ✅ DONE
 
 **Problem:** Whole schema = one migration, all `IF NOT EXISTS` — masks three
 weaknesses in `RunMigrations` that bite when migration v2 lands:

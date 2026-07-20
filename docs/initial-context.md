@@ -74,7 +74,7 @@ metadata    — document_id (FK→documents CASCADE), key, value  (PK: document_
 chunks_fts  — FTS5 virtual table over chunks.text, auto-synced via INSERT/DELETE triggers
 ```
 
-Migrations versioned in `schema_migrations` table. Add new migrations by appending to the `migrations` slice in `storage/migrate.go`.
+Migrations versioned in `schema_migrations` table. Add new migrations by appending to the `migrations` slice in `storage/migrate.go`. Each migration's SQL and its version record are applied in one transaction (crash-safe: never changed-but-unrecorded). A DB whose recorded version exceeds the binary's latest migration is rejected with `ErrSchemaTooNew` rather than read with a misunderstood schema.
 
 Embeddings: `storage.Float32SliceToBlob` / `BlobToFloat32Slice` — little-endian `[]float32`.
 

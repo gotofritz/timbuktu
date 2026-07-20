@@ -37,6 +37,29 @@ func TestMigrations_idempotent(t *testing.T) {
 	}
 }
 
+// A database whose recorded schema version is newer than this binary knows
+// about must be rejected, not silently read/written with a misunderstood
+// schema (P1-22).
+func TestMigrations_newerDBRejected(t *testing.T) {
+	db := openTestDB(t)
+
+	// Simulate a DB written by a future tbuk: record a version far ahead.
+	if _, err := db.DB().Exec(
+		`INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`,
+		9999, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("seed future version: %v", err)
+	}
+
+	err := storage.RunMigrations(db.DB())
+	if err == nil {
+		t.Fatal("expected error opening a newer-than-supported DB, got nil")
+	}
+	if !errors.Is(err, storage.ErrSchemaTooNew) {
+		t.Errorf("want ErrSchemaTooNew, got %v", err)
+	}
+}
+
 // ── foreign-key cascade across a connection pool (P0-1) ───────────────────────
 
 // TestForeignKeyCascade_AcrossPooledConnections proves the PRAGMA foreign_keys
