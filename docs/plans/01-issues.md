@@ -620,7 +620,7 @@ wanted).
 without closing — holds a pooled connection until GC. Use
 `QueryRowContext(...).Scan(...)` (tolerate `sql.ErrNoRows`) or close rows.
 
-### 36. [CORR] `tbuk template edit` doesn't edit anything (orig #22)
+### 36. [CORR] `tbuk template edit` doesn't edit anything (orig #22) — ✅ DONE
 
 Help ("Open a template's manifest in $EDITOR") and `docs/initial-context.md`
 promise an editor session; implementation prints `Edit: <path> (open with vi)`
