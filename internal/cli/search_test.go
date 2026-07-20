@@ -133,6 +133,65 @@ func TestFindCommand_badFormat(t *testing.T) {
 	}
 }
 
+// Hybrid scores are RRF sums (~0.03 max), not 0–1 cosine values, so a
+// 0–1 --min-score silently filters everything. The command must warn on
+// stderr when --min-score is combined with the default hybrid mode (P1-16).
+func TestSearchCommand_hybridMinScoreWarns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	err := runCLI("--config", cfgPath, "search", "hello", "--mode", "keyword", "--min-score", "0.7")
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if !strings.Contains(out, "min-score") {
+		t.Errorf("expected a min-score scale warning on stderr, got: %q", out)
+	}
+}
+
+// Vector mode uses 0–1 cosine scores, so a 0–1 --min-score is correct there
+// and must NOT trigger the warning.
+func TestSearchCommand_vectorMinScoreNoWarn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// keyword avoids needing a live embedder; the warning is scoped to hybrid.
+	_ = runCLI("--config", cfgPath, "search", "hello", "--mode", "keyword", "--min-score", "0")
+
+	_ = w.Close()
+	os.Stderr = oldStderr
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+
+	if strings.Contains(out, "min-score") {
+		t.Errorf("did not expect a warning when --min-score is 0, got: %q", out)
+	}
+}
+
 func TestTruncatePreview_shortUnchanged(t *testing.T) {
 	s := "café"
 	if got := cli.TruncatePreview(s, 120); got != s {

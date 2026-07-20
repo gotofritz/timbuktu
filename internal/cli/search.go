@@ -44,6 +44,17 @@ func newSearchCmd() *cobra.Command {
 				}
 			}
 
+			// Only vector mode produces 0–1 cosine scores. Hybrid scores are
+			// RRF sums (~0.03 max, k=60) and keyword scores are FTS ranks, so a
+			// 0–1 --min-score threshold silently filters every result. Warn
+			// rather than leave the user staring at "No results found."
+			if minScore > 0 && mode != "vector" {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"warning: --min-score is on a 0–1 scale only in --mode vector; "+
+						"%s scores use a different, much smaller scale, so a threshold "+
+						"like %g will filter out every result\n", mode, minScore)
+			}
+
 			s := search.New(db.DB(), emb)
 			opts := search.Options{TopK: topK, MinScore: minScore}
 
