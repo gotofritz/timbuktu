@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"context"
 	"io"
 	"net/http"
@@ -32,13 +31,6 @@ func errorMessage(resp *http.Response) string {
 		return msg
 	}
 	return http.StatusText(resp.StatusCode)
-}
-
-// sseScanner returns a scanner that yields SSE lines from r.
-// It strips the trailing carriage return if present.
-func sseScanner(r io.Reader) *bufio.Scanner {
-	s := bufio.NewScanner(r)
-	return s
 }
 
 // parseSSELine splits a raw SSE line into field and value.

@@ -51,7 +51,7 @@ release workflow and has not been altered since.
 
 Requires:
 
-- Go 1.25+
+- Go 1.26+
 - `golangci-lint` v2 — needed only for `make lint` / `check` / `check-ci`.
   Install the version CI uses (build from source with your Go toolchain):
   `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
@@ -232,7 +232,6 @@ internal/
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
-  metadata/         stub (not yet active)
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces defined in `internal/llm` and `internal/embeddings`.

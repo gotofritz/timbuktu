@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -130,7 +131,7 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 		defer close(ch)
 		defer func() { _ = resp.Body.Close() }()
 
-		scanner := sseScanner(resp.Body)
+		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
 			line := scanner.Text()
 			field, value := parseSSELine(line)
