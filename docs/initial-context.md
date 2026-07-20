@@ -142,6 +142,15 @@ func NewEmbedder(cfg config.EmbeddingConfig) (Embedder, error)
 `base_url` defaults to `http://localhost:8080` (llama/ollama) or `https://api.openai.com` (openai).
 `dimension` is read from config — no auto-detection round-trip.
 
+The `openai` and `ollama` adapters wrap each POST in `doWithRetry` (`retry.go`):
+2 retries / 3 attempts total, exponential backoff (500 ms → 1 s), retrying
+connection errors and transient statuses (429 + 5xx) and honouring a
+`Retry-After` header of seconds. This keeps a large bulk ingest against a
+rate-limiting hosted provider from degrading into repeated manual re-runs. The
+final response is handed back on exhaustion so the existing `EmbedError` path
+still surfaces the provider's message. LLM streaming is deliberately **not**
+retried — `ask` is interactive and should fail fast.
+
 ---
 
 ## LLM

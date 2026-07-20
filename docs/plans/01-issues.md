@@ -583,7 +583,7 @@ more concurrency. Races regress silently until a user hits them.
 **Fix:** Add `-race` to the CI test step (suite ~3s, race overhead trivial) or
 a parallel job.
 
-### 33. [SRE] No retry on transient provider errors during bulk ingest (orig #33)
+### 33. [SRE] No retry on transient provider errors during bulk ingest (orig #33) — ✅ DONE
 
 **Problem:** Bulk `tbuk ingest <dir>` against a hosted embedding provider hits
 rate limits (429) + occasional 5xx/connection resets; each error fails that

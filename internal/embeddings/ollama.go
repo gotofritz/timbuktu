@@ -17,6 +17,7 @@ type ollamaEmbedder struct {
 	model     string
 	dimension int
 	client    *http.Client
+	retry     retryPolicy
 }
 
 func newOllamaEmbedder(cfg config.EmbeddingConfig) *ollamaEmbedder {
@@ -29,6 +30,7 @@ func newOllamaEmbedder(cfg config.EmbeddingConfig) *ollamaEmbedder {
 		model:     cfg.Model,
 		dimension: cfg.Dimension,
 		client:    &http.Client{},
+		retry:     defaultRetryPolicy(),
 	}
 }
 
@@ -59,13 +61,16 @@ func (o *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("ollama: marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/embed", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("ollama: build request: %w", err)
+	newReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/embed", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("ollama: build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(req)
+	resp, err := doWithRetry(ctx, o.client, o.retry, newReq)
 	if err != nil {
 		return nil, fmt.Errorf("ollama: do request: %w", err)
 	}
