@@ -21,7 +21,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -50,7 +50,7 @@ jobs:
     # The project ships standalone binaries; scan the dependency tree for known
     # CVEs (e.g. in the PDF parser that handles untrusted input) on every PR.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Scan with the latest stable Go, NOT the pinned go.mod version. govulncheck
       # reports standard-library CVEs relative to the Go release running it, and
@@ -106,7 +106,7 @@ jobs:
         goarch: [amd64, arm64]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v7
