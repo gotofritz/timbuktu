@@ -546,6 +546,29 @@ func TestIngester_dirWalk(t *testing.T) {
 	}
 }
 
+// Walk errors (unreadable entries, missing root) must surface as error
+// Results, not be silently swallowed (P1-15).
+func TestIngester_dirWalkError_surfaced(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: "content"}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	results := ing.IngestDir(context.Background(), missing, ingest.Options{})
+
+	var gotErr bool
+	for _, r := range results {
+		if r.Err != nil {
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Errorf("expected an error Result for unwalkable dir, got %+v", results)
+	}
+}
+
 func TestIngester_writesAutomaticMetadata(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
