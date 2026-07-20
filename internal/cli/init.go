@@ -35,7 +35,11 @@ func runInit(_ *cobra.Command, _ []string) error {
 
 	cfgPath := filepath.Join(tbukDir, "config.yaml")
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		if err := os.WriteFile(cfgPath, []byte(config.DefaultYAML()), 0o600); err != nil {
+		defaultYAML, err := config.DefaultYAML()
+		if err != nil {
+			return fmt.Errorf("render default config: %w", err)
+		}
+		if err := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); err != nil {
 			return fmt.Errorf("write config: %w", err)
 		}
 		fmt.Printf("Created config: %s\n", cfgPath)

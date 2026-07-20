@@ -173,40 +173,54 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// DefaultYAML returns a YAML representation of the default config.
-func DefaultYAML() string {
-	home, _ := os.UserHomeDir()
-	return `database:
-  path: ` + filepath.Join(home, ".tbuk", "tbuk.sqlite") + `
+// DefaultYAML returns the default config serialised to YAML with explanatory
+// comments. Values are marshalled from Defaults() — the single source of truth —
+// so the two can never drift; a new default field appears here automatically.
+// Comments are attached to the encoded node tree rather than typed into a
+// hand-built string.
+func DefaultYAML() (string, error) {
+	var root yaml.Node
+	if err := root.Encode(Defaults()); err != nil {
+		return "", fmt.Errorf("config: encode default yaml: %w", err)
+	}
 
-llm:
-  provider: llama
-  model: ""
-  max_tokens: 4096
-  # base_url: leave empty to use the provider default
-  #   llama/openai-compatible → http://localhost:8080
-  #   ollama                  → http://localhost:11434
-  #   claude                  → https://api.anthropic.com
-  #   openai                  → https://api.openai.com
-  base_url: ""
+	mapKey(mapValue(&root, "llm"), "base_url").HeadComment = "base_url: leave empty to use the provider default\n" +
+		"  llama/openai-compatible → http://localhost:8080\n" +
+		"  ollama                  → http://localhost:11434\n" +
+		"  claude                  → https://api.anthropic.com\n" +
+		"  openai                  → https://api.openai.com"
 
-embedding:
-  provider: llama
-  model: ""
-  dimension: 768
-  # base_url: leave empty to use the provider default (see llm above)
-  base_url: ""
+	mapKey(mapValue(&root, "embedding"), "base_url").HeadComment =
+		"base_url: leave empty to use the provider default (see llm above)"
 
-chunking:
-  size: 800
-  overlap: 100
+	mapKey(mapValue(&root, "ingest"), "embed_concurrency").HeadComment =
+		"max embed batches processed concurrently within one file (keep low to\n" +
+			"respect provider rate limits; 1 = fully serial)"
 
-preprocess:
-  output_dir: ` + filepath.Join(home, ".tbuk", "extracted") + `
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("config: marshal default yaml: %w", err)
+	}
+	return string(out), nil
+}
 
-ingest:
-  # max embed batches processed concurrently within one file (keep low to
-  # respect provider rate limits; 1 = fully serial)
-  embed_concurrency: 4
-`
+// mapValue returns the value node for key in a YAML mapping node, or nil.
+func mapValue(m *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// mapKey returns the key node for key in a YAML mapping node, or nil. Comments
+// attached to the key node render on the line above it.
+func mapKey(m *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i]
+		}
+	}
+	return nil
 }
