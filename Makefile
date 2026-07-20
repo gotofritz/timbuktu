@@ -1,4 +1,4 @@
-.PHONY: help build install test test-race coverage coverage-html lint vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump
+.PHONY: help build install test test-verbose test-race coverage coverage-html lint vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump
 
 .DEFAULT_GOAL := help
 
@@ -22,6 +22,9 @@ install: ## Install tbuk to $GOPATH/bin
 	go install -ldflags "$(LDFLAGS)" ./cmd/tbuk
 
 test: ## Run all tests
+	go test ./... -count=1
+
+test-verbose: ## Run all tests with per-test output (-v)
 	go test ./... -v -count=1
 
 coverage: ## Print total coverage percentage

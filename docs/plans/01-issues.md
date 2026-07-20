@@ -23,6 +23,13 @@ traceability; duplicates note every reviewer that independently found them.
 | ECO   | Ecosystem health (dependency manager)            | ECO-1–5   |
 | AGENT | Agent-readiness                                  | AR-1–11   |
 
+## Status convention
+
+This file is the source index for assessment findings. As each finding is
+fixed, its heading is marked ` — ✅ DONE` (search for `✅` to see progress).
+Unmarked headings are open. The pre-compression backup of this list lives at
+`docs/archive/01-issues.original.md`.
+
 ---
 
 ## P0 — Alpha blockers
@@ -699,7 +706,7 @@ AGENTS.md tooling says "go (1.24+)" while README requires "Go 1.25+" and
 auto-downloads 1.25, surprising offline/CI environments). State the Go
 requirement in one place (README); AGENTS.md defers to it.
 
-### 46. [DEBT] Test suite runs twice on every push/PR; verbose output floods logs (ES-9; dup: AR-10)
+### 46. [DEBT] Test suite runs twice on every push/PR; verbose output floods logs (ES-9; dup: AR-10) — ✅ DONE
 
 Both `ci.yml` (Test step, `-v`) and `quality-check.yml` (coverage job) trigger
 on the same events and run the full suite; `-v` prints every test name,
@@ -707,7 +714,7 @@ burying failures in noise (and flooding agent context). Drop the Test step
 from ci.yml (coverage job already runs everything with `-count=1`) or merge
 the workflows; drop `-v` either way (keep a `test-verbose` target).
 
-### 47. [MAINT] No SECURITY.md / vulnerability disclosure channel (orig #48)
+### 47. [MAINT] No SECURITY.md / vulnerability disclosure channel (orig #48) — ✅ DONE
 
 Issues 24/38 cover *detecting* vulns and *signing* releases; nothing tells an
 outside reporter where to send one. Project parses untrusted input (PDFs,
@@ -715,7 +722,7 @@ issue 9) and ships binaries — the case where private disclosure matters. Add
 `SECURITY.md` advertising GitHub private vulnerability reporting (supported
 versions + "use GitHub advisories / email").
 
-### 48. [MAINT] Findings backlog has no lifecycle — nothing marks issues resolved (orig #49)
+### 48. [MAINT] Findings backlog has no lifecycle — nothing marks issues resolved (orig #49) — ✅ DONE
 
 This file holds all findings from the assessment passes; GitHub Issues never
 used (0 issues, tracker idle). No status marker per finding — as fixes land,
