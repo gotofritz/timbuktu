@@ -499,6 +499,30 @@ This tells you how many files are indexed, how many chunks they produced, and
 whether all chunks have embeddings. If "Embedded" is less than "Chunks", some
 chunks are missing embeddings — re-run `tbuk ingest` to fix that.
 
+### Listing documents
+
+```bash
+tbuk list
+```
+
+Output:
+
+```
+PATH                 TITLE          CHUNKS  UPDATED
+/home/me/notes.md    notes          12      2026-07-20T09:14:00Z
+/home/me/report.pdf  Q3 Report      48      2026-07-19T18:02:11Z
+```
+
+`tbuk list` shows every indexed document — path, title, chunk count, and when
+it was last ingested — so you can confirm an ingest worked, spot stale or
+renamed files, and decide what to delete. Use `--limit N` to cap the number of
+rows and `--format json` for scripting:
+
+```bash
+tbuk list --limit 20
+tbuk list --format json | jq '.[].path'
+```
+
 ### Finding documents by metadata
 
 ```bash
@@ -506,8 +530,8 @@ tbuk find topic=cooking
 ```
 
 This finds documents tagged with specific metadata. Metadata tagging is an
-advanced feature covered in section 13. For now, `tbuk stats` is the quickest
-way to check what is in the database.
+advanced feature covered in section 13. For a plain inventory of everything
+indexed, use `tbuk list`; for aggregate counts, use `tbuk stats`.
 
 ---
 

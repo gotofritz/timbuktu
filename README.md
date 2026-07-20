@@ -67,6 +67,7 @@ tbuk template edit <n>   # open template manifest in $EDITOR
 tbuk delete <path>       # remove a document, its chunks, and its extracted-text cache (--yes skips prompt)
 tbuk update <path>       # re-ingest if SHA256 changed, skip otherwise (--force)
 tbuk stats               # knowledge base summary: doc/chunk counts, size (--format text|json)
+tbuk list                # list indexed documents: path, title, chunk count, updated (--limit, --format)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:

@@ -349,6 +349,7 @@ tbuk template edit <name>      open manifest in $EDITOR
 tbuk delete <path>             remove document + cascade-delete chunks/metadata + extracted-text cache (--yes skips prompt)
 tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--force)
 tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
+tbuk list                      list indexed documents: path, title, chunk count, updated_at (--limit, --format text|json)
 ```
 
 ---
