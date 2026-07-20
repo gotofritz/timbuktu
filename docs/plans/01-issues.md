@@ -639,7 +639,7 @@ elsewhere (citations, titles, metadata in `meta list`/`stats`). Fix: filter
 C0/C1 control chars (keep `\n`, `\t`) from streamed `ask` output +
 doc-derived display strings — small writer wrapper, one place.
 
-### 38. [SEC] Release artifacts lack provenance / signature (orig #29)
+### 38. [SEC] Release artifacts lack provenance / signature (orig #29) — ✅ DONE
 
 Checksums + binaries live in the same release — attacker who tampers one
 tampers both. GitHub `actions/attest-build-provenance` gives signed

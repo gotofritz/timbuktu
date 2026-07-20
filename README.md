@@ -35,6 +35,18 @@ tbuk version
 On Windows, download the `_windows_amd64.zip` (or `_windows_arm64.zip`)
 asset, unzip it, and move `tbuk.exe` to a folder on your `PATH`.
 
+#### Verifying the download (optional)
+
+Every release archive carries a signed build-provenance attestation binding
+it to the workflow run that built it. With the [GitHub CLI](https://cli.github.com):
+
+```bash
+gh attestation verify tbuk.tar.gz --repo gotofritz/timbuktu
+```
+
+A successful check proves the archive was produced by this repository's
+release workflow and has not been altered since.
+
 ### From source
 
 Requires:
