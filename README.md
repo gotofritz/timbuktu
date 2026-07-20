@@ -208,6 +208,9 @@ chunking:
 
 ingest:
   embed_concurrency: 4   # embed batches in flight per file (>=1; 1 = serial)
+
+prompts:
+  dir: ~/.tbuk/prompts   # root directory holding prompt template folders
 ```
 
 Override config file: `tbuk --config /path/to/config.yaml <cmd>`

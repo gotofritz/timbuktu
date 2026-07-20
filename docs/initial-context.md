@@ -316,7 +316,7 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, topK int, meta m
 
 ### Prompt Templates
 
-Disk layout: `~/.tbuk/prompts/<name>/{manifest.yaml, system.tmpl, user.tmpl}`
+Disk layout: `~/.tbuk/prompts/<name>/{manifest.yaml, system.tmpl, user.tmpl}` (root configurable via `prompts.dir`)
 
 ```go
 type TemplateData struct {

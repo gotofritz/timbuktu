@@ -134,8 +134,8 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	printCheck(w, "hybrid", "available (RRF)", "✓")
 
 	printSection(w, "Prompts")
-	printCheck(w, "dir", promptsRoot(), "")
-	manifests, listErr := promptsDir().List()
+	printCheck(w, "dir", promptsRoot(cfg), "")
+	manifests, listErr := promptsDir(cfg).List()
 	if listErr != nil || len(manifests) == 0 {
 		printCheck(w, "templates", "none", "")
 	} else {

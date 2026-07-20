@@ -64,6 +64,12 @@ type Config struct {
 	Chunking   ChunkingConfig   `yaml:"chunking"`
 	Preprocess PreprocessConfig `yaml:"preprocess"`
 	Ingest     IngestConfig     `yaml:"ingest"`
+	Prompts    PromptsConfig    `yaml:"prompts"`
+}
+
+// PromptsConfig controls where prompt templates live.
+type PromptsConfig struct {
+	Dir string `yaml:"dir"`
 }
 
 // IngestConfig controls ingestion throughput.
@@ -145,6 +151,9 @@ func Defaults() Config {
 		Ingest: IngestConfig{
 			EmbedConcurrency: 4,
 		},
+		Prompts: PromptsConfig{
+			Dir: filepath.Join(home, ".tbuk", "prompts"),
+		},
 	}
 }
 
@@ -196,6 +205,9 @@ func DefaultYAML() (string, error) {
 	mapKey(mapValue(&root, "ingest"), "embed_concurrency").HeadComment =
 		"max embed batches processed concurrently within one file (keep low to\n" +
 			"respect provider rate limits; 1 = fully serial)"
+
+	mapKey(mapValue(&root, "prompts"), "dir").HeadComment =
+		"dir: root directory holding prompt template folders"
 
 	out, err := yaml.Marshal(&root)
 	if err != nil {

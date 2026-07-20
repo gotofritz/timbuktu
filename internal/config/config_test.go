@@ -36,6 +36,12 @@ func TestDefaults(t *testing.T) {
 	if cfg.Embedding.BaseURL != "" {
 		t.Errorf("embedding.base_url: want empty (provider resolves), got %q", cfg.Embedding.BaseURL)
 	}
+	// prompts.dir must default under ~/.tbuk like the db and extracted dirs, so
+	// the prompt root is configurable rather than hardcoded in the ask/template
+	// commands.
+	if !strings.HasSuffix(cfg.Prompts.Dir, filepath.Join(".tbuk", "prompts")) {
+		t.Errorf("prompts.dir: want a path ending in .tbuk/prompts, got %q", cfg.Prompts.Dir)
+	}
 }
 
 func TestLoad_missingFile(t *testing.T) {

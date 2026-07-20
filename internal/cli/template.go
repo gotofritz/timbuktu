@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gotofritz/timbuktu/internal/config"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 )
 
@@ -28,8 +29,8 @@ func newTemplateListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List available prompt templates",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			td := promptsDir()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			td := promptsDir(configFrom(cmd))
 			manifests, err := td.List()
 			if err != nil {
 				return fmt.Errorf("list templates: %w", err)
@@ -51,9 +52,9 @@ func newTemplateShowCmd() *cobra.Command {
 		Use:   "show <name>",
 		Short: "Print manifest and template files to stdout",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			td := promptsDir()
+			td := promptsDir(configFrom(cmd))
 			tmpl, err := td.Load(name)
 			if err != nil {
 				return fmt.Errorf("load template %q: %w", name, err)
@@ -84,7 +85,7 @@ func newTemplateShowCmd() *cobra.Command {
 				}
 			}
 
-			dir := filepath.Join(promptsRoot(), name)
+			dir := filepath.Join(promptsRoot(configFrom(cmd)), name)
 			printFile("=== system.tmpl ===", filepath.Join(dir, "system.tmpl"))
 			printFile("=== user.tmpl ===", filepath.Join(dir, "user.tmpl"))
 			return nil
@@ -99,7 +100,7 @@ func newTemplateEditCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			manifestPath := filepath.Join(promptsRoot(), name, "manifest.yaml")
+			manifestPath := filepath.Join(promptsRoot(configFrom(cmd)), name, "manifest.yaml")
 			if _, err := os.Stat(manifestPath); err != nil {
 				return fmt.Errorf("template %q: %w", name, err)
 			}
@@ -132,13 +133,12 @@ func launchEditor(editor, path string, stdin io.Reader, stdout, stderr io.Writer
 	return nil
 }
 
-func promptsRoot() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".tbuk", "prompts")
+func promptsRoot(cfg config.Config) string {
+	return cfg.Prompts.Dir
 }
 
-func promptsDir() *prompts.TemplateDir {
-	return prompts.NewTemplateDir(promptsRoot())
+func promptsDir(cfg config.Config) *prompts.TemplateDir {
+	return prompts.NewTemplateDir(promptsRoot(cfg))
 }
 
 func printFile(header, path string) {

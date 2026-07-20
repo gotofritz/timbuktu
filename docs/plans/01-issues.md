@@ -657,7 +657,7 @@ stat the path and return "update takes a single file; use `tbuk ingest <dir>`
 for folders". Evidence: `internal/cli/update.go:60-77` vs
 `internal/cli/ingest.go:65-70`.
 
-### 40. [ARCH] Prompts root hardcoded (orig #7)
+### 40. [ARCH] Prompts root hardcoded (orig #7) — ✅ DONE
 
 `~/.tbuk/prompts` hardcoded in `internal/cli/ask.go:44-46` (also affects
 `internal/cli/template.go:111-114`, per PROD review) while DB path +
