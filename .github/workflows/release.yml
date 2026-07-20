@@ -31,7 +31,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write     # create the GitHub release and upload artifacts
+      id-token: write      # mint the OIDC token the attestation is signed with
+      attestations: write  # record the provenance attestation
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,3 +52,13 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Sign a build-provenance attestation for every published artifact. The
+      # binaries and checksums.txt otherwise ship together with nothing binding
+      # them to this workflow run, so tampering with both goes undetected.
+      # Feeding the checksums file attests each archive it lists in one shot;
+      # consumers verify with `gh attestation verify <file> --repo <owner>/<repo>`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/checksums.txt
