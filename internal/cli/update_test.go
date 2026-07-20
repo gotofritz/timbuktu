@@ -52,6 +52,20 @@ func TestUpdateCommand_nonExistentFile(t *testing.T) {
 	}
 }
 
+func TestRunUpdate_directoryGivesClearError(t *testing.T) {
+	dir := t.TempDir()
+
+	// A directory short-circuits before the ingester is touched, so nil is fine.
+	err := cli.RunUpdate(context.Background(), &bytes.Buffer{}, nil, nil, dir, false)
+	if err == nil {
+		t.Fatal("expected error updating a directory")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "single file") || !strings.Contains(msg, "ingest") {
+		t.Errorf("error should point to `tbuk ingest` for directories, got: %q", msg)
+	}
+}
+
 func TestRunUpdate_unchanged(t *testing.T) {
 	sqlDB := openMemoryDB(t)
 	docs := storage.NewDocumentRepo(sqlDB)
