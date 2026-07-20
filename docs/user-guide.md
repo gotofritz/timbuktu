@@ -354,10 +354,19 @@ embedding:
 chunking:
   size: 800          # how large each chunk is (measured in approximate word-equivalents)
   overlap: 100       # how much consecutive chunks overlap
+
+ingest:
+  embed_concurrency: 4   # embed batches sent to the server at once per file
 ```
 
 **Settings most users never need to change:** `database.path`, `chunking.size`,
-`chunking.overlap`.
+`chunking.overlap`, `ingest.embed_concurrency`.
+
+`ingest.embed_concurrency` controls how many embedding requests `tbuk ingest`
+keeps in flight at once for a single file. The default of `4` overlaps network
+round-trips so large ingests finish faster. Lower it to `1` (fully serial) if
+your embedding server is rate-limited or easily overloaded; raising it past a
+handful rarely helps and can trip provider rate limits. Must be at least `1`.
 
 **Settings you set once, per backend** (see [section 4](#4-before-you-start)
 for the two backend paths):

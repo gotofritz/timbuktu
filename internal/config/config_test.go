@@ -208,6 +208,8 @@ func TestConfig_Validate(t *testing.T) {
 		{"unknown embedding provider", func(c *config.Config) { c.Embedding.Provider = "word2vec" }, "embedding provider"},
 		{"claude not valid embedder", func(c *config.Config) { c.Embedding.Provider = "claude" }, "embedding provider"},
 		{"empty db path", func(c *config.Config) { c.Database.Path = "" }, "database"},
+		{"zero embed concurrency", func(c *config.Config) { c.Ingest.EmbedConcurrency = 0 }, "embed_concurrency"},
+		{"negative embed concurrency", func(c *config.Config) { c.Ingest.EmbedConcurrency = -2 }, "embed_concurrency"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
