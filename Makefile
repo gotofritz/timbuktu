@@ -54,22 +54,12 @@ clean: ## Remove built binaries
 check: fmt vet lint test ## Format, vet, lint, and test (run before committing)
 
 # Mirror the quality-check CI jobs (lint + build + coverage >= 85% total and
-# per package — AGENTS.md demands >= 85% for every package, not just the total)
+# per package — AGENTS.md demands >= 85% for every package, not just the total).
+# The coverage gate lives in scripts/check-coverage.sh, which CI invokes too, so
+# the local and CI gates cannot drift.
 check-ci: lint ## Full CI gate: lint + build + coverage >= 85%
 	go build ./...
-	go test -coverpkg=./... ./internal/... -coverprofile=coverage.out -count=1
-	@COVERAGE=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{print $$3}' | tr -d '%'); \
-	rm -f coverage.out; \
-	echo "Total coverage: $${COVERAGE}%"; \
-	awk -v cov="$${COVERAGE}" 'BEGIN { if (cov < 85) { print "FAIL: coverage " cov "% is below 85%"; exit 1 } else { print "PASS: coverage " cov "% >= 85%" } }'
-	@echo "Per-package coverage:"; \
-	go test ./internal/... -cover -count=1 | awk '\
-	  /coverage:/ { for (i = 1; i <= NF; i++) if ($$i ~ /%$$/) { c = $$i; sub(/%$$/, "", c) }; \
-	                printf "  %-55s %s%%\n", $$2, c; \
-	                if (c + 0 < 85) { bad = 1; fail = fail "  " $$2 " (" c "%)\n" } } \
-	  /\[no test files\]/ { printf "  %-55s no tests\n", $$2; bad = 1; fail = fail "  " $$2 " (no test files)\n" } \
-	  END { if (bad) { printf "FAIL: packages below 85%%:\n%s", fail; exit 1 } \
-	        else print "PASS: every package >= 85%" }'
+	@./scripts/check-coverage.sh
 
 # Serve output/ over HTTP for local feed testing (install python3 if needed)
 serve: ## Serve output/ over HTTP for local feed testing

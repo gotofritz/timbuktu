@@ -44,19 +44,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run tests with coverage
-        run: go test -coverpkg=./... ./internal/... -coverprofile=coverage.out -count=1
-
-      - name: Check coverage threshold
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep "^total:" | awk '{print $3}' | tr -d '%')
-          echo "Total coverage: ${COVERAGE}%"
-          if [ -z "$COVERAGE" ]; then
-            echo "::error::Could not determine test coverage"
-            exit 1
-          fi
-          if awk -v cov="$COVERAGE" 'BEGIN { exit !(cov < 85) }'; then
-            echo "::error::Coverage ${COVERAGE}% is below the required 85% threshold"
-            exit 1
-          fi
-          echo "Coverage check passed: ${COVERAGE}% >= 85%"
+      # Same gate as `make check-ci` — the shared script enforces >= 85% total
+      # AND per package, so a PR can't drop one package's coverage while the
+      # total stays green. Local and CI gates stay in lockstep by construction.
+      - name: Check coverage threshold (total + per-package)
+        run: ./scripts/check-coverage.sh

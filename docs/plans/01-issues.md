@@ -429,7 +429,7 @@ scanning); `.github/workflows/release.yml:24-27` (`version: latest`); no
 pin GoReleaser (`version: '~> v2'`). Optionally pin actions to commit SHAs —
 with Dependabot keeping them fresh, pinning costs nothing.
 
-### 25. [QA] CI enforces only *total* coverage — per-package ≥85% rule local-only (orig #34; dup: ES-1, AR-7)
+### 25. [QA] CI enforces only *total* coverage — per-package ≥85% rule local-only (orig #34; dup: ES-1, AR-7) — ✅ DONE
 
 **Problem:** AGENTS.md mandates coverage ≥85% *per package*; `make check-ci`
 enforces it, but the actual CI coverage job checks only the total (86.7%): a
