@@ -359,6 +359,52 @@ func TestIngester_reingestChunkStoreFailure_keepsOldSHA(t *testing.T) {
 	}
 }
 
+// miscountEmbedder returns a vector slice whose length does NOT match the
+// number of input texts, simulating a partial/malformed embedding response.
+type miscountEmbedder struct {
+	dim   int
+	count int // number of vectors to return regardless of len(texts)
+}
+
+func (m *miscountEmbedder) Embed(_ context.Context, _ []string) ([][]float32, error) {
+	out := make([][]float32, m.count)
+	for i := range out {
+		out[i] = make([]float32, m.dim)
+	}
+	return out, nil
+}
+
+func (m *miscountEmbedder) Dimension() int { return m.dim }
+
+// An embedder that returns fewer vectors than input texts must produce a
+// descriptive error, not an index-out-of-range panic (P1-14).
+func TestIngester_embeddingCountMismatch_errorsNotPanics(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 200)} // many chunks
+	emb := &miscountEmbedder{dim: 4, count: 1}                 // returns 1 vector per batch
+	ing := newIngester(t, db, ext, emb, extractedDir)
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "doc.md", "content triggering multiple chunks")
+
+	res := ing.IngestFile(context.Background(), path, ingest.Options{})
+	if res.Err == nil {
+		t.Fatal("expected error on embedding count mismatch, got nil")
+	}
+	if !strings.Contains(res.Err.Error(), "embedding count") {
+		t.Errorf("error = %v, want it to mention embedding count", res.Err)
+	}
+
+	var count int
+	if err := db.DB().QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 chunks stored after mismatch, got %d", count)
+	}
+}
+
 func TestIngester_forceFlag(t *testing.T) {
 	db := openTestDB(t)
 	extractedDir := t.TempDir()

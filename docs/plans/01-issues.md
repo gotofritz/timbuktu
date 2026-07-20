@@ -245,7 +245,7 @@ the user. Undercuts the atomicity the chunk transaction was built for.
 **Fix:** Document upsert + `ReplaceForDocument` in the same transaction, or
 update document SHA256 only after chunks are stored.
 
-### 14. [CORR] Embedding count mismatch panics mid-ingest (orig #19)
+### 14. [CORR] Embedding count mismatch panics mid-ingest (orig #19) — ✅ DONE
 
 **Problem:** Ingester indexes `vecs[j]` assuming the embedder returned exactly
 one vector per input text. Ollama + openai adapters return whatever the server
