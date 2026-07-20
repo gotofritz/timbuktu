@@ -56,6 +56,13 @@ Prioritize:
 
 ### Commits
 
+- **[Conventional Commits](https://www.conventionalcommits.org)** —
+  `<type>(<scope>): <subject>`, e.g. `fix(ingest): guard embedding count`.
+  The `commit-msg` pre-commit hook runs `cz check` and rejects
+  non-conforming subjects; `feat`/`fix` prefixes drive the GoReleaser
+  changelog. Config: `.cz.toml`. Setup: `CONTRIBUTING.md`.
+- Common types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`,
+  `ci`, `chore`
 - Small, atomic commits
 - Imperative present tense
 - Subject ≤ 72 chars
@@ -132,12 +139,16 @@ Which runs: `golangci-lint`, `go build ./...`, tests with coverage ≥ 85%.
 
 ## Environment
 
-No virtualenv. Standard Go toolchain.
+Standard Go toolchain for building and testing:
 
 ```bash
 go build ./...
 go test ./...
 ```
+
+The **commit-msg / pre-commit hooks** additionally need Python-based tooling
+(`pre-commit`, `commitizen`) plus `goimports` and `golangci-lint` on `PATH`.
+This is only for committing locally — see `CONTRIBUTING.md`.
 
 ## Failure Policy
 
@@ -158,7 +169,9 @@ go test ./...
 
 ## Enforcement
 
-- Pre-commit enabled
+- Pre-commit hooks (`.pre-commit-config.yaml`): fmt, vet, goimports,
+  golangci-lint, `go test`, and a `cz check` commit-msg gate. Setup in
+  `CONTRIBUTING.md`
 - CI via GitHub Actions
 - All checks must pass before merge Project Info
 

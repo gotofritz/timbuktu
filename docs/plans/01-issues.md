@@ -543,7 +543,7 @@ version (binary install script or
 note it's needed only for `make lint`/`check`/`check-ci`. State the version in
 exactly one place.
 
-### 31. [DX] Commit-time gates (pre-commit + commitizen) enforced but undocumented (orig #39; dup: ES-7, AR-6)
+### 31. [DX] Commit-time gates (pre-commit + commitizen) enforced but undocumented (orig #39; dup: ES-7, AR-6) — ✅ DONE
 
 **Problem:** AGENTS.md declares "Pre-commit enabled"; `.pre-commit-config.yaml`
 wires a commit-msg hook running `cz check` (commitizen, Python,

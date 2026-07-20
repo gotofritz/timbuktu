@@ -1,0 +1,6 @@
+[tool.commitizen]
+# Commit messages follow Conventional Commits. The commit-msg pre-commit hook
+# runs `cz check` against this schema, and GoReleaser groups the changelog by
+# the type prefix (feat / fix / …). See CONTRIBUTING.md for setup.
+name = "cz_conventional_commits"
+tag_format = "v$version"

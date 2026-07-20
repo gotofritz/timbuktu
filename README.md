@@ -82,6 +82,10 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 ## Development
 
+New contributors: see **[CONTRIBUTING.md](CONTRIBUTING.md)** for one-time
+setup (pre-commit hooks, commit-message convention, and the tooling the hooks
+need on `PATH`).
+
 Run `make` (or `make help`) to list every target with a description — the
 Makefile is self-documenting, so this is always current:
 
