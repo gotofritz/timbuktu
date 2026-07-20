@@ -884,3 +884,55 @@ func TestDocumentRepo_TimestampsSet(t *testing.T) {
 		t.Errorf("UpdatedAt out of range: %v", doc.UpdatedAt)
 	}
 }
+
+func TestDocumentRepo_Count(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	repo := storage.NewDocumentRepo(db.DB())
+
+	if n, err := repo.Count(ctx); err != nil || n != 0 {
+		t.Fatalf("empty Count: got (%d, %v), want (0, nil)", n, err)
+	}
+
+	for _, p := range []string{"/a.txt", "/b.txt", "/c.txt"} {
+		if err := repo.Create(ctx, makeDoc(p)); err != nil {
+			t.Fatalf("Create %s: %v", p, err)
+		}
+	}
+
+	n, err := repo.Count(ctx)
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("want 3 documents, got %d", n)
+	}
+}
+
+func TestChunkRepo_Count(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	docRepo := storage.NewDocumentRepo(db.DB())
+	chunkRepo := storage.NewChunkRepo(db.DB())
+
+	if n, err := chunkRepo.Count(ctx); err != nil || n != 0 {
+		t.Fatalf("empty Count: got (%d, %v), want (0, nil)", n, err)
+	}
+
+	doc := seedDocument(t, ctx, docRepo)
+	chunks := []*storage.Chunk{
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "one", TokenCount: 1},
+		{DocumentID: doc.ID, ChunkIndex: 1, Text: "two", TokenCount: 1},
+	}
+	if err := chunkRepo.BulkInsert(ctx, chunks); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	n, err := chunkRepo.Count(ctx)
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("want 2 chunks, got %d", n)
+	}
+}

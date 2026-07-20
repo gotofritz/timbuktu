@@ -73,10 +73,11 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		db, err := storage.Open(cfg.Database.Path)
 		if err == nil {
 			sqlDB := db.DB()
-			if n, err := CountDocuments(sqlDB); err == nil {
+			ctx := context.Background()
+			if n, err := storage.NewDocumentRepo(sqlDB).Count(ctx); err == nil {
 				printCheck(w, "documents", fmt.Sprintf("%d", n), "")
 			}
-			if n, err := CountChunks(sqlDB); err == nil {
+			if n, err := storage.NewChunkRepo(sqlDB).Count(ctx); err == nil {
 				printCheck(w, "chunks", fmt.Sprintf("%d", n), "")
 			}
 			_ = db.Close()

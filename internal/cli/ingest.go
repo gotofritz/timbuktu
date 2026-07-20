@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -108,18 +107,4 @@ func PrintDirResults(results []ingest.Result, verbose bool, outW, errW io.Writer
 		return fmt.Errorf("%d file(s) failed to ingest", errs)
 	}
 	return nil
-}
-
-// CountDocuments returns the total number of documents in the database.
-func CountDocuments(db *sql.DB) (int, error) {
-	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM documents`).Scan(&n)
-	return n, err
-}
-
-// CountChunks returns the total number of chunks in the database.
-func CountChunks(db *sql.DB) (int, error) {
-	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&n)
-	return n, err
 }

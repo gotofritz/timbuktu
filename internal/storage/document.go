@@ -48,6 +48,15 @@ func (r *DocumentRepo) Create(ctx context.Context, doc *Document) error {
 	return nil
 }
 
+// Count returns the total number of documents.
+func (r *DocumentRepo) Count(ctx context.Context) (int, error) {
+	var n int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM documents`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("DocumentRepo.Count: %w", err)
+	}
+	return n, nil
+}
+
 // GetByPath returns the document with the given path, or an error if not found.
 func (r *DocumentRepo) GetByPath(ctx context.Context, path string) (*Document, error) {
 	row := r.db.QueryRowContext(ctx,

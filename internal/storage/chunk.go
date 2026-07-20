@@ -22,6 +22,15 @@ type ChunkRepo struct{ db *sql.DB }
 // NewChunkRepo returns a ChunkRepo backed by db.
 func NewChunkRepo(db *sql.DB) *ChunkRepo { return &ChunkRepo{db: db} }
 
+// Count returns the total number of chunks.
+func (r *ChunkRepo) Count(ctx context.Context) (int, error) {
+	var n int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("ChunkRepo.Count: %w", err)
+	}
+	return n, nil
+}
+
 // BulkInsert inserts chunks in a single transaction and sets each ID.
 func (r *ChunkRepo) BulkInsert(ctx context.Context, chunks []*Chunk) error {
 	tx, err := r.db.BeginTx(ctx, nil)

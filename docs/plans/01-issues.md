@@ -663,7 +663,7 @@ for folders". Evidence: `internal/cli/update.go:60-77` vs
 `internal/cli/template.go:111-114`, per PROD review) while DB path +
 extracted dir are configurable. Move to config (e.g. `prompts.dir`).
 
-### 41. [ARCH] Storage queries in CLI package (orig #8)
+### 41. [ARCH] Storage queries in CLI package (orig #8) — ✅ DONE
 
 `CountDocuments` / `CountChunks` in `internal/cli/ingest.go:128-139` are
 storage concerns. Move to `internal/storage`.
