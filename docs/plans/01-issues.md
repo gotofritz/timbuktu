@@ -333,7 +333,7 @@ run `root.ExecuteContext(ctx)`. On cancellation, return `ctx.Err()`, exit
 non-zero. `IngestDir`: print summary accumulated so far before return. Second
 Ctrl-C force-quits (`NotifyContext` restores default handling).
 
-### 20. [SRE] Release workflow publishes without test gate; CI never builds shipped platforms (orig #31)
+### 20. [SRE] Release workflow publishes without test gate; CI never builds shipped platforms (orig #31) — ✅ DONE
 
 **Problem:** Two holes in the commit → published binary path:
 1. `release.yml` triggers on any `v*` tag push straight to GoReleaser — no

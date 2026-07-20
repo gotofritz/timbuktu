@@ -6,8 +6,29 @@ on:
       - 'v*'
 
 jobs:
+  # Gate: a tag push does not trigger the CI workflow, so re-run the checks
+  # here. GoReleaser only runs if vet and the full test suite pass, so a broken
+  # commit can never ship a published binary.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
   release:
     name: Release
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
