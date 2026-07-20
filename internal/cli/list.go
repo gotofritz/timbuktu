@@ -8,8 +8,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-
-	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
 func newListCmd() *cobra.Command {
@@ -26,13 +24,12 @@ func newListCmd() *cobra.Command {
 			if format != "text" && format != "json" {
 				return fmt.Errorf("invalid format %q: must be text or json", format)
 			}
-			cfg := configFrom(cmd)
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(configFrom(cmd))
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
-			return RunList(cmd.OutOrStdout(), db.DB(), limit, format)
+			defer func() { _ = app.Close() }()
+			return RunList(cmd.OutOrStdout(), app.DB(), limit, format)
 		},
 	}
 

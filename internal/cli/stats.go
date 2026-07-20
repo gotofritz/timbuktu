@@ -8,8 +8,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-
-	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
 func newStatsCmd() *cobra.Command {
@@ -21,12 +19,12 @@ func newStatsCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := configFrom(cmd)
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(cfg)
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
-			return RunStats(cmd.OutOrStdout(), db.DB(), cfg.Database.Path, format)
+			defer func() { _ = app.Close() }()
+			return RunStats(cmd.OutOrStdout(), app.DB(), cfg.Database.Path, format)
 		},
 	}
 

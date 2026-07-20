@@ -7,8 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gotofritz/timbuktu/internal/chunking"
-	"github.com/gotofritz/timbuktu/internal/embeddings"
 	"github.com/gotofritz/timbuktu/internal/ingest"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
@@ -21,31 +19,18 @@ func newUpdateCmd() *cobra.Command {
 		Short: "Re-ingest a file if its content has changed",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := configFrom(cmd)
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(configFrom(cmd))
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
-			sqlDB := db.DB()
+			defer func() { _ = app.Close() }()
 
-			emb, err := embeddings.NewEmbedder(cfg.Embedding)
+			ing, err := app.Ingester()
 			if err != nil {
-				return fmt.Errorf("embedder: %w", err)
+				return err
 			}
 
-			docs := storage.NewDocumentRepo(sqlDB)
-			ing := ingest.NewIngester(
-				docs,
-				storage.NewChunkRepo(sqlDB),
-				storage.NewMetadataRepo(sqlDB),
-				&ingest.DefaultFileExtractor{},
-				&chunking.Chunker{Size: cfg.Chunking.Size, Overlap: cfg.Chunking.Overlap},
-				emb,
-				cfg.Preprocess.OutputDir,
-			)
-
-			return RunUpdate(cmd.Context(), cmd.OutOrStdout(), ing, docs, args[0], force)
+			return RunUpdate(cmd.Context(), cmd.OutOrStdout(), ing, app.Docs(), args[0], force)
 		},
 	}
 

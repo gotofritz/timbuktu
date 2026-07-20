@@ -25,14 +25,14 @@ func newDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := configFrom(cmd)
-			db, err := storage.Open(cfg.Database.Path)
+			app, err := openApp(cfg)
 			if err != nil {
-				return fmt.Errorf("open database: %w", err)
+				return err
 			}
-			defer func() { _ = db.Close() }()
-			sqlDB := db.DB()
+			defer func() { _ = app.Close() }()
+			sqlDB := app.DB()
 			out := cmd.OutOrStdout()
-			docs := storage.NewDocumentRepo(sqlDB)
+			docs := app.Docs()
 
 			if !yes {
 				path, err := NormalizePath(args[0])
