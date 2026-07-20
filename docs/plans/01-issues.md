@@ -406,7 +406,7 @@ repos + text/JSON printing patterns exist.
 
 ## P2 — Medium
 
-### 24. [SEC] No dependency vuln scanning; release toolchain unpinned (orig #28; dup: ES-4, ECO-1, ECO-2, ECO-5)
+### 24. [SEC] No dependency vuln scanning; release toolchain unpinned (orig #28; dup: ES-4, ECO-1, ECO-2, ECO-5) — ✅ DONE
 
 **Problem:** Project ships standalone binaries but nothing watches the
 dependency tree: no `govulncheck` in CI, no Dependabot/Renovate — a CVE in

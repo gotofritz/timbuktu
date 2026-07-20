@@ -32,6 +32,56 @@ jobs:
       - name: Build
         run: go build -o /dev/null ./...
 
+  govulncheck:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    # The project ships standalone binaries; scan the dependency tree for known
+    # CVEs (e.g. in the PDF parser that handles untrusted input) on every PR.
+    steps:
+      - uses: actions/checkout@v4
+
+      # Scan with the latest stable Go, NOT the pinned go.mod version. govulncheck
+      # reports standard-library CVEs relative to the Go release running it, and
+      # every patch discloses new ones fixed in the next patch — pinning to an
+      # exact version would turn this gate red the day any new stdlib CVE lands,
+      # with no code change. Using the newest release means only genuinely
+      # unpatched vulnerabilities fail, and the job self-heals as Go patches ship.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Run govulncheck
+        # local: scan with the setup-go stable toolchain above, never download
+        # the exact go.mod pin (which would reintroduce the stale-version rot).
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+
+          # Human-readable scan for the logs (does not gate on its own).
+          govulncheck ./... || true
+
+          # Gate policy: fail only on CALLED vulnerabilities in third-party
+          # modules — those are actionable (bump the dependency: x/net, sqlite,
+          # the PDF parser, ...). Standard-library CVEs are reported as a warning
+          # but never block, because they are only fixable by a new Go release,
+          # and the stdlib treadmill (each patch discloses CVEs fixed in the
+          # next) would otherwise turn this gate red on untouched code.
+          govulncheck -format json ./... > govulncheck.json || true
+          called='[.[] | select(has("finding")) | .finding | select(.trace[0].function != null)]'
+          dep=$(jq -rs "$called | map(select(.trace[0].module != \"stdlib\") | .osv) | unique | .[]" govulncheck.json)
+          std=$(jq -rs "$called | map(select(.trace[0].module == \"stdlib\") | .osv) | unique | .[]" govulncheck.json)
+
+          if [ -n "$std" ]; then
+            echo "::warning::govulncheck: standard-library vulnerabilities present, fixed only by a newer Go release: $(echo $std | tr '\n' ' ')"
+          fi
+          if [ -n "$dep" ]; then
+            echo "::error::govulncheck: called vulnerabilities in dependencies (bump the affected module): $(echo $dep | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "No called third-party vulnerabilities."
+
   cross-compile:
     name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
