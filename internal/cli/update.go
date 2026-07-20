@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -44,6 +45,12 @@ func RunUpdate(ctx context.Context, out io.Writer, ing *ingest.Ingester, _ *stor
 	path, err := NormalizePath(path)
 	if err != nil {
 		return fmt.Errorf("resolve path %s: %w", path, err)
+	}
+	// update re-ingests one file; on a directory IngestFile fails deep in the
+	// extractor with an opaque "is a directory" read error. Catch it here and
+	// point the user at the command that does handle folders.
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		return fmt.Errorf("update takes a single file; use `tbuk ingest %s` for directories", path)
 	}
 	res := ing.IngestFile(ctx, path, ingest.Options{Force: force})
 	if res.Err != nil {

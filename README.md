@@ -81,7 +81,7 @@ tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR
 tbuk delete <path>       # remove a document, its chunks, and its extracted-text cache (--yes skips prompt)
-tbuk update <path>       # re-ingest if SHA256 changed, skip otherwise (--force)
+tbuk update <file>       # re-ingest a single file if SHA256 changed (--force); use `tbuk ingest <dir>` for folders
 tbuk stats               # knowledge base summary: doc/chunk counts, size (--format text|json)
 tbuk list                # list indexed documents: path, title, chunk count, updated (--limit, --format)
 ```

@@ -648,7 +648,7 @@ lines of workflow YAML; cosign keyless signing of `checksums.txt` is an
 alternative. Evidence: `.goreleaser.yml` (`checksum:` only),
 `.github/workflows/release.yml`.
 
-### 39. [PROD] `tbuk update` fails obscure on directories (orig #46)
+### 39. [PROD] `tbuk update` fails obscure on directories (orig #46) — ✅ DONE
 
 `ingest` accepts file or directory; `update` calls `IngestFile`
 unconditionally — natural `tbuk update ~/notes/` fails with a low-level
