@@ -28,11 +28,10 @@ jobs:
       # Inspect commits since the last tag and determine the highest-priority bump.
       #
       # Rules (from highest to lowest priority):
-      #   feat!:              → major
-      #   feat: / fix!: / refactor!: → minor
-      #   fix: / style: / refactor:  → patch
+      #   (feat|fix|refactor|perf|ci)!: → minor  (no major; breaking changes are minor bumps)
+      #   (feat|fix|refactor|perf|ci):  → patch
       #
-      # Any commit type not listed (docs:, chore:, ci:, test:, …) is ignored.
+      # Any commit type not listed (docs:, chore:, test:, …) is ignored.
       # If no releasable commits exist since the last tag, BUMP=none and no tag
       # is created.
       - name: Determine version bump
@@ -47,16 +46,13 @@ jobs:
 
           BUMP="none"
           while IFS= read -r msg; do
-            # feat! → major (highest priority; short-circuit on first match)
-            if echo "$msg" | grep -qE '^feat(\([^)]*\))?!:'; then
-              BUMP="major"
+            # breaking change (!) → minor (highest priority; short-circuit on first match)
+            if echo "$msg" | grep -qE '^(feat|fix|refactor|perf|ci)(\([^)]*\))?!:'; then
+              BUMP="minor"
               break
             fi
-            # feat / fix! / refactor! / perf! → minor
-            if echo "$msg" | grep -qE '^(feat|fix|refactor|perf)(\([^)]*\))?!:|^feat(\([^)]*\))?:'; then
-              if [ "$BUMP" != "major" ]; then BUMP="minor"; fi
-            # fix / style / refactor / perf → patch
-            elif echo "$msg" | grep -qE '^(fix|style|refactor|perf)(\([^)]*\))?:'; then
+            # non-breaking releasable type → patch
+            if echo "$msg" | grep -qE '^(feat|fix|refactor|perf|ci)(\([^)]*\))?:'; then
               if [ "$BUMP" = "none" ]; then BUMP="patch"; fi
             fi
           done < <(git log "$RANGE" --pretty=tformat:"%s")
@@ -80,7 +76,6 @@ jobs:
           fi
 
           case "$BUMP" in
-            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR+1)); PATCH=0 ;;
             patch) PATCH=$((PATCH+1)) ;;
           esac
