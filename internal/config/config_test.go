@@ -13,11 +13,11 @@ import (
 func TestDefaults(t *testing.T) {
 	cfg := config.Defaults()
 
-	if cfg.Chunking.Size != 800 {
-		t.Errorf("chunking size: want 800, got %d", cfg.Chunking.Size)
+	if cfg.Chunking.Size != 400 {
+		t.Errorf("chunking size: want 400, got %d", cfg.Chunking.Size)
 	}
-	if cfg.Chunking.Overlap != 100 {
-		t.Errorf("chunking overlap: want 100, got %d", cfg.Chunking.Overlap)
+	if cfg.Chunking.Overlap != 50 {
+		t.Errorf("chunking overlap: want 50, got %d", cfg.Chunking.Overlap)
 	}
 	if cfg.LLM.Provider != "llama" {
 		t.Errorf("llm.provider: want llama, got %s", cfg.LLM.Provider)
@@ -49,8 +49,8 @@ func TestLoad_missingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error for missing file, got: %v", err)
 	}
-	if cfg.Chunking.Size != 800 {
-		t.Errorf("want default size 800, got %d", cfg.Chunking.Size)
+	if cfg.Chunking.Size != 400 {
+		t.Errorf("want default size 400, got %d", cfg.Chunking.Size)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestLoad_partialYAML(t *testing.T) {
 		t.Errorf("want 512, got %d", cfg.Chunking.Size)
 	}
 	// unset fields should keep defaults
-	if cfg.Chunking.Overlap != 100 {
-		t.Errorf("overlap should keep default 100, got %d", cfg.Chunking.Overlap)
+	if cfg.Chunking.Overlap != 50 {
+		t.Errorf("overlap should keep default 50, got %d", cfg.Chunking.Overlap)
 	}
 	if cfg.LLM.Provider != "llama" {
 		t.Errorf("llm.provider should keep default, got %s", cfg.LLM.Provider)
@@ -151,8 +151,8 @@ func TestDefaultYAML_isValidYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultYAML not valid YAML: %v", err)
 	}
-	if cfg.Chunking.Size != 800 {
-		t.Errorf("want default size 800, got %d", cfg.Chunking.Size)
+	if cfg.Chunking.Size != 400 {
+		t.Errorf("want default size 400, got %d", cfg.Chunking.Size)
 	}
 }
 

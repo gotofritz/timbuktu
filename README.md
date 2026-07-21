@@ -203,8 +203,8 @@ embedding:
   dimension: 768
 
 chunking:
-  size: 800          # tokens (approximated as chars/4)
-  overlap: 100
+  size: 400          # tokens (approximated as chars/4); keep ≤ llama.cpp batch size (default 512)
+  overlap: 50
 
 ingest:
   embed_concurrency: 4   # embed batches in flight per file (>=1; 1 = serial)

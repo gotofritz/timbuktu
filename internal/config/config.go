@@ -142,8 +142,11 @@ func Defaults() Config {
 			BaseURL:   "",
 		},
 		Chunking: ChunkingConfig{
-			Size:    800,
-			Overlap: 100,
+			// 400 keeps chunks safely below the llama.cpp default physical batch
+			// size of 512 tokens, accounting for BPE counts exceeding the len/4
+			// heuristic used by the chunker.
+			Size:    400,
+			Overlap: 50,
 		},
 		Preprocess: PreprocessConfig{
 			OutputDir: filepath.Join(home, ".tbuk", "extracted"),
