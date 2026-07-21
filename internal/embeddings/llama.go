@@ -69,10 +69,27 @@ func (l *llamaEmbedder) embedOne(ctx context.Context, text string) ([]float32, e
 		}
 	}
 
+	var raw json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("llama: decode response: %w", err)
+	}
+	// newer llama.cpp returns [{embedding:[[...]]}]; older returns {embedding:[...]}
+	if len(raw) > 0 && raw[0] == '[' {
+		var arr []struct {
+			Embedding [][]float32 `json:"embedding"`
+		}
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			return nil, fmt.Errorf("llama: decode array response: %w", err)
+		}
+		if len(arr) == 0 || len(arr[0].Embedding) == 0 {
+			return nil, fmt.Errorf("llama: empty array response")
+		}
+		return arr[0].Embedding[0], nil
+	}
 	var result struct {
 		Embedding []float32 `json:"embedding"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("llama: decode response: %w", err)
 	}
 	return result.Embedding, nil

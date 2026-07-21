@@ -62,6 +62,10 @@ func openAIHandler(t *testing.T, vecs [][]float32) http.HandlerFunc {
 // --- llama.cpp handler ---
 
 func llamaHandler(t *testing.T, vecs [][]float32) http.HandlerFunc {
+	return llamaHandlerFormat(t, vecs, false)
+}
+
+func llamaHandlerFormat(t *testing.T, vecs [][]float32, arrayFormat bool) http.HandlerFunc {
 	t.Helper()
 	call := 0
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +82,13 @@ func llamaHandler(t *testing.T, vecs [][]float32) http.HandlerFunc {
 			http.Error(w, "unexpected", http.StatusInternalServerError)
 			return
 		}
-		resp := map[string]any{"embedding": vecs[call]}
+		var resp any
+		if arrayFormat {
+			// newer llama.cpp: [{embedding: [[v1, v2, ...]]}]
+			resp = []map[string]any{{"embedding": [][]float32{vecs[call]}}}
+		} else {
+			resp = map[string]any{"embedding": vecs[call]}
+		}
 		call++
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp) //nolint:errcheck
@@ -116,6 +126,36 @@ func TestLlamaEmbedder_success(t *testing.T) {
 	}
 	if emb.Dimension() != 3 {
 		t.Errorf("Dimension: want 3, got %d", emb.Dimension())
+	}
+}
+
+func TestLlamaEmbedder_arrayResponse(t *testing.T) {
+	// newer llama.cpp versions return [{embedding:[...]}] instead of {embedding:[...]}
+	vecs := [][]float32{{0.1, 0.2, 0.3}, {0.4, 0.5, 0.6}}
+	srv := httptest.NewServer(llamaHandlerFormat(t, vecs, true))
+	defer srv.Close()
+
+	cfg := config.EmbeddingConfig{
+		Provider:  "llama",
+		BaseURL:   srv.URL,
+		Dimension: 3,
+	}
+	emb, err := embeddings.NewEmbedder(cfg)
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+
+	got, err := emb.Embed(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 results, got %d", len(got))
+	}
+	for i, row := range got {
+		if len(row) != 3 {
+			t.Errorf("row %d: want len 3, got %d", i, len(row))
+		}
 	}
 }
 
