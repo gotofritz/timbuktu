@@ -56,7 +56,7 @@ type Config struct {
 }
 ```
 
-Defaults: llm.provider=`llama`, embedding.provider=`llama`, dimension=768, chunk size=800, overlap=100.
+Defaults: llm.provider=`llama`, embedding.provider=`llama`, dimension=768, chunk size=400, overlap=50. Chunk size kept below llama.cpp default physical batch size (512 tokens) to avoid HTTP 500 errors from the embedding server.
 
 `Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, empty db path, an unknown llm/embedding provider, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
 
