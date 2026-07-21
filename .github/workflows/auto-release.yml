@@ -55,7 +55,7 @@ jobs:
             elif echo "$msg" | grep -qE '^(fix|style|refactor|perf)(\([^)]*\))?:'; then
               if [ "$BUMP" = "none" ]; then BUMP="patch"; fi
             fi
-          done < <(git log "$RANGE" --pretty=format:"%s")
+          done < <(git log "$RANGE" --pretty=tformat:"%s")
 
           echo "bump=$BUMP"         >> "$GITHUB_OUTPUT"
           echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
