@@ -121,6 +121,32 @@ func TestInitCommand_writesQATemplate(t *testing.T) {
 	}
 }
 
+func TestInitCommand_installsMissingTemplateOnRerun(t *testing.T) {
+	// Simulate existing setup (config + brief) without anki, then re-run init.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("first init failed: %v", err)
+	}
+
+	// Remove anki dir to simulate pre-anki installation.
+	if err := os.RemoveAll(filepath.Join(home, ".tbuk", "prompts", "anki")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("second init failed: %v", err)
+	}
+
+	for _, name := range []string{"manifest.yaml", "system.tmpl", "user.tmpl"} {
+		path := filepath.Join(home, ".tbuk", "prompts", "anki", name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected anki template file after re-run: %s", path)
+		}
+	}
+}
+
 func TestInitCommand_writesAnkiTemplate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
