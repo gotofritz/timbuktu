@@ -145,11 +145,28 @@ Releases are cut from a git **tag**. Pushing a `v*` tag triggers the
 (amd64 + arm64) and publish them, plus checksums and auto-generated release
 notes, to the [Releases page](https://github.com/gotofritz/timbuktu/releases).
 
-### Cutting a release
+### Automatic releases
 
-From a clean `main`, use the helper targets — they compute the next
-[semver](https://semver.org) tag from the latest existing tag, then tag and push
-it (after a confirmation prompt):
+Merging to `main` triggers an automatic release when the commits since the last
+tag include at least one releasable type. The
+[Auto Release workflow](.github/workflows/auto-release.yml) runs after CI passes
+and applies these bump rules:
+
+| Commit prefix | Version bump |
+|---------------|-------------|
+| `feat!:` | major |
+| `feat:` / `fix!:` / `refactor!:` / `perf!:` | minor |
+| `fix:` / `style:` / `refactor:` / `perf:` | patch |
+| `docs:` / `chore:` / `ci:` / `test:` | — (no release) |
+
+The workflow creates the next `vX.Y.Z` tag, which fires the release pipeline
+(GoReleaser). If no releasable commits exist since the last tag, no tag is
+created.
+
+### Cutting a release manually
+
+The `make` helpers remain available when you need to cut a release by hand
+(hotfix, dry-run, or automation skip):
 
 ```bash
 make release-patch   # bug fixes only:        v0.1.0 -> v0.1.1
