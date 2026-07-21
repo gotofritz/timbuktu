@@ -1,7 +1,8 @@
 name: Auto Release
 
 # Trigger after CI completes on main so the release only tags green builds.
-# The tag push then fires release.yml (GoReleaser).
+# A second job (goreleaser) runs GoReleaser directly in this workflow because
+# GitHub does not fire workflow triggers for tag pushes made by GITHUB_TOKEN.
 on:
   workflow_run:
     workflows: [CI]
@@ -15,6 +16,9 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      bump: ${{ steps.bump.outputs.bump }}
 
     steps:
       - uses: actions/checkout@v7
@@ -93,3 +97,39 @@ jobs:
           git tag "${{ steps.version.outputs.version }}"
           git push origin "${{ steps.version.outputs.version }}"
           echo "Tagged ${{ steps.version.outputs.version }}"
+
+  # GoReleaser must run here rather than in release.yml because GitHub will not
+  # fire workflow triggers for tag pushes made by GITHUB_TOKEN (infinite-loop
+  # guard). release.yml still handles tags pushed by a human (make release-*).
+  goreleaser:
+    name: Build and publish release
+    needs: auto-release
+    if: needs.auto-release.outputs.bump != 'none'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # create the GitHub release and upload artifacts
+      id-token: write      # mint the OIDC token the attestation is signed with
+      attestations: write  # record the provenance attestation
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.auto-release.outputs.version }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/checksums.txt
