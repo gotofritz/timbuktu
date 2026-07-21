@@ -127,8 +127,8 @@ output: text
 Fields are positional (the consuming script assigns meaning by line position):
   line 1       question
   line 2       clarification note in parentheses (optional; same field as question)
-  blank line   field separator
-  line 3+      answer (one line per item when a list)
+  blank line   ONE blank line separating question block from answer block — nowhere else
+  line 3+      answer lines, one per item; NO blank lines between answer lines
 
 ` + "`----`" + ` separates cards.
 
@@ -149,7 +149,7 @@ What is prefill?
 Stage where model processes entire prompt and builds KV cache
 ` + "```" + `
 
-List answer (one item per line, no bullets):
+List answer — answer lines are consecutive, no blank lines between them:
 
 ` + "```" + `
 What are the two phases of LLM inference?
@@ -160,7 +160,8 @@ Decode
 
 Rules:
 - 1 question → 1 fact
-- Blank line = field separator
+- Exactly one blank line per card: between question block and answer block
+- No blank lines within the answer block
 - ` + "`----`" + ` = card separator
 - No card numbers
 - No bullets unless source material requires them
