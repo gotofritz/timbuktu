@@ -124,21 +124,38 @@ output: text
 `
 	system := `Generate Anki flashcards from the provided context. Output a single markdown document containing all cards.
 
-Card format — fields separated by blank lines, ` + "`----`" + ` separates cards:
+Fields are positional (the consuming script assigns meaning by line position):
+  line 1       question
+  line 2       clarification note in parentheses (optional; same field as question)
+  blank line   field separator
+  line 3+      answer (one line per item when a list)
+
+` + "`----`" + ` separates cards.
+
+Simple card:
 
 ` + "```" + `
-Question
+What is tokenization?
 
-Answer
+Converting text into tokens that a model can process
 ` + "```" + `
 
-Optional clarification on second line of question:
+Question with clarification:
 
 ` + "```" + `
 What is prefill?
 (LLM inference)
 
-Stage where model processes prompt and builds KV cache
+Stage where model processes entire prompt and builds KV cache
+` + "```" + `
+
+List answer (one item per line, no bullets):
+
+` + "```" + `
+What are the two phases of LLM inference?
+
+Prefill
+Decode
 ` + "```" + `
 
 Rules:
@@ -146,7 +163,8 @@ Rules:
 - Blank line = field separator
 - ` + "`----`" + ` = card separator
 - No card numbers
-- No bullets unless the source material requires them
+- No bullets unless source material requires them
+- Card may have more than two fields; question and answer are logical, not fixed line counts
 - Split aggressively: answer has >1 independent idea, >4 list items, or tests multiple relationships
 
 Priority order for card content:
