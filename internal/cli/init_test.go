@@ -155,6 +155,49 @@ func TestInitCommand_customConfig(t *testing.T) {
 	}
 }
 
+func TestInitCommand_writesBriefTemplate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	for _, name := range []string{"manifest.yaml", "system.tmpl", "user.tmpl"} {
+		path := filepath.Join(home, ".tbuk", "prompts", "brief", name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected brief template file: %s", path)
+		}
+	}
+}
+
+func TestInitCommand_briefTemplateIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatal(err)
+	}
+
+	systemPath := filepath.Join(home, ".tbuk", "prompts", "brief", "system.tmpl")
+	sentinel := "# custom brief system prompt\n"
+	if err := os.WriteFile(systemPath, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("init"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(systemPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != sentinel {
+		t.Error("second init overwrote existing brief template file")
+	}
+}
+
 func TestInitCommand_templateIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

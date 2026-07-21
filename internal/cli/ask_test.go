@@ -114,9 +114,11 @@ func TestAskCommand_templateListEmpty(t *testing.T) {
 	if err := runCLI("init"); err != nil {
 		t.Fatal(err)
 	}
-	// remove the qa template so dir is empty
-	if err := os.RemoveAll(filepath.Join(home, ".tbuk", "prompts", "qa")); err != nil {
-		t.Fatal(err)
+	// remove all built-in templates so dir is empty
+	for _, name := range []string{"qa", "brief"} {
+		if err := os.RemoveAll(filepath.Join(home, ".tbuk", "prompts", name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	oldStdout := os.Stdout

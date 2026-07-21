@@ -25,11 +25,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	tbukDir := filepath.Join(home, ".tbuk")
-	// Seed the built-in template under the configured prompts root so init and
+	// Seed built-in templates under the configured prompts root so init and
 	// the ask/template commands agree on where templates live.
-	promptsDir := filepath.Join(configFrom(cmd).Prompts.Dir, "qa")
+	promptsRoot := configFrom(cmd).Prompts.Dir
+	qaDir := filepath.Join(promptsRoot, "qa")
+	briefDir := filepath.Join(promptsRoot, "brief")
 
-	for _, dir := range []string{tbukDir, promptsDir} {
+	for _, dir := range []string{tbukDir, qaDir, briefDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create dir %s: %w", dir, err)
 		}
@@ -49,11 +51,60 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("Config already exists: %s\n", cfgPath)
 	}
 
-	if err := writeBuiltinQATemplate(promptsDir); err != nil {
+	if err := writeBuiltinQATemplate(qaDir); err != nil {
+		return err
+	}
+	if err := writeBuiltinBriefTemplate(briefDir); err != nil {
 		return err
 	}
 
 	fmt.Printf("Initialised tbuk at %s\n", tbukDir)
+	return nil
+}
+
+func writeBuiltinBriefTemplate(dir string) error {
+	manifest := `name: brief
+description: "Telegraphic, tweet-like answers from retrieved context."
+model: ""
+temperature: 0.3
+max_tokens: 280
+retrieval:
+  top_k: 5
+output: text
+`
+	system := `You are a telegraphic assistant. Answer using only the provided context.
+Rules:
+- Max 280 characters per answer
+- Drop articles, filler words, hedging
+- Fragments OK
+- Facts only, no padding
+- If context lacks the answer, say: "Not in notes."
+`
+	user := `Question: {{ .Question }}
+
+Context:
+{{ range .Chunks }}
+Source: {{ .Citation }}
+{{ .Text }}
+{{ end }}
+
+Answer in ≤280 chars, telegraphic style:
+`
+
+	files := map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   system,
+		"user.tmpl":     user,
+	}
+
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				return fmt.Errorf("write %s: %w", path, err)
+			}
+		}
+	}
 	return nil
 }
 
