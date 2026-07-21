@@ -155,8 +155,8 @@ and applies these bump rules:
 | Commit prefix | Version bump |
 |---------------|-------------|
 | `feat!:` | major |
-| `feat:` / `fix!:` / `refactor!:` | minor |
-| `fix:` / `style:` / `refactor:` | patch |
+| `feat:` / `fix!:` / `refactor!:` / `perf!:` | minor |
+| `fix:` / `style:` / `refactor:` / `perf:` | patch |
 | `docs:` / `chore:` / `ci:` / `test:` | — (no release) |
 
 The workflow creates the next `vX.Y.Z` tag, which fires the release pipeline

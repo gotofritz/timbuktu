@@ -48,11 +48,11 @@ jobs:
               BUMP="major"
               break
             fi
-            # feat / fix! / refactor! → minor
-            if echo "$msg" | grep -qE '^(feat|fix|refactor)(\([^)]*\))?!:|^feat(\([^)]*\))?:'; then
+            # feat / fix! / refactor! / perf! → minor
+            if echo "$msg" | grep -qE '^(feat|fix|refactor|perf)(\([^)]*\))?!:|^feat(\([^)]*\))?:'; then
               if [ "$BUMP" != "major" ]; then BUMP="minor"; fi
-            # fix / style / refactor → patch
-            elif echo "$msg" | grep -qE '^(fix|style|refactor)(\([^)]*\))?:'; then
+            # fix / style / refactor / perf → patch
+            elif echo "$msg" | grep -qE '^(fix|style|refactor|perf)(\([^)]*\))?:'; then
               if [ "$BUMP" = "none" ]; then BUMP="patch"; fi
             fi
           done < <(git log "$RANGE" --pretty=format:"%s")
