@@ -115,7 +115,7 @@ func TestAskCommand_templateListEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	// remove all built-in templates so dir is empty
-	for _, name := range []string{"qa", "brief"} {
+	for _, name := range []string{"qa", "brief", "anki"} {
 		if err := os.RemoveAll(filepath.Join(home, ".tbuk", "prompts", name)); err != nil {
 			t.Fatal(err)
 		}
