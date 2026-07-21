@@ -1,0 +1,95 @@
+name: Auto Release
+
+# Trigger after CI completes on main so the release only tags green builds.
+# The tag push then fires release.yml (GoReleaser).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  auto-release:
+    name: Compute and tag release
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Inspect commits since the last tag and determine the highest-priority bump.
+      #
+      # Rules (from highest to lowest priority):
+      #   feat!:              → major
+      #   feat: / fix!: / refactor!: → minor
+      #   fix: / style: / refactor:  → patch
+      #
+      # Any commit type not listed (docs:, chore:, ci:, test:, …) is ignored.
+      # If no releasable commits exist since the last tag, BUMP=none and no tag
+      # is created.
+      - name: Determine version bump
+        id: bump
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${LAST_TAG}..HEAD"
+          fi
+
+          BUMP="none"
+          while IFS= read -r msg; do
+            # feat! → major (highest priority; short-circuit on first match)
+            if echo "$msg" | grep -qE '^feat(\([^)]*\))?!:'; then
+              BUMP="major"
+              break
+            fi
+            # feat / fix! / refactor! → minor
+            if echo "$msg" | grep -qE '^(feat|fix|refactor)(\([^)]*\))?!:|^feat(\([^)]*\))?:'; then
+              if [ "$BUMP" != "major" ]; then BUMP="minor"; fi
+            # fix / style / refactor → patch
+            elif echo "$msg" | grep -qE '^(fix|style|refactor)(\([^)]*\))?:'; then
+              if [ "$BUMP" = "none" ]; then BUMP="patch"; fi
+            fi
+          done < <(git log "$RANGE" --pretty=format:"%s")
+
+          echo "bump=$BUMP"         >> "$GITHUB_OUTPUT"
+          echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+          echo "Bump level: $BUMP (since ${LAST_TAG:-'beginning'})"
+
+      - name: Compute next version
+        if: steps.bump.outputs.bump != 'none'
+        id: version
+        run: |
+          LAST_TAG="${{ steps.bump.outputs.last_tag }}"
+          BUMP="${{ steps.bump.outputs.bump }}"
+
+          if [ -z "$LAST_TAG" ]; then
+            MAJOR=0; MINOR=0; PATCH=0
+          else
+            VERSION="${LAST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          fi
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+
+          NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT"
+
+      - name: Tag release
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
+          echo "Tagged ${{ steps.version.outputs.version }}"
