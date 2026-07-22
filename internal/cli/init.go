@@ -30,8 +30,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	promptsRoot := configFrom(cmd).Prompts.Dir
 	qaDir := filepath.Join(promptsRoot, "qa")
 	briefDir := filepath.Join(promptsRoot, "brief")
+	ankiDir := filepath.Join(promptsRoot, "anki")
 
-	for _, dir := range []string{tbukDir, qaDir, briefDir} {
+	for _, dir := range []string{tbukDir, qaDir, briefDir, ankiDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create dir %s: %w", dir, err)
 		}
@@ -55,6 +56,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := writeBuiltinBriefTemplate(briefDir); err != nil {
+		return err
+	}
+	if err := writeBuiltinAnkiTemplate(ankiDir); err != nil {
 		return err
 	}
 
@@ -89,6 +93,107 @@ Source: {{ .Citation }}
 {{ end }}
 
 Answer in ≤280 chars, telegraphic style:
+`
+
+	files := map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   system,
+		"user.tmpl":     user,
+	}
+
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				return fmt.Errorf("write %s: %w", path, err)
+			}
+		}
+	}
+	return nil
+}
+
+func writeBuiltinAnkiTemplate(dir string) error {
+	manifest := `name: anki
+description: "Generate Anki flashcards from retrieved context."
+model: ""
+temperature: 0.3
+max_tokens: 4096
+retrieval:
+  top_k: 10
+output: text
+`
+	system := `Generate Anki flashcards from the provided context. Output a single markdown document containing all cards.
+
+Fields are positional (the consuming script assigns meaning by line position):
+  line 1       question
+  line 2       clarification note in parentheses (optional; same field as question)
+  blank line   ONE blank line separating question block from answer block — nowhere else
+  line 3+      answer lines, one per item; NO blank lines between answer lines
+
+` + "`----`" + ` separates cards.
+
+Simple card:
+
+` + "```" + `
+What is tokenization?
+
+Converting text into tokens that a model can process
+` + "```" + `
+
+Question with clarification:
+
+` + "```" + `
+What is prefill?
+(LLM inference)
+
+Stage where model processes entire prompt and builds KV cache
+` + "```" + `
+
+List answer — answer lines are consecutive, no blank lines between them:
+
+` + "```" + `
+What are the two phases of LLM inference?
+
+Prefill
+Decode
+` + "```" + `
+
+Rules:
+- 1 question → 1 fact
+- Exactly one blank line per card: between question block and answer block
+- No blank lines within the answer block
+- ` + "`----`" + ` = card separator
+- No card numbers
+- No bullets unless source material requires them
+- Card may have more than two fields; question and answer are logical, not fixed line counts
+- Split aggressively: answer has >1 independent idea, >4 list items, or tests multiple relationships
+
+Priority order for card content:
+1. Core mental models
+2. Cause-and-effect relationships
+3. System behaviour
+4. Definitions
+5. Implementation details
+
+Do not restate source wording. Test understanding, not recall of phrasing.
+
+Bad: "What is decode? The decode phase is when the model generates tokens."
+Good: "Why does decode slow down with long context? More KV cache data must be read per token."
+
+Generate the minimum cards needed to cover all important concepts. Never merge concepts to reduce card count.
+`
+	user := `Topic: {{ .Question }}
+
+Context:
+
+{{ range .Chunks }}
+Source: {{ .Citation }}
+
+{{ .Text }}
+
+{{ end }}
+
+Flashcards:
 `
 
 	files := map[string]string{

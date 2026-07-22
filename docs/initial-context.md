@@ -333,7 +333,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa` template installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
+Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 

@@ -121,6 +121,75 @@ func TestInitCommand_writesQATemplate(t *testing.T) {
 	}
 }
 
+func TestInitCommand_installsMissingTemplateOnRerun(t *testing.T) {
+	// Simulate existing setup (config + brief) without anki, then re-run init.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("first init failed: %v", err)
+	}
+
+	// Remove anki dir to simulate pre-anki installation.
+	if err := os.RemoveAll(filepath.Join(home, ".tbuk", "prompts", "anki")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("second init failed: %v", err)
+	}
+
+	for _, name := range []string{"manifest.yaml", "system.tmpl", "user.tmpl"} {
+		path := filepath.Join(home, ".tbuk", "prompts", "anki", name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected anki template file after re-run: %s", path)
+		}
+	}
+}
+
+func TestInitCommand_writesAnkiTemplate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	for _, name := range []string{"manifest.yaml", "system.tmpl", "user.tmpl"} {
+		path := filepath.Join(home, ".tbuk", "prompts", "anki", name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected anki template file: %s", path)
+		}
+	}
+}
+
+func TestInitCommand_ankiTemplateIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatal(err)
+	}
+
+	systemPath := filepath.Join(home, ".tbuk", "prompts", "anki", "system.tmpl")
+	sentinel := "# custom anki system prompt\n"
+	if err := os.WriteFile(systemPath, []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("init"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(systemPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != sentinel {
+		t.Error("second init overwrote existing anki template file")
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	if err := runCLI("version"); err != nil {
 		t.Fatalf("version command failed: %v", err)
