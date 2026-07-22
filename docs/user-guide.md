@@ -934,7 +934,7 @@ down.
   piece of context across two chunks. If answers about a specific document feel
   incomplete, try re-ingesting with a larger `chunking.size` (e.g. 500). With
   llama.cpp, keep `chunking.size` below the server's physical batch size
-  (default 512 tokens); increase `--n-batch` at server startup to go higher.
+  (default 512 tokens); increase `-b` and `-ub` at server startup to go higher.
 - **Real-time or recent information.** The knowledge base knows only what you
   have ingested. Run `tbuk ingest` after updating your documents.
 
@@ -944,7 +944,7 @@ Edit `~/.tbuk/config.yaml`:
 
 ```yaml
 chunking:
-  size: 400    # default; keep ≤ llama.cpp batch size (default 512)
+  size: 400    # default; keep ≤ llama.cpp ubatch size (default 512)
   overlap: 50
 ```
 
@@ -953,9 +953,10 @@ chunking:
 | Smaller (200–300) | More precise retrieval; less context per chunk |
 | Larger (400–500) | More context per chunk; retrieval slightly less precise |
 
-> **llama.cpp note:** the server's `--n-batch` flag sets the maximum input size
-> (default 512 tokens). Keep `chunking.size` below that value or raise it at
-> server startup (`llama-server --n-batch 1024 …`).
+> **llama.cpp note:** the server's `-ub` (ubatch) flag sets the maximum input
+> size per embedding request (default 512 tokens). Keep `chunking.size` below
+> that value or raise it at server startup — `-b` and `-ub` must match:
+> `llama-server -b 1024 -ub 1024 …`.
 
 Start with the defaults. If answers feel too narrow (missing context), increase
 `size`. If answers feel unfocused (too much irrelevant material), decrease it.
