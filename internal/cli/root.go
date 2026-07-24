@@ -49,6 +49,7 @@ func New() *cobra.Command {
 
 	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.tbuk/config.yaml)")
 
+	root.AddCommand(newContextCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newDoctorCmd())
