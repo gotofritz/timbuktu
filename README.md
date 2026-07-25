@@ -61,6 +61,17 @@ Requires:
   single source of truth) so local and CI never drift. Re-runs are a no-op once
   the right binary is present.
 
+> **Local vs CI — why they install the linter differently.** CI does *not* run
+> `make lint`. Its lint job uses [`golangci-lint-action`](https://github.com/golangci/golangci-lint-action)
+> in `goinstall` mode, which builds the linter with the job's Go (1.26, from
+> `go.mod`) and adds inline PR annotations and caching. That path is already
+> correct, so CI is left on the action. The `make lint-install` script exists
+> for **local** builds only: on a machine whose base Go is older than 1.26,
+> `GOTOOLCHAIN=auto` would otherwise build `golangci-lint` with that older Go
+> and it would then refuse to lint this module. The version pin is shared (the
+> script reads it from the same workflow file), so the two paths can't drift on
+> version.
+
 ```bash
 make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin
 ```
