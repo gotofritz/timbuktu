@@ -52,11 +52,14 @@ release workflow and has not been altered since.
 Requires:
 
 - Go 1.26+
-- `golangci-lint` v2 — needed only for `make lint` / `check` / `check-ci`.
-  Install the version CI uses (build from source with your Go toolchain):
-  `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
-  (note the `/v2` in the path — the bare path is v1). Keep the version in sync
-  with `.github/workflows/quality-check.yml`, which is the single source of truth.
+- `golangci-lint` v2 — needed only for `make lint` / `check` / `check-ci`, and
+  installed automatically the first time you run any of them (`make lint`
+  depends on `make lint-install`). To install it up front, run `make
+  lint-install`. It builds the pinned version from source **with this module's
+  Go toolchain** — a linter built with an older Go refuses to lint a newer
+  module — pinning the version from `.github/workflows/quality-check.yml` (the
+  single source of truth) so local and CI never drift. Re-runs are a no-op once
+  the right binary is present.
 
 ```bash
 make install             # installs to $(go env GOPATH)/bin — defaults to ~/go/bin

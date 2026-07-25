@@ -1,4 +1,4 @@
-.PHONY: help build install test test-verbose test-race coverage coverage-html lint vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump
+.PHONY: help build install test test-verbose test-race coverage coverage-html lint lint-install vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump
 
 .DEFAULT_GOAL := help
 
@@ -6,6 +6,11 @@
 # Falls back to "dev" outside a git checkout.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/gotofritz/timbuktu/internal/cli.version=$(VERSION)
+
+# golangci-lint is installed into $GOPATH/bin by scripts/install-golangci-lint.sh
+# (built with the module's Go toolchain). Call it by absolute path so `make lint`
+# works even when $GOPATH/bin is not on PATH.
+GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
 
 # List all documented targets (the `## ...` text after each target name).
 help: ## Show this help
@@ -45,8 +50,11 @@ fmt: ## Format all Go files
 vet: ## Run go vet
 	go vet ./...
 
-lint: ## Run golangci-lint
-	golangci-lint run ./...
+lint-install: ## Install the pinned golangci-lint (built with the module's Go toolchain)
+	@./scripts/install-golangci-lint.sh
+
+lint: lint-install ## Run golangci-lint (auto-installs the pinned version first)
+	$(GOLANGCI_LINT) run ./...
 
 tidy: ## Tidy go.mod and go.sum
 	go mod tidy
