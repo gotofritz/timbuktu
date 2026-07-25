@@ -13,7 +13,7 @@ pipx install commitizen
 
 # Go tooling used by the hooks
 go install golang.org/x/tools/cmd/goimports@latest
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2  # match CI (see README)
+make lint-install   # pinned golangci-lint, built with this module's Go toolchain
 
 # Wire the hooks into .git/hooks (installs both pre-commit and commit-msg)
 pre-commit install --install-hooks
