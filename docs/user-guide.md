@@ -357,10 +357,15 @@ chunking:
 
 ingest:
   embed_concurrency: 4   # embed batches sent to the server at once per file
+  raw_dir: ~/.tbuk/raw   # keep a copy of every ingested source here (empty to disable)
 ```
 
 **Settings most users never need to change:** `database.path`, `chunking.size`,
-`chunking.overlap`, `ingest.embed_concurrency`.
+`chunking.overlap`, `ingest.embed_concurrency`, `ingest.raw_dir`.
+
+`ingest.raw_dir` is where Timbuktu keeps a copy of every document you ingest
+(see [Your original files are kept](#your-original-files-are-kept) below). Leave
+it empty to turn archiving off.
 
 `ingest.embed_concurrency` controls how many embedding requests `tbuk ingest`
 keeps in flight at once for a single file. The default of `4` overlaps network
@@ -464,6 +469,22 @@ run does nothing:
 ```
 
 The file's content is fingerprinted; only changed files are re-indexed.
+
+### Your original files are kept
+
+Every time you ingest a document, Timbuktu also saves an untouched copy of the
+original into `~/.tbuk/raw/`. So even if you later move, edit, or delete the
+source file, the exact bytes you indexed are still on hand. Copies are named by
+content fingerprint, so re-ingesting the same file never makes a duplicate.
+
+To skip the copy for a single run, pass `--no-raw`:
+
+```bash
+tbuk ingest --no-raw ~/notes/first-note.md
+```
+
+To turn archiving off entirely, set `ingest.raw_dir` to an empty value in
+`~/.tbuk/config.yaml`.
 
 ---
 

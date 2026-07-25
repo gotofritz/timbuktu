@@ -59,7 +59,7 @@ func openTestDB(t *testing.T) *storage.DB {
 	return db
 }
 
-func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ingest.Embedder, extractedDir string) *ingest.Ingester {
+func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ingest.Embedder, extractedDir string, opts ...ingest.Option) *ingest.Ingester {
 	t.Helper()
 	sqlDB := db.DB()
 	return ingest.NewIngester(
@@ -70,6 +70,7 @@ func newIngester(t *testing.T, db *storage.DB, ext ingest.FileExtractor, emb ing
 		&chunking.Chunker{Size: 50, Overlap: 0},
 		emb,
 		extractedDir,
+		opts...,
 	)
 }
 
@@ -678,6 +679,115 @@ func TestIngester_refreshesMetadataOnReingest(t *testing.T) {
 	}
 	if v, err := metaRepo.Get(ctx, doc.ID, "tag"); err != nil || v != "design" {
 		t.Errorf("user tag lost on re-ingest: got %q err %v", v, err)
+	}
+}
+
+// With a raw dir configured, ingesting a file copies the original source into
+// rawDir/<sha><ext>, byte-for-byte, owner-only.
+func TestIngester_copiesSourceToRaw(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	rawDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 50)}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir, ingest.WithRawDir(rawDir))
+
+	dir := t.TempDir()
+	content := "raw source bytes to archive"
+	path := writeTempFile(t, dir, "doc.md", content)
+
+	if res := ing.IngestFile(context.Background(), path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+
+	sha, err := computeSHA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPath := filepath.Join(rawDir, sha+".md")
+	got, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatalf("raw copy not found at %s: %v", rawPath, err)
+	}
+	if string(got) != content {
+		t.Errorf("raw copy content = %q, want %q", got, content)
+	}
+	info, err := os.Stat(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("raw copy perms = %o, want 600", perm)
+	}
+}
+
+// Options.NoRaw suppresses the raw archive copy for that ingest.
+func TestIngester_noRawOptionSkipsCopy(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	rawDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 50)}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir, ingest.WithRawDir(rawDir))
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "doc.md", "content")
+
+	if res := ing.IngestFile(context.Background(), path, ingest.Options{NoRaw: true}); res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+
+	entries, err := os.ReadDir(rawDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("NoRaw=true copied %d file(s) into raw dir, want 0", len(entries))
+	}
+}
+
+// With no raw dir configured, ingestion neither copies nor errors.
+func TestIngester_rawDisabledWhenUnconfigured(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 50)}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir) // no WithRawDir
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "doc.md", "content")
+
+	if res := ing.IngestFile(context.Background(), path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+}
+
+// The raw copy is content-addressed, so a forced re-ingest of identical content
+// is a no-op: exactly one raw file, no leftover temp files.
+func TestIngester_rawCopyIdempotentOnReingest(t *testing.T) {
+	db := openTestDB(t)
+	extractedDir := t.TempDir()
+	rawDir := t.TempDir()
+	ext := &mockExtractor{text: strings.Repeat("word ", 50)}
+	emb := &mockEmbedder{dim: 4}
+	ing := newIngester(t, db, ext, emb, extractedDir, ingest.WithRawDir(rawDir))
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "doc.md", "unchanging content")
+
+	if res := ing.IngestFile(context.Background(), path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("first ingest: %v", res.Err)
+	}
+	if res := ing.IngestFile(context.Background(), path, ingest.Options{Force: true}); res.Err != nil {
+		t.Fatalf("force re-ingest: %v", res.Err)
+	}
+
+	entries, err := os.ReadDir(rawDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("raw dir has %d files after re-ingest, want 1 (content-addressed, idempotent)", len(entries))
 	}
 }
 

@@ -218,7 +218,7 @@ type FileExtractor interface {
     ExtractFile(ctx context.Context, path string) (string, error)
 }
 
-type Options struct { Force bool }
+type Options struct { Force bool; NoRaw bool } // NoRaw skips the raw archive copy
 
 type Result struct {
     Path    string
@@ -227,12 +227,14 @@ type Result struct {
     Err     error
 }
 
-func NewIngester(docs, chunks, meta repos, ext FileExtractor, chunker, emb, extractedDir, progress) *Ingester
+func NewIngester(docs, chunks, meta repos, ext FileExtractor, chunker, emb, extractedDir, opts...) *Ingester
 func (ing *Ingester) IngestFile(ctx, path, opts) Result
 func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
 ```
 
-Pipeline per file: SHA256 → dedup check → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc → `ChunkRepo.ReplaceForDocument` → write automatic metadata.
+Pipeline per file: SHA256 → dedup check → raw archive (see below) → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc → `ChunkRepo.ReplaceForDocument` → write automatic metadata.
+
+Raw archive: when a raw dir is configured (`ingest.raw_dir`, default `~/.tbuk/raw`; `WithRawDir` option) and `Options.NoRaw` is false, the untouched source is copied to `rawDir/<sha256><ext>` — content-addressed like the extracted store, written via temp-file + rename (crash-safe), `0o600`, and idempotent (an existing copy is left as-is). The copy runs *before* extraction/embedding so a copy failure aborts the whole ingest and is retried, never stranding an indexed document without its raw backup. `tbuk ingest --no-raw` suppresses it for one run.
 Embed batches within a file run through a bounded worker pool (`ingest.embed_concurrency`, default 4; `WithEmbedConcurrency` option) so embedder round-trips — the latency bottleneck — overlap. Results are reassembled in chunk order and the per-file DB write stays serial, so `ReplaceForDocument` atomicity is untouched; the first batch error cancels the rest.
 Re-index is atomic: extraction and embedding run *first*, then `ReplaceForDocument` deletes old chunks and inserts new ones in a single transaction. A failed re-ingest (embedding error) leaves the previous chunks intact rather than destroying the index.
 

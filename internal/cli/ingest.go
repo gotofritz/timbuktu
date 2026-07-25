@@ -14,6 +14,7 @@ func newIngestCmd() *cobra.Command {
 	var (
 		force   bool
 		verbose bool
+		noRaw   bool
 	)
 
 	cmd := &cobra.Command{
@@ -41,7 +42,7 @@ func newIngestCmd() *cobra.Command {
 				return fmt.Errorf("stat %s: %w", path, err)
 			}
 
-			opts := ingest.Options{Force: force}
+			opts := ingest.Options{Force: force, NoRaw: noRaw}
 			if fi.IsDir() {
 				results := ing.IngestDir(cmd.Context(), path, opts)
 				return printDirResults(results, verbose)
@@ -53,6 +54,7 @@ func newIngestCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&force, "force", false, "re-ingest even if file is unchanged")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "show skipped files")
+	cmd.Flags().BoolVar(&noRaw, "no-raw", false, "do not copy the source into ~/.tbuk/raw")
 	return cmd
 }
 

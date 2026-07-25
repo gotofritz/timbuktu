@@ -80,6 +80,7 @@ func (a *App) Ingester() (*ingest.Ingester, error) {
 		emb,
 		a.cfg.Preprocess.OutputDir,
 		ingest.WithEmbedConcurrency(a.cfg.Ingest.EmbedConcurrency),
+		ingest.WithRawDir(a.cfg.Ingest.RawDir),
 	), nil
 }
 

@@ -78,6 +78,10 @@ type IngestConfig struct {
 	// single file. 1 = fully serial. Kept low by default so it composes with
 	// provider rate limits.
 	EmbedConcurrency int `yaml:"embed_concurrency"`
+	// RawDir is where ingest archives a copy of each source document
+	// (content-addressed as <sha256><ext>). Empty disables archiving; the
+	// per-ingest --no-raw flag suppresses it for a single run.
+	RawDir string `yaml:"raw_dir"`
 }
 
 // PreprocessConfig controls where extracted text files are stored.
@@ -153,6 +157,7 @@ func Defaults() Config {
 		},
 		Ingest: IngestConfig{
 			EmbedConcurrency: 4,
+			RawDir:           filepath.Join(home, ".tbuk", "raw"),
 		},
 		Prompts: PromptsConfig{
 			Dir: filepath.Join(home, ".tbuk", "prompts"),
@@ -208,6 +213,10 @@ func DefaultYAML() (string, error) {
 	mapKey(mapValue(&root, "ingest"), "embed_concurrency").HeadComment =
 		"max embed batches processed concurrently within one file (keep low to\n" +
 			"respect provider rate limits; 1 = fully serial)"
+
+	mapKey(mapValue(&root, "ingest"), "raw_dir").HeadComment =
+		"raw_dir: archive a copy of each ingested source here (empty to disable;\n" +
+			"ingest --no-raw skips it for one run)"
 
 	mapKey(mapValue(&root, "prompts"), "dir").HeadComment =
 		"dir: root directory holding prompt template folders"
