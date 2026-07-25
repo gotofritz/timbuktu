@@ -44,6 +44,16 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaults_rawDir(t *testing.T) {
+	cfg := config.Defaults()
+	// ingest.raw_dir must default under ~/.tbuk like the db, extracted and
+	// prompt dirs, so the on-ingest source archive is configurable rather than
+	// hardcoded in the ingester.
+	if !strings.HasSuffix(cfg.Ingest.RawDir, filepath.Join(".tbuk", "raw")) {
+		t.Errorf("ingest.raw_dir: want a path ending in .tbuk/raw, got %q", cfg.Ingest.RawDir)
+	}
+}
+
 func TestLoad_missingFile(t *testing.T) {
 	cfg, err := config.Load("/nonexistent/path/config.yaml")
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/cli"
 	"github.com/gotofritz/timbuktu/internal/config"
+	"github.com/gotofritz/timbuktu/internal/preprocess"
 )
 
 // TestCLI_endToEnd drives the assembled binary through the root command —
@@ -74,6 +75,58 @@ func TestCLI_endToEnd(t *testing.T) {
 	// After delete the knowledge base is empty.
 	if out := mustRun(t, "list"); !strings.Contains(out, "No documents") {
 		t.Fatalf("list after delete = %q, want empty-KB message", out)
+	}
+}
+
+// TestIngestCommand_archivesRawSource drives the real ingest command end to end
+// and asserts the on-ingest raw archive: a plain ingest copies the source into
+// ~/.tbuk/raw, and --no-raw suppresses the copy. Only the embedding server is
+// faked; the rawDir wiring (config → app → ingester) is production code.
+func TestIngestCommand_archivesRawSource(t *testing.T) {
+	const dim = 4
+	embSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string][]float32{"embedding": {1, 0, 0, 0}})
+	}))
+	defer embSrv.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	rawDir := filepath.Join(home, ".tbuk", "raw")
+
+	mustRun(t, "init")
+	writeConfig(t, filepath.Join(home, ".tbuk", "config.yaml"), config.Config{
+		Database:   config.DatabaseConfig{Path: filepath.Join(home, ".tbuk", "tbuk.sqlite")},
+		LLM:        config.LLMConfig{Provider: "llama", MaxTokens: 2048},
+		Embedding:  config.EmbeddingConfig{Provider: "llama", Dimension: dim, BaseURL: embSrv.URL},
+		Chunking:   config.ChunkingConfig{Size: 800, Overlap: 100},
+		Preprocess: config.PreprocessConfig{OutputDir: filepath.Join(home, ".tbuk", "extracted")},
+		Ingest:     config.IngestConfig{EmbedConcurrency: 2, RawDir: rawDir},
+	})
+
+	// Plain ingest → source archived under raw/<sha>.md.
+	kept := filepath.Join(home, "kept.md")
+	writeFile(t, kept, "# Kept\n\nArchive me into raw.\n")
+	mustRun(t, "ingest", kept)
+
+	keptSHA, err := preprocess.HashFile(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(rawDir, keptSHA+".md")); err != nil {
+		t.Fatalf("expected raw copy for ingested file: %v", err)
+	}
+
+	// --no-raw → no archive copy.
+	skipped := filepath.Join(home, "skipped.md")
+	writeFile(t, skipped, "# Skipped\n\nDo not archive me.\n")
+	mustRun(t, "ingest", "--no-raw", skipped)
+
+	skipSHA, err := preprocess.HashFile(skipped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(rawDir, skipSHA+".md")); !os.IsNotExist(err) {
+		t.Fatalf("--no-raw still created a raw copy (stat err = %v)", err)
 	}
 }
 

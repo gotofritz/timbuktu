@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ type Embedder interface {
 // Options controls ingestion behaviour.
 type Options struct {
 	Force bool // re-ingest even if SHA256 unchanged
+	NoRaw bool // skip copying the source into the raw archive for this ingest
 }
 
 // Result describes the outcome of ingesting a single file.
@@ -49,6 +51,7 @@ type Ingester struct {
 	chunker      *chunking.Chunker
 	embedder     Embedder
 	extractedDir string // directory for extracted text files (<sha256>.txt)
+	rawDir       string // directory for archived source copies (<sha256><ext>); empty disables
 
 	// embedConcurrency bounds how many embed batches within a single file are
 	// in flight at once. 1 (the default) means the old fully-serial behaviour.
@@ -62,6 +65,12 @@ type Option func(*Ingester)
 // concurrently within a single file. Values < 1 are treated as 1 (serial).
 func WithEmbedConcurrency(n int) Option {
 	return func(ing *Ingester) { ing.embedConcurrency = n }
+}
+
+// WithRawDir enables archiving each ingested source into dir as
+// <sha256><ext>. An empty dir (the default) disables archiving.
+func WithRawDir(dir string) Option {
+	return func(ing *Ingester) { ing.rawDir = dir }
 }
 
 // NewIngester constructs an Ingester with the given dependencies.
@@ -119,6 +128,15 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	}
 	if existing != nil && existing.SHA256 == sha && !opts.Force {
 		return Result{Path: path, Skipped: true}
+	}
+
+	// Archive the untouched source before extraction/embedding, so a copy
+	// failure (e.g. disk full) aborts the ingest and is retried whole rather
+	// than leaving an indexed document with no raw backup.
+	if ing.rawDir != "" && !opts.NoRaw {
+		if err := ing.copySourceToRaw(path, sha); err != nil {
+			return Result{Path: path, Err: err}
+		}
 	}
 
 	text, err := ing.readOrExtract(ctx, path, sha)
@@ -346,6 +364,51 @@ func (ing *Ingester) readOrExtract(ctx context.Context, path, sha string) (strin
 		return "", fmt.Errorf("ingest: save extracted: %w", err)
 	}
 	return text, nil
+}
+
+// copySourceToRaw archives the source file at path into rawDir as
+// <sha256><ext>, preserving the original extension so the copy stays openable.
+// The name is content-addressed (like the extracted store), so distinct sources
+// never collide and an identical re-ingest is a no-op. The copy is written to a
+// temp file and renamed so a crash mid-write can't leave a truncated file under
+// the content-addressed name (which a later run would trust and skip). Owner-only
+// perms match the rest of the knowledge base.
+func (ing *Ingester) copySourceToRaw(path, sha string) error {
+	dst := filepath.Join(ing.rawDir, sha+filepath.Ext(path))
+	if _, err := os.Stat(dst); err == nil {
+		return nil // already archived — content-addressed name means identical bytes
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("ingest: stat raw copy: %w", err)
+	}
+
+	if err := os.MkdirAll(ing.rawDir, 0o700); err != nil {
+		return fmt.Errorf("ingest: mkdir rawDir: %w", err)
+	}
+
+	src, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("ingest: open source for raw copy: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	tmp, err := os.CreateTemp(ing.rawDir, sha+".*.tmp") // CreateTemp uses 0o600
+	if err != nil {
+		return fmt.Errorf("ingest: create temp raw copy: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed away
+
+	if _, err := io.Copy(tmp, src); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("ingest: copy source to raw: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("ingest: close raw copy: %w", err)
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		return fmt.Errorf("ingest: finalize raw copy: %w", err)
+	}
+	return nil
 }
 
 // IngestDir walks dir recursively, ingesting all supported file types.

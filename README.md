@@ -69,7 +69,8 @@ tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
 tbuk doctor              # check config, database, LLM connectivity, and extractors
 tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extracted/ (--dry-run, --output-dir)
-tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose)
+tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose, --no-raw)
+                         #   copies each source into ~/.tbuk/raw unless --no-raw is passed
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
                          #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
@@ -225,6 +226,7 @@ chunking:
 
 ingest:
   embed_concurrency: 4   # embed batches in flight per file (>=1; 1 = serial)
+  raw_dir: ~/.tbuk/raw   # archive a copy of each ingested source (empty to disable)
 
 prompts:
   dir: ~/.tbuk/prompts   # root directory holding prompt template folders
