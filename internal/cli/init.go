@@ -19,12 +19,13 @@ func newInitCmd() *cobra.Command {
 }
 
 func runInit(cmd *cobra.Command, _ []string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolve home dir: %w", err)
+	// The data root comes from --root (resolved in the root PersistentPreRunE),
+	// defaulting to ~/.tbuk. All scaffolding — config, templates, and the config
+	// file's own data paths — is derived from it.
+	tbukDir := rootFrom(cmd)
+	if tbukDir == "" {
+		tbukDir = config.DefaultRoot()
 	}
-
-	tbukDir := filepath.Join(home, ".tbuk")
 	// Seed built-in templates under the configured prompts root so init and
 	// the ask/template commands agree on where templates live.
 	promptsRoot := configFrom(cmd).Prompts.Dir
@@ -40,7 +41,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 
 	cfgPath := filepath.Join(tbukDir, "config.yaml")
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		defaultYAML, err := config.DefaultYAML()
+		defaultYAML, err := config.DefaultYAMLForRoot(tbukDir)
 		if err != nil {
 			return fmt.Errorf("render default config: %w", err)
 		}

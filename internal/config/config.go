@@ -112,22 +112,41 @@ type ChunkingConfig struct {
 	Overlap int `yaml:"overlap"`
 }
 
-// DefaultPath returns the default config file location.
-func DefaultPath() string {
+// DefaultRoot returns the default data-root directory (~/.tbuk) — the base
+// under which the database, extracted-text store, raw archive, prompt templates
+// and config file all live. It falls back to a relative ".tbuk" when the home
+// directory cannot be resolved. The --root flag overrides it per invocation.
+func DefaultRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".tbuk/config.yaml"
+		return ".tbuk"
 	}
-	return filepath.Join(home, ".tbuk", "config.yaml")
+	return filepath.Join(home, ".tbuk")
 }
 
-// Defaults returns a Config with sensible default values.
+// DefaultPath returns the default config file location under DefaultRoot().
+func DefaultPath() string {
+	return DefaultPathForRoot(DefaultRoot())
+}
+
+// DefaultPathForRoot returns the config file location under root.
+func DefaultPathForRoot(root string) string {
+	return filepath.Join(root, "config.yaml")
+}
+
+// Defaults returns a Config with paths rooted at DefaultRoot().
 func Defaults() Config {
-	home, _ := os.UserHomeDir()
-	dbPath := filepath.Join(home, ".tbuk", "tbuk.sqlite")
+	return DefaultsForRoot(DefaultRoot())
+}
+
+// DefaultsForRoot returns a Config whose data paths (database, extracted-text
+// store, raw archive, prompt templates) are all derived from root. The non-path
+// defaults — providers, chunk sizes, dimension — are independent of root, so
+// --root relocates the whole knowledge base without changing behaviour.
+func DefaultsForRoot(root string) Config {
 	return Config{
 		Database: DatabaseConfig{
-			Path: dbPath,
+			Path: filepath.Join(root, "tbuk.sqlite"),
 		},
 		LLM: LLMConfig{
 			Provider:  "llama",
@@ -153,22 +172,32 @@ func Defaults() Config {
 			Overlap: 50,
 		},
 		Preprocess: PreprocessConfig{
-			OutputDir: filepath.Join(home, ".tbuk", "extracted"),
+			OutputDir: filepath.Join(root, "extracted"),
 		},
 		Ingest: IngestConfig{
 			EmbedConcurrency: 4,
-			RawDir:           filepath.Join(home, ".tbuk", "raw"),
+			RawDir:           filepath.Join(root, "raw"),
 		},
 		Prompts: PromptsConfig{
-			Dir: filepath.Join(home, ".tbuk", "prompts"),
+			Dir: filepath.Join(root, "prompts"),
 		},
 	}
 }
 
-// Load reads config from path, falling back to defaults for missing fields.
-// If the file does not exist, defaults are returned without error.
+// Load reads config from path, falling back to DefaultRoot()-derived defaults
+// for missing fields. If the file does not exist, defaults are returned without
+// error.
 func Load(path string) (Config, error) {
-	cfg := Defaults()
+	return LoadForRoot(path, DefaultRoot())
+}
+
+// LoadForRoot reads config from path, seeding missing fields from
+// DefaultsForRoot(root). This lets a --root invocation resolve every data path
+// under root even when the config file is absent or only partially populated.
+// If the file does not exist, the root-derived defaults are returned without
+// error.
+func LoadForRoot(path, root string) (Config, error) {
+	cfg := DefaultsForRoot(root)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -190,38 +219,44 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// DefaultYAML returns the default config serialised to YAML with explanatory
-// comments. Values are marshalled from Defaults() — the single source of truth —
-// so the two can never drift; a new default field appears here automatically.
-// Comments are attached to the encoded node tree rather than typed into a
-// hand-built string.
+// DefaultYAML returns the default config (rooted at DefaultRoot()) serialised to
+// commented YAML.
 func DefaultYAML() (string, error) {
-	var root yaml.Node
-	if err := root.Encode(Defaults()); err != nil {
+	return DefaultYAMLForRoot(DefaultRoot())
+}
+
+// DefaultYAMLForRoot returns the default config for root serialised to YAML with
+// explanatory comments. Values are marshalled from DefaultsForRoot(root) — the
+// single source of truth — so the two can never drift; a new default field
+// appears here automatically. Comments are attached to the encoded node tree
+// rather than typed into a hand-built string.
+func DefaultYAMLForRoot(root string) (string, error) {
+	var node yaml.Node
+	if err := node.Encode(DefaultsForRoot(root)); err != nil {
 		return "", fmt.Errorf("config: encode default yaml: %w", err)
 	}
 
-	mapKey(mapValue(&root, "llm"), "base_url").HeadComment = "base_url: leave empty to use the provider default\n" +
+	mapKey(mapValue(&node, "llm"), "base_url").HeadComment = "base_url: leave empty to use the provider default\n" +
 		"  llama/openai-compatible → http://localhost:8080\n" +
 		"  ollama                  → http://localhost:11434\n" +
 		"  claude                  → https://api.anthropic.com\n" +
 		"  openai                  → https://api.openai.com"
 
-	mapKey(mapValue(&root, "embedding"), "base_url").HeadComment =
+	mapKey(mapValue(&node, "embedding"), "base_url").HeadComment =
 		"base_url: leave empty to use the provider default (see llm above)"
 
-	mapKey(mapValue(&root, "ingest"), "embed_concurrency").HeadComment =
+	mapKey(mapValue(&node, "ingest"), "embed_concurrency").HeadComment =
 		"max embed batches processed concurrently within one file (keep low to\n" +
 			"respect provider rate limits; 1 = fully serial)"
 
-	mapKey(mapValue(&root, "ingest"), "raw_dir").HeadComment =
+	mapKey(mapValue(&node, "ingest"), "raw_dir").HeadComment =
 		"raw_dir: archive a copy of each ingested source here (empty to disable;\n" +
 			"ingest --no-raw skips it for one run)"
 
-	mapKey(mapValue(&root, "prompts"), "dir").HeadComment =
+	mapKey(mapValue(&node, "prompts"), "dir").HeadComment =
 		"dir: root directory holding prompt template folders"
 
-	out, err := yaml.Marshal(&root)
+	out, err := yaml.Marshal(&node)
 	if err != nil {
 		return "", fmt.Errorf("config: marshal default yaml: %w", err)
 	}

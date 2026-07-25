@@ -56,6 +56,11 @@ scattered across it; the matrix above points at them by group.
    `--db <path>` global flag and/or `TBUK_DB` env var overriding config, plus
    optional named collections resolved from config so `tbuk --db work ask ...`
    just works. No schema change — each DB is already self-contained.
+   *Partially delivered (#95):* the global `--root DIR` flag switches the whole
+   data directory (db + cache + raw + prompts + config) at once, which covers
+   the common "separate collection" case. Still open: switching **only** the DB
+   while sharing one prompt/cache root (`--db`/`TBUK_DB`) and named collections
+   resolved from config.
 
 2. **Context-window budget guard on `ask`.** *(user-requested: context management)*
    `retrieval.max_tokens` already trims retrieved chunks, but nothing bounds

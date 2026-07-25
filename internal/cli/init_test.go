@@ -3,6 +3,7 @@ package cli_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
@@ -30,6 +31,39 @@ func TestInitCommand_createsDirs(t *testing.T) {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			t.Errorf("expected dir to exist: %s", dir)
 		}
+	}
+}
+
+// init --root <dir> must scaffold under that directory (config + templates with
+// root-derived paths) and leave the default ~/.tbuk untouched.
+func TestInitCommand_rootFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	root := filepath.Join(t.TempDir(), "kb")
+	if err := runCLI("--root", root, "init"); err != nil {
+		t.Fatalf("init --root failed: %v", err)
+	}
+
+	for _, p := range []string{
+		filepath.Join(root, "config.yaml"),
+		filepath.Join(root, "prompts", "qa", "manifest.yaml"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected %s under custom root: %v", p, err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), filepath.Join(root, "tbuk.sqlite")) {
+		t.Errorf("written config does not point database at custom root:\n%s", data)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".tbuk")); !os.IsNotExist(err) {
+		t.Errorf("init --root must not create ~/.tbuk, stat err = %v", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -18,22 +19,37 @@ type ctxKey int
 const (
 	cfgKey ctxKey = iota
 	cfgPathKey
+	rootKey
 )
 
 // New returns the root cobra command.
 func New() *cobra.Command {
-	var cfgFile string
+	var (
+		cfgFile string
+		rootDir string
+	)
 
 	root := &cobra.Command{
 		Use:   "tbuk",
 		Short: "Local-first RAG knowledge base",
 		Long:  "tbuk indexes documents and lets you query them with your preferred LLM.",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// --root relocates the whole data directory; --config still points at
+			// a specific file when given. Without --root, the default ~/.tbuk is
+			// used, so existing setups are unaffected.
+			dataRoot := config.DefaultRoot()
+			if rootDir != "" {
+				abs, err := filepath.Abs(rootDir)
+				if err != nil {
+					return fmt.Errorf("resolve --root %s: %w", rootDir, err)
+				}
+				dataRoot = abs
+			}
 			path := cfgFile
 			if path == "" {
-				path = config.DefaultPath()
+				path = config.DefaultPathForRoot(dataRoot)
 			}
-			cfg, err := config.Load(path)
+			cfg, err := config.LoadForRoot(path, dataRoot)
 			if err != nil {
 				return fmt.Errorf("load config %s: %w", path, err)
 			}
@@ -42,12 +58,14 @@ func New() *cobra.Command {
 			}
 			ctx := context.WithValue(cmd.Context(), cfgKey, cfg)
 			ctx = context.WithValue(ctx, cfgPathKey, path)
+			ctx = context.WithValue(ctx, rootKey, dataRoot)
 			cmd.SetContext(ctx)
 			return nil
 		},
 	}
 
-	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.tbuk/config.yaml)")
+	root.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: <root>/config.yaml)")
+	root.PersistentFlags().StringVar(&rootDir, "root", "", "data root directory (default: ~/.tbuk)")
 
 	root.AddCommand(newContextCmd())
 	root.AddCommand(newInitCmd())
@@ -79,6 +97,13 @@ func configFrom(cmd *cobra.Command) config.Config {
 func configPathFrom(cmd *cobra.Command) string {
 	path, _ := cmd.Context().Value(cfgPathKey).(string)
 	return path
+}
+
+// rootFrom returns the resolved data-root directory from cmd's context (the
+// --root value or DefaultRoot()), as set by the root PersistentPreRunE.
+func rootFrom(cmd *cobra.Command) string {
+	r, _ := cmd.Context().Value(rootKey).(string)
+	return r
 }
 
 // Execute runs the CLI and exits on error. It installs a signal-aware context

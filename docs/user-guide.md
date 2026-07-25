@@ -332,6 +332,28 @@ This creates `~/.tbuk/` with:
 It is safe to run more than once. It will not overwrite anything that already
 exists.
 
+### Using a different data directory
+
+By default everything lives under `~/.tbuk/`. To keep a knowledge base
+somewhere else — a project folder, an external drive, or a second collection
+kept separate from your main notes — pass `--root` to any command:
+
+```bash
+tbuk init  --root /data/work-kb      # scaffold config + templates under /data/work-kb
+tbuk ingest --root /data/work-kb ./docs
+tbuk ask   --root /data/work-kb "what did we decide about X?"
+```
+
+`--root DIR` relocates the database, extracted-text cache, raw archive, prompt
+templates, and the config file — all of them move together to `DIR`. The
+`config.yaml` written by `init --root DIR` already points its paths at `DIR`, so
+later commands only need the same `--root DIR`. Without the flag, the default
+`~/.tbuk` is used, so existing setups are unaffected. Point `--root` at
+different directories to keep several independent knowledge bases side by side.
+
+Use `--config /path/to/config.yaml` instead when you want a specific config file
+while leaving the rest of the layout at its defaults.
+
 ### Understanding the configuration
 
 Open `~/.tbuk/config.yaml` in any text editor. It looks like this:

@@ -47,6 +47,18 @@ No test-only external deps — `net/http/httptest` from stdlib.
 
 File: `~/.tbuk/config.yaml` (created by `tbuk init`)
 
+**Data root.** Every data path (database, extracted cache, raw archive, prompt
+templates, config file) is derived from a single *root*, `config.DefaultRoot()`
+= `~/.tbuk`. The global `--root DIR` flag overrides it per invocation:
+`config.DefaultsForRoot(root)` / `LoadForRoot(path, root)` / `DefaultYAMLForRoot(root)`
+re-base all paths under `DIR`, and the no-arg `Defaults()`/`Load()`/`DefaultYAML()`
+are thin wrappers rooted at `DefaultRoot()`. The root command's `PersistentPreRunE`
+resolves the root (flag → abs, else default), loads `DIR/config.yaml` unless
+`--config` names another file, and stores it in the command context (`rootFrom`);
+`init` scaffolds under that root and writes a `config.yaml` whose paths already
+point at it. This is the concrete form of the "DB switching" roadmap item — a
+whole-collection switch rather than a single `--db` path.
+
 ```go
 type Config struct {
     Database  DatabaseConfig   // path
