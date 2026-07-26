@@ -102,6 +102,7 @@ func New() *cobra.Command {
 	root.AddCommand(newStatsCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newExportCmd())
+	root.AddCommand(newImportCmd())
 
 	return root
 }
