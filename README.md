@@ -248,6 +248,24 @@ prompts:
 
 Override config file: `tbuk --config /path/to/config.yaml <cmd>`
 
+### Data root (`--root`)
+
+By default all data — database, extracted-text cache, raw archive, prompt
+templates, and `config.yaml` — lives under `~/.tbuk`. The global `--root DIR`
+flag relocates that whole directory for a single invocation:
+
+```bash
+tbuk init  --root /data/work-kb    # scaffold config + templates under /data/work-kb
+tbuk ingest --root /data/work-kb ./docs
+tbuk ask   --root /data/work-kb "…"
+```
+
+`init --root DIR` writes a `config.yaml` whose paths already point at `DIR`, so
+subsequent commands need only the same `--root DIR`. Pointing `--root` at
+different directories keeps several independent knowledge bases side by side.
+`--config` still overrides just the config-file location when you need a
+specific file with an otherwise-default layout.
+
 ## Architecture
 
 ```

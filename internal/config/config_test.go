@@ -54,6 +54,108 @@ func TestDefaults_rawDir(t *testing.T) {
 	}
 }
 
+func TestDefaultRoot_endsInTbuk(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got, want := config.DefaultRoot(), filepath.Join(home, ".tbuk"); got != want {
+		t.Errorf("DefaultRoot() = %q, want %q", got, want)
+	}
+}
+
+// DefaultsForRoot must derive every data path from the given root while leaving
+// the non-path defaults (providers, sizes, dimension) untouched, so --root
+// relocates the whole knowledge base in one move.
+func TestDefaultsForRoot_derivesPathsFromRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	cfg := config.DefaultsForRoot(root)
+
+	paths := map[string]string{
+		"database.path":         cfg.Database.Path,
+		"preprocess.output_dir": cfg.Preprocess.OutputDir,
+		"ingest.raw_dir":        cfg.Ingest.RawDir,
+		"prompts.dir":           cfg.Prompts.Dir,
+	}
+	for name, got := range paths {
+		if !strings.HasPrefix(got, root+string(filepath.Separator)) {
+			t.Errorf("%s = %q, want a path under root %q", name, got, root)
+		}
+	}
+	if cfg.Database.Path != filepath.Join(root, "tbuk.sqlite") {
+		t.Errorf("database.path = %q, want %q", cfg.Database.Path, filepath.Join(root, "tbuk.sqlite"))
+	}
+	// Non-path defaults must match Defaults() regardless of root.
+	if cfg.Chunking.Size != 400 || cfg.Embedding.Dimension != 768 || cfg.LLM.Provider != "llama" {
+		t.Errorf("non-path defaults drifted under a custom root: %+v", cfg)
+	}
+}
+
+func TestDefaultPathForRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	if got, want := config.DefaultPathForRoot(root), filepath.Join(root, "config.yaml"); got != want {
+		t.Errorf("DefaultPathForRoot(%q) = %q, want %q", root, got, want)
+	}
+}
+
+// A --root run with no config file present must still resolve every path under
+// root, not under ~/.tbuk.
+func TestLoadForRoot_missingFileUsesRootDefaults(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	cfg, err := config.LoadForRoot(config.DefaultPathForRoot(root), root)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if cfg.Database.Path != filepath.Join(root, "tbuk.sqlite") {
+		t.Errorf("database.path = %q, want under root %q", cfg.Database.Path, root)
+	}
+	if cfg.Prompts.Dir != filepath.Join(root, "prompts") {
+		t.Errorf("prompts.dir = %q, want under root %q", cfg.Prompts.Dir, root)
+	}
+}
+
+// Fields present in the config file win; absent ones fall back to root-derived
+// defaults rather than ~/.tbuk.
+func TestLoadForRoot_fileOverridesRootDefaults(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("database:\n  path: /explicit/db.sqlite\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadForRoot(path, root)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if cfg.Database.Path != "/explicit/db.sqlite" {
+		t.Errorf("database.path = %q, want the file's explicit value", cfg.Database.Path)
+	}
+	if cfg.Ingest.RawDir != filepath.Join(root, "raw") {
+		t.Errorf("ingest.raw_dir = %q, want root-derived default under %q", cfg.Ingest.RawDir, root)
+	}
+}
+
+// DefaultYAMLForRoot must emit root-derived paths and round-trip back to
+// DefaultsForRoot exactly — the same anti-drift guard as the no-root variant.
+func TestDefaultYAMLForRoot_roundTrips(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	yamlStr, err := config.DefaultYAMLForRoot(root)
+	if err != nil {
+		t.Fatalf("DefaultYAMLForRoot: %v", err)
+	}
+	if !strings.Contains(yamlStr, root) {
+		t.Errorf("DefaultYAMLForRoot output does not mention root %q:\n%s", root, yamlStr)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(yamlStr), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.LoadForRoot(path, root)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if want := config.DefaultsForRoot(root); !reflect.DeepEqual(loaded, want) {
+		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", loaded, want)
+	}
+}
+
 func TestLoad_missingFile(t *testing.T) {
 	cfg, err := config.Load("/nonexistent/path/config.yaml")
 	if err != nil {
