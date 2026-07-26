@@ -58,8 +58,16 @@ func TestInitCommand_rootFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), filepath.Join(root, "tbuk.sqlite")) {
-		t.Errorf("written config does not point database at custom root:\n%s", data)
+	// The written config uses paths relative to the root (portable) and names
+	// the root in its header comment, not an absolute database path.
+	if !strings.Contains(string(data), "./tbuk.sqlite") {
+		t.Errorf("written config does not use a relative database path:\n%s", data)
+	}
+	if !strings.Contains(string(data), root) {
+		t.Errorf("written config header does not mention the data root %q:\n%s", root, data)
+	}
+	if abs := filepath.Join(root, "tbuk.sqlite"); strings.Contains(string(data), abs) {
+		t.Errorf("written config should not hard-code the absolute path %q:\n%s", abs, data)
 	}
 
 	if _, err := os.Stat(filepath.Join(home, ".tbuk")); !os.IsNotExist(err) {
@@ -111,18 +119,52 @@ func TestInitCommand_writesConfig(t *testing.T) {
 	}
 }
 
-func TestInitCommand_idempotent(t *testing.T) {
+// init on an existing config must add default keys the file is missing while
+// preserving the user's own values, rather than leaving it partial (#96).
+func TestInitCommand_fillsMissingKeysInExistingConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A partial config: a custom chunk size, everything else absent.
+	if err := os.WriteFile(cfgPath, []byte("chunking:\n  size: 999\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "size: 999") {
+		t.Errorf("init dropped the user's chunking.size:\n%s", got)
+	}
+	for _, want := range []string{"database:", "./tbuk.sqlite", "raw_dir", "provider: llama"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("init did not fill missing default %q:\n%s", want, got)
+		}
+	}
+}
+
+// init on a config that already carries every default must leave it byte-for-byte
+// untouched (nothing to add → bail).
+func TestInitCommand_completeConfigLeftUntouched(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("first init failed: %v", err)
 	}
-
-	// write sentinel to config
 	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
-	sentinel := "# sentinel\n"
-	if err := os.WriteFile(cfgPath, []byte(sentinel), 0o644); err != nil {
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,12 +172,12 @@ func TestInitCommand_idempotent(t *testing.T) {
 		t.Fatalf("second init failed: %v", err)
 	}
 
-	data, err := os.ReadFile(cfgPath)
+	after, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != sentinel {
-		t.Error("second init overwrote existing config")
+	if string(before) != string(after) {
+		t.Errorf("second init rewrote a complete config:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
