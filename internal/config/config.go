@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -261,6 +262,98 @@ func DefaultYAMLForRoot(root string) (string, error) {
 		return "", fmt.Errorf("config: marshal default yaml: %w", err)
 	}
 	return string(out), nil
+}
+
+// exportPathKeys maps each config section to the single data-folder key that
+// `tbuk export` comments out. Commenting these (rather than dropping them) keeps
+// the original location visible for reference while letting an import re-home
+// the component under its own root.
+var exportPathKeys = map[string]string{
+	"database":   "path",
+	"preprocess": "output_dir",
+	"ingest":     "raw_dir",
+	"prompts":    "dir",
+}
+
+// ExportYAML serialises cfg to YAML with the data-folder path keys commented
+// out (database.path, preprocess.output_dir, ingest.raw_dir, prompts.dir). An
+// import then re-homes those components under the target root instead of the
+// exporting machine's absolute paths, while portable settings (providers,
+// models, chunk sizes) are left active. When commenting a key empties its
+// section, the section header is commented too, so the key is absent on reload
+// and the root-derived default survives rather than being overwritten by a
+// zero value.
+func ExportYAML(cfg Config) (string, error) {
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("config: marshal export yaml: %w", err)
+	}
+	header := "# tbuk knowledge-base export.\n" +
+		"# Data-folder paths below are commented out so `tbuk import` places each\n" +
+		"# component under the target root (--root, else ~/.tbuk). Uncomment and\n" +
+		"# edit a path to pin that component to a fixed location on import.\n"
+	return header + commentPathKeys(string(out)), nil
+}
+
+// commentPathKeys comments out the data-folder path line in each section named
+// in exportPathKeys, and the section header itself when no active key remains.
+func commentPathKeys(yamlText string) string {
+	lines := strings.Split(yamlText, "\n")
+
+	type section struct {
+		name          string
+		header, start int
+		end           int // exclusive
+	}
+	var sections []section
+	for i, line := range lines {
+		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
+			continue
+		}
+		if n := len(sections); n > 0 {
+			sections[n-1].end = i
+		}
+		name := strings.TrimSpace(strings.SplitN(line, ":", 2)[0])
+		sections = append(sections, section{name: name, header: i, start: i + 1, end: len(lines)})
+	}
+
+	for _, s := range sections {
+		key, ok := exportPathKeys[s.name]
+		if !ok {
+			continue
+		}
+		for i := s.start; i < s.end; i++ {
+			trimmed := strings.TrimSpace(lines[i])
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			if strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[0]) == key {
+				lines[i] = commentLine(lines[i])
+			}
+		}
+		if !hasActiveLine(lines[s.start:s.end]) {
+			lines[s.header] = commentLine(lines[s.header])
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// commentLine prefixes line's content with "# ", preserving its indentation.
+func commentLine(line string) string {
+	body := strings.TrimLeft(line, " \t")
+	indent := line[:len(line)-len(body)]
+	return indent + "# " + body
+}
+
+// hasActiveLine reports whether any line is neither blank nor already a comment.
+func hasActiveLine(lines []string) bool {
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			return true
+		}
+	}
+	return false
 }
 
 // mapValue returns the value node for key in a YAML mapping node, or nil.

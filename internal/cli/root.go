@@ -82,6 +82,7 @@ func New() *cobra.Command {
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newStatsCmd())
 	root.AddCommand(newListCmd())
+	root.AddCommand(newExportCmd())
 
 	return root
 }

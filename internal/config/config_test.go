@@ -424,3 +424,94 @@ func TestValidateKeyedBaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestExportYAML_commentsOutDataFolderPaths(t *testing.T) {
+	cfg := config.DefaultsForRoot("/home/alice/.tbuk")
+	out, err := config.ExportYAML(cfg)
+	if err != nil {
+		t.Fatalf("ExportYAML: %v", err)
+	}
+
+	// The machine-specific path keys must be commented out so `tbuk import`
+	// re-homes each component under the target root instead of pinning it to
+	// the exporting machine's absolute paths.
+	for _, frag := range []string{
+		"# path: /home/alice/.tbuk/tbuk.sqlite",
+		"# output_dir: /home/alice/.tbuk/extracted",
+		"# raw_dir: /home/alice/.tbuk/raw",
+		"# dir: /home/alice/.tbuk/prompts",
+	} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("exported config missing commented line %q\n---\n%s", frag, out)
+		}
+	}
+}
+
+func TestExportYAML_keepsPortableKeysActive(t *testing.T) {
+	cfg := config.DefaultsForRoot("/root")
+	out, err := config.ExportYAML(cfg)
+	if err != nil {
+		t.Fatalf("ExportYAML: %v", err)
+	}
+
+	// Provider/model/chunking settings are portable and must stay active
+	// (uncommented) so they survive an import.
+	for _, frag := range []string{"provider: llama", "size: 400", "overlap: 50", "dimension: 768"} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("exported config should keep %q active, got:\n%s", frag, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "provider: llama") && strings.Contains(line, "#") {
+			t.Errorf("portable line unexpectedly commented: %q", line)
+		}
+		if strings.Contains(line, "embed_concurrency:") && strings.Contains(line, "#") {
+			t.Errorf("embed_concurrency should stay active, got: %q", line)
+		}
+	}
+}
+
+func TestExportYAML_roundTripReHomesUnderTargetRoot(t *testing.T) {
+	src := config.DefaultsForRoot("/home/alice/.tbuk")
+	src.LLM.Provider = "openai" // a non-default portable setting
+	src.Chunking.Size = 512
+
+	out, err := config.ExportYAML(src)
+	if err != nil {
+		t.Fatalf("ExportYAML: %v", err)
+	}
+
+	// Simulate importing into a different root: write the exported config and
+	// load it against the target root. Commented paths must fall back to the
+	// target root's defaults; portable settings must survive.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "bob-kb")
+	loaded, err := config.LoadForRoot(path, target)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+
+	checks := []struct {
+		name, got, want string
+	}{
+		{"db path", loaded.Database.Path, filepath.Join(target, "tbuk.sqlite")},
+		{"extracted dir", loaded.Preprocess.OutputDir, filepath.Join(target, "extracted")},
+		{"raw dir", loaded.Ingest.RawDir, filepath.Join(target, "raw")},
+		{"prompts dir", loaded.Prompts.Dir, filepath.Join(target, "prompts")},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s: want re-homed %q, got %q", c.name, c.want, c.got)
+		}
+	}
+	if loaded.LLM.Provider != "openai" {
+		t.Errorf("llm.provider: want openai (portable), got %q", loaded.LLM.Provider)
+	}
+	if loaded.Chunking.Size != 512 {
+		t.Errorf("chunking.size: want 512 (portable), got %d", loaded.Chunking.Size)
+	}
+}

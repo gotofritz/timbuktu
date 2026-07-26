@@ -12,8 +12,8 @@ Module: `github.com/gotofritz/timbuktu`
 cmd/tbuk/           cobra entry point
 
 internal/
-  config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta)
+  config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML(), ExportYAML()
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta, export)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
@@ -23,6 +23,7 @@ internal/
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
+  export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces.
@@ -353,6 +354,40 @@ Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperat
 
 ---
 
+## Export
+
+`tbuk export <path>` snapshots a knowledge base as a tar archive for backup or
+transfer.
+
+```go
+// Create writes a tar of cfg's data to w: config.yaml (paths commented out) plus
+// the database (+ SQLite -wal/-shm sidecars), extracted store, raw archive and
+// prompt templates that exist. Entries are named relative to root, or by basename
+// when the source lives outside root, so ".." never escapes the archive. Missing
+// or disabled components (e.g. raw_dir="") are skipped without error.
+func Create(w io.Writer, cfg config.Config, root string) error
+```
+
+Portable config: `config.ExportYAML(cfg)` marshals the config and comments out
+the four data-folder path keys (`database.path`, `preprocess.output_dir`,
+`ingest.raw_dir`, `prompts.dir`), also commenting the section header when doing
+so would leave it empty — so the key is *absent* on reload rather than decoded as
+a zero value. An import's `LoadForRoot` then re-homes every component under the
+target root; portable settings (providers, models, chunk sizes) stay active.
+
+CLI seams (`internal/cli/export.go`), exported for unit testing like
+`RunDelete`/`ConfirmYes`:
+- `ResolveExportTarget(arg, now)` — existing dir → `tbuk-export-<ts>.tar` inside
+  it; existing file or non-existent path → used as-is; non-existent path with a
+  trailing separator → error.
+- `RunExport(in, out, cfg, root, target, force)` — prompts before overwriting an
+  existing target unless `force`; writes to a temp file in the destination dir
+  then renames into place (crash-safe, `0o600`).
+
+Import is a planned follow-up (issue #93).
+
+---
+
 ## CLI Commands (implemented)
 
 ```
@@ -373,6 +408,7 @@ tbuk delete <path>             remove document + cascade-delete chunks/metadata 
 tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--force)
 tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
 tbuk list                      list indexed documents: path, title, chunk count, updated_at (--limit, --format text|json)
+tbuk export <path>             tar snapshot of config + data folders (dir→timestamped file, file→as-is; --force, --root)
 ```
 
 ---

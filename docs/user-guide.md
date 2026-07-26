@@ -860,6 +860,41 @@ tbuk ingest ~/notes/
 You can run this any time after editing your documents. A reasonable habit is
 to run it once a day, or after any batch of edits.
 
+### Backing up or moving your knowledge base
+
+`tbuk export` bundles everything — your config plus every data folder
+(database, extracted-text cache, raw archive, and prompt templates) — into a
+single `.tar` archive. Use it to back up a knowledge base or move it to another
+machine.
+
+```bash
+tbuk export ~/backups            # writes ~/backups/tbuk-export-<timestamp>.tar
+tbuk export ~/backups/kb.tar     # writes exactly that file
+```
+
+If you point it at an existing directory, Timbuktu creates a timestamped
+filename inside it. If you give it a filename, it uses that name — and asks
+before overwriting an existing archive unless you pass `--force`:
+
+```bash
+tbuk export --force ~/backups/kb.tar
+```
+
+The `--root` flag chooses *which* knowledge base to export, the same as for
+every other command:
+
+```bash
+tbuk export --root /data/work-kb ~/backups/work.tar
+```
+
+Inside the archive, the config's data-folder paths are **commented out**. That
+keeps the export portable: when an `import` command restores it (planned in a
+future release), each folder is re-created under the target machine's own data
+root rather than pinned to the paths from the machine that made the export. Your
+provider, model, and chunking settings are preserved. If you need to pin a
+folder to a fixed location, extract the archive and uncomment that path in
+`config.yaml` before importing.
+
 ---
 
 ## 13. More Complex Use Cases
