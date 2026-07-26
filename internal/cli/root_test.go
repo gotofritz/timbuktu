@@ -44,6 +44,30 @@ func TestRoot_rootFlagRoutesDataUnderRoot(t *testing.T) {
 	}
 }
 
+// With --config but no --root, the config file's own directory becomes the data
+// root, so `--config <dir>/config.yaml` behaves like `--root <dir>`: data lands
+// beside the config, never under ~/.tbuk (issue #96).
+func TestRoot_configDirBecomesRootWithoutRootFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(t.TempDir(), "kb")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	if err := runCLI("--config", cfgPath, "list"); err != nil {
+		t.Fatalf("list --config: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tbuk.sqlite")); err != nil {
+		t.Errorf("expected database beside config under %s: %v", dir, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".tbuk", "tbuk.sqlite")); !os.IsNotExist(err) {
+		t.Errorf("--config alone must not create a database under ~/.tbuk, stat err = %v", err)
+	}
+}
+
 // An invalid config must fail every command fast via the root
 // PersistentPreRunE, with a message that points at the config (P1-17).
 func TestRoot_invalidConfigFailsFast(t *testing.T) {

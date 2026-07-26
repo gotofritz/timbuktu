@@ -34,19 +34,38 @@ func New() *cobra.Command {
 		Short: "Local-first RAG knowledge base",
 		Long:  "tbuk indexes documents and lets you query them with your preferred LLM.",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			// --root relocates the whole data directory; --config still points at
-			// a specific file when given. Without --root, the default ~/.tbuk is
-			// used, so existing setups are unaffected.
-			dataRoot := config.DefaultRoot()
-			if rootDir != "" {
+			// Resolve the data root and config path. The config always lives
+			// directly under the root, so the two flags relate as follows:
+			//   --root DIR            → root=DIR, config=DIR/config.yaml
+			//   --config FILE (alone) → root=dir(FILE), config=FILE  (so
+			//                           `--config DIR/config.yaml` ≡ `--root DIR`)
+			//   neither               → root=~/.tbuk, config=~/.tbuk/config.yaml
+			// If both are given, --root wins for the root and --config just names
+			// the file. Relative data paths in the config resolve under the root.
+			var (
+				dataRoot string
+				path     string
+			)
+			switch {
+			case rootDir != "":
 				abs, err := filepath.Abs(rootDir)
 				if err != nil {
 					return fmt.Errorf("resolve --root %s: %w", rootDir, err)
 				}
 				dataRoot = abs
-			}
-			path := cfgFile
-			if path == "" {
+				path = cfgFile
+				if path == "" {
+					path = config.DefaultPathForRoot(dataRoot)
+				}
+			case cfgFile != "":
+				abs, err := filepath.Abs(cfgFile)
+				if err != nil {
+					return fmt.Errorf("resolve --config %s: %w", cfgFile, err)
+				}
+				path = abs
+				dataRoot = filepath.Dir(abs)
+			default:
+				dataRoot = config.DefaultRoot()
 				path = config.DefaultPathForRoot(dataRoot)
 			}
 			cfg, err := config.LoadForRoot(path, dataRoot)

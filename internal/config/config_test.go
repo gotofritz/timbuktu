@@ -89,6 +89,59 @@ func TestDefaultsForRoot_derivesPathsFromRoot(t *testing.T) {
 	}
 }
 
+// ResolvePaths rebases relative data paths onto root while leaving absolute
+// paths and empty values (which disable a component) untouched — this is what
+// lets a config hold paths relative to its root, or pin a single part with an
+// absolute path, so the pipeline's parts can live in different places (#96).
+func TestResolvePaths_rebasesRelativeLeavesAbsoluteAndEmpty(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	abs := filepath.Join(t.TempDir(), "elsewhere", "big.sqlite")
+	cfg := config.Config{
+		Database:   config.DatabaseConfig{Path: "db/kb.sqlite"}, // relative → under root
+		Preprocess: config.PreprocessConfig{OutputDir: abs},     // absolute → untouched
+		Ingest:     config.IngestConfig{RawDir: ""},             // empty → disabled, untouched
+		Prompts:    config.PromptsConfig{Dir: "prompts"},        // relative → under root
+	}
+
+	got := cfg.ResolvePaths(root)
+
+	if want := filepath.Join(root, "db", "kb.sqlite"); got.Database.Path != want {
+		t.Errorf("database.path = %q, want %q", got.Database.Path, want)
+	}
+	if got.Preprocess.OutputDir != abs {
+		t.Errorf("preprocess.output_dir = %q, want unchanged absolute %q", got.Preprocess.OutputDir, abs)
+	}
+	if got.Ingest.RawDir != "" {
+		t.Errorf("ingest.raw_dir = %q, want empty (disabled) preserved", got.Ingest.RawDir)
+	}
+	if want := filepath.Join(root, "prompts"); got.Prompts.Dir != want {
+		t.Errorf("prompts.dir = %q, want %q", got.Prompts.Dir, want)
+	}
+}
+
+// A config file may hold paths relative to the data root; LoadForRoot resolves
+// them under root so each component lands beside the config rather than beside
+// the current working directory (#96).
+func TestLoadForRoot_relativeFilePathsResolveUnderRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "database:\n  path: data/kb.sqlite\ningest:\n  raw_dir: archive\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadForRoot(path, root)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if want := filepath.Join(root, "data", "kb.sqlite"); cfg.Database.Path != want {
+		t.Errorf("database.path = %q, want %q", cfg.Database.Path, want)
+	}
+	if want := filepath.Join(root, "archive"); cfg.Ingest.RawDir != want {
+		t.Errorf("ingest.raw_dir = %q, want %q", cfg.Ingest.RawDir, want)
+	}
+}
+
 func TestDefaultPathForRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "kb")
 	if got, want := config.DefaultPathForRoot(root), filepath.Join(root, "config.yaml"); got != want {

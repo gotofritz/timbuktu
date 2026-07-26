@@ -184,6 +184,30 @@ func DefaultsForRoot(root string) Config {
 	}
 }
 
+// ResolvePaths rebases each relative data path (database, extracted-text store,
+// raw archive, prompt templates) onto root, leaving absolute paths and empty
+// values untouched. Empty is preserved because it disables a component (an empty
+// ingest.raw_dir turns off the source archive), and an absolute path pins that
+// part to a fixed location regardless of root. This lets a single config keep
+// its parts in different places — most relative to a portable root, some pinned
+// absolutely (e.g. the raw archive on a larger disk).
+func (c Config) ResolvePaths(root string) Config {
+	c.Database.Path = resolveUnderRoot(c.Database.Path, root)
+	c.Preprocess.OutputDir = resolveUnderRoot(c.Preprocess.OutputDir, root)
+	c.Ingest.RawDir = resolveUnderRoot(c.Ingest.RawDir, root)
+	c.Prompts.Dir = resolveUnderRoot(c.Prompts.Dir, root)
+	return c
+}
+
+// resolveUnderRoot joins a relative path onto root; empty and absolute paths are
+// returned unchanged.
+func resolveUnderRoot(path, root string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
 // Load reads config from path, falling back to DefaultRoot()-derived defaults
 // for missing fields. If the file does not exist, defaults are returned without
 // error.
@@ -216,7 +240,10 @@ func LoadForRoot(path, root string) (Config, error) {
 		return Config{}, err
 	}
 
-	return cfg, nil
+	// Resolve any relative data paths from the file against root, so a config can
+	// hold portable relative paths (or absolute ones to pin a part elsewhere).
+	// Seeded defaults are already absolute, so this is a no-op on them.
+	return cfg.ResolvePaths(root), nil
 }
 
 // DefaultYAML returns the default config (rooted at DefaultRoot()) serialised to
