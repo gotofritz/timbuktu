@@ -223,7 +223,7 @@ Default config at `~/.tbuk/config.yaml` (created by `tbuk init`):
 
 ```yaml
 database:
-  path: ~/.tbuk/tbuk.sqlite
+  path: ./tbuk.sqlite
 
 llm:
   provider: llama    # llama | ollama | claude | openai
@@ -240,11 +240,21 @@ chunking:
 
 ingest:
   embed_concurrency: 4   # embed batches in flight per file (>=1; 1 = serial)
-  raw_dir: ~/.tbuk/raw   # archive a copy of each ingested source (empty to disable)
+  raw_dir: ./raw         # archive a copy of each ingested source (empty to disable)
+
+preprocess:
+  output_dir: ./extracted  # extracted-text cache
 
 prompts:
-  dir: ~/.tbuk/prompts   # root directory holding prompt template folders
+  dir: ./prompts       # root directory holding prompt template folders
 ```
+
+Each data path (`database.path`, `preprocess.output_dir`, `ingest.raw_dir`,
+`prompts.dir`) may be **relative to the data root** — as written above, so the
+config is portable — or an **absolute path** to pin one component elsewhere (e.g.
+`raw_dir: /mnt/big/raw` to keep the archive on a larger disk). Relative paths
+resolve against the root; the pipeline's parts can therefore live in different
+places.
 
 Override config file: `tbuk --config /path/to/config.yaml <cmd>`
 
@@ -260,11 +270,19 @@ tbuk ingest --root /data/work-kb ./docs
 tbuk ask   --root /data/work-kb "…"
 ```
 
-`init --root DIR` writes a `config.yaml` whose paths already point at `DIR`, so
-subsequent commands need only the same `--root DIR`. Pointing `--root` at
-different directories keeps several independent knowledge bases side by side.
-`--config` still overrides just the config-file location when you need a
-specific file with an otherwise-default layout.
+`init --root DIR` writes a portable `config.yaml` — its data paths are relative
+to `DIR`, so relocating the directory moves every component with it — and later
+commands need only the same `--root DIR`. Pointing `--root` at different
+directories keeps several independent knowledge bases side by side.
+
+The config always lives directly under its root, so `--config DIR/config.yaml`
+(with no `--root`) is equivalent to `--root DIR`: the config file's own directory
+becomes the data root. Passing both lets `--root` set the root while `--config`
+names a specific file within it.
+
+Re-running `tbuk init` on a directory that already has a `config.yaml` fills in
+any default keys the file is missing (preserving your own values) rather than
+overwriting it; a config that already has every key is left untouched.
 
 ## Architecture
 

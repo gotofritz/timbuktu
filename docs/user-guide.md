@@ -329,8 +329,10 @@ This creates `~/.tbuk/` with:
 - `config.yaml` — your configuration
 - `prompts/` — templates that control how the AI formats its answers
 
-It is safe to run more than once. It will not overwrite anything that already
-exists.
+It is safe to run more than once. It never overwrites your own settings: on a
+folder that already has a `config.yaml`, it only **adds** default keys the file
+is missing (leaving your values and comments in place), and it leaves a config
+that already has every key untouched.
 
 ### Using a different data directory
 
@@ -346,13 +348,34 @@ tbuk ask   --root /data/work-kb "what did we decide about X?"
 
 `--root DIR` relocates the database, extracted-text cache, raw archive, prompt
 templates, and the config file — all of them move together to `DIR`. The
-`config.yaml` written by `init --root DIR` already points its paths at `DIR`, so
-later commands only need the same `--root DIR`. Without the flag, the default
-`~/.tbuk` is used, so existing setups are unaffected. Point `--root` at
-different directories to keep several independent knowledge bases side by side.
+`config.yaml` written by `init --root DIR` uses paths **relative** to `DIR`, so
+the whole folder is portable: move it elsewhere and point `--root` at the new
+location, and every component follows. Without the flag, the default `~/.tbuk` is
+used, so existing setups are unaffected. Point `--root` at different directories
+to keep several independent knowledge bases side by side.
 
-Use `--config /path/to/config.yaml` instead when you want a specific config file
-while leaving the rest of the layout at its defaults.
+The config file always lives directly under its root, so
+`--config /some/dir/config.yaml` (with no `--root`) is just another way of saying
+`--root /some/dir` — the config's own folder becomes the data root. Pass both
+when you want `--root` to set the root and `--config` to name a specific file
+inside it.
+
+### Putting components in different places
+
+Each data path in `config.yaml` can be **relative to the root** (the portable
+default) or an **absolute path** that pins one component somewhere specific — for
+example, keeping the raw archive on a larger disk while everything else stays
+under the root:
+
+```yaml
+database:
+  path: ./tbuk.sqlite      # relative → beside the config, under the root
+ingest:
+  raw_dir: /mnt/big/raw    # absolute → pinned to a larger disk
+```
+
+Relative paths resolve against the root; absolute paths are used as-is. An empty
+`ingest.raw_dir` still turns the archive off entirely.
 
 ### Understanding the configuration
 
@@ -360,7 +383,7 @@ Open `~/.tbuk/config.yaml` in any text editor. It looks like this:
 
 ```yaml
 database:
-  path: ~/.tbuk/tbuk.sqlite
+  path: ./tbuk.sqlite    # relative to the data root (the config file's folder)
 
 llm:
   provider: llama    # llama | ollama | claude | openai
@@ -379,8 +402,19 @@ chunking:
 
 ingest:
   embed_concurrency: 4   # embed batches sent to the server at once per file
-  raw_dir: ~/.tbuk/raw   # keep a copy of every ingested source here (empty to disable)
+  raw_dir: ./raw         # keep a copy of every ingested source here (empty to disable)
+
+preprocess:
+  output_dir: ./extracted  # where extracted plain text is cached
+
+prompts:
+  dir: ./prompts       # where prompt templates live
 ```
+
+The paths above are **relative to the data root** — the folder holding this
+`config.yaml` — so the whole knowledge base is portable. Give any of them an
+**absolute** path instead to pin that component to a fixed location (see
+[Putting components in different places](#putting-components-in-different-places)).
 
 **Settings most users never need to change:** `database.path`, `chunking.size`,
 `chunking.overlap`, `ingest.embed_concurrency`, `ingest.raw_dir`.

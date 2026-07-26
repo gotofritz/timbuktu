@@ -48,16 +48,37 @@ No test-only external deps — `net/http/httptest` from stdlib.
 File: `~/.tbuk/config.yaml` (created by `tbuk init`)
 
 **Data root.** Every data path (database, extracted cache, raw archive, prompt
-templates, config file) is derived from a single *root*, `config.DefaultRoot()`
+templates, config file) hangs off a single *root*, `config.DefaultRoot()`
 = `~/.tbuk`. The global `--root DIR` flag overrides it per invocation:
 `config.DefaultsForRoot(root)` / `LoadForRoot(path, root)` / `DefaultYAMLForRoot(root)`
 re-base all paths under `DIR`, and the no-arg `Defaults()`/`Load()`/`DefaultYAML()`
-are thin wrappers rooted at `DefaultRoot()`. The root command's `PersistentPreRunE`
-resolves the root (flag → abs, else default), loads `DIR/config.yaml` unless
-`--config` names another file, and stores it in the command context (`rootFrom`);
-`init` scaffolds under that root and writes a `config.yaml` whose paths already
-point at it. This is the concrete form of the "DB switching" roadmap item — a
-whole-collection switch rather than a single `--db` path.
+are thin wrappers rooted at `DefaultRoot()`.
+
+**Per-component paths (relative or absolute).** Each data path in the config may
+be **relative to the root** or **absolute**. `Config.ResolvePaths(root)` rebases
+every relative data path onto the root and leaves absolute paths and empty values
+(an empty `ingest.raw_dir` disables the archive) untouched; `LoadForRoot` applies
+it after decoding, so every command reads already-resolved absolute paths through
+the one config chokepoint. This lets the pipeline's parts live in different places
+— most relative to a portable root, one or two pinned absolutely (e.g. the raw
+archive on a larger disk). The single source of truth is `relativeDefaults()`
+(paths like `./tbuk.sqlite`, `./raw`); `DefaultsForRoot(root)` is
+`relativeDefaults().ResolvePaths(root)`, and `defaultConfigNode()` builds the
+commented YAML node tree shared by `DefaultYAMLForRoot` (header-topped) and
+`FillMissingDefaults`.
+
+**Flag resolution.** The root command's `PersistentPreRunE` resolves root and
+config path together: `--root DIR` → root=`DIR`, config=`DIR/config.yaml` (or the
+`--config` file if given); `--config FILE` alone → root=`dir(FILE)`, config=`FILE`
+(so `--config DIR/config.yaml` ≡ `--root DIR`, the config always sitting directly
+under its root); neither → `~/.tbuk`. The resolved root is stored in the command
+context (`rootFrom`). `init` scaffolds under that root; for a fresh config it
+writes a portable `config.yaml` with relative paths under a header naming the
+root, and for an existing config it fills in any missing default keys in place
+(`config.FillMissingDefaults`, a YAML-node merge that preserves the user's values
+and comments) or leaves a complete file untouched. This is the concrete form of
+the "DB switching" roadmap item — a whole-collection switch rather than a single
+`--db` path.
 
 ```go
 type Config struct {
