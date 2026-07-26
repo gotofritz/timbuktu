@@ -24,6 +24,7 @@ func TestContextCommand_prints(t *testing.T) {
 		"search",
 		"config",
 		"template",
+		"export",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("context output missing %q", want)

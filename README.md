@@ -99,6 +99,8 @@ tbuk delete <path>       # remove a document, its chunks, and its extracted-text
 tbuk update <file>       # re-ingest a single file if SHA256 changed (--force); use `tbuk ingest <dir>` for folders
 tbuk stats               # knowledge base summary: doc/chunk counts, size (--format text|json)
 tbuk list                # list indexed documents: path, title, chunk count, updated (--limit, --format)
+tbuk export <path>       # bundle config + all data folders into a portable .tar (--root, --force)
+                         #   <path> dir → timestamped file inside it; <path> file → that file (prompts before overwrite)
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -266,6 +268,25 @@ different directories keeps several independent knowledge bases side by side.
 `--config` still overrides just the config-file location when you need a
 specific file with an otherwise-default layout.
 
+## Backup and export
+
+`tbuk export <path>` writes a portable `.tar` snapshot of a knowledge base — the
+config plus every data folder (database with its SQLite WAL sidecars,
+extracted-text cache, raw archive, and prompt templates):
+
+```bash
+tbuk export ~/backups          # writes ~/backups/tbuk-export-<timestamp>.tar
+tbuk export ~/backups/kb.tar   # exact filename; prompts before overwrite (--force skips the prompt)
+tbuk export --root /data/work-kb ~/backups/work.tar
+```
+
+An existing **directory** target gets a timestamped filename inside it; a
+**file** target is used as-is. The archived `config.yaml` has its data-folder
+paths commented out, so a future `import` re-homes each folder under the target
+root instead of pinning it to the exporting machine's absolute paths (provider,
+model, and chunking settings are preserved). Components stored outside the root
+are archived by basename so the archive is always self-contained.
+
 ## Architecture
 
 ```
@@ -283,6 +304,7 @@ internal/
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
+  export/           Create — tar snapshot of config + data folders (portable, path-commented config)
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces defined in `internal/llm` and `internal/embeddings`.

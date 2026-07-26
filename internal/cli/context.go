@@ -38,6 +38,7 @@ tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 tbuk stats                       document and chunk counts, DB size
 tbuk list                        list all indexed documents
 tbuk find <key=value>...         find documents by metadata
+tbuk export <path>               tar snapshot of the KB (config + data folders) for backup/transfer
 
 ## Templates
 
