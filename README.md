@@ -101,6 +101,8 @@ tbuk stats               # knowledge base summary: doc/chunk counts, size (--for
 tbuk list                # list indexed documents: path, title, chunk count, updated (--limit, --format)
 tbuk export <path>       # bundle config + all data folders into a portable .tar (--root, --force)
                          #   <path> dir → timestamped file inside it; <path> file → that file (prompts before overwrite)
+tbuk import <archive>    # restore a knowledge base from a .tar snapshot (--root, --config, --merge, --force)
+                         #   default: adopt archive config, re-home folders under root; --merge: keep target config
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -286,7 +288,7 @@ Re-running `tbuk init` on a directory that already has a `config.yaml` fills in
 any default keys the file is missing (preserving your own values) rather than
 overwriting it; a config that already has every key is left untouched.
 
-## Backup and export
+## Backup, export, and import
 
 `tbuk export <path>` writes a portable `.tar` snapshot of a knowledge base — the
 config plus every data folder (database with its SQLite WAL sidecars,
@@ -300,10 +302,29 @@ tbuk export --root /data/work-kb ~/backups/work.tar
 
 An existing **directory** target gets a timestamped filename inside it; a
 **file** target is used as-is. The archived `config.yaml` has its data-folder
-paths commented out, so a future `import` re-homes each folder under the target
+paths commented out, so `tbuk import` re-homes each folder under the target
 root instead of pinning it to the exporting machine's absolute paths (provider,
 model, and chunking settings are preserved). Components stored outside the root
 are archived by basename so the archive is always self-contained.
+
+`tbuk import <archive>` restores a snapshot. `--root` / `--config` choose where
+it lands, exactly as for every other command:
+
+```bash
+tbuk import ~/backups/kb.tar                    # restore into ~/.tbuk
+tbuk import --root /data/work-kb ~/backups/kb.tar   # restore into a specific root
+tbuk import --merge ~/backups/kb.tar            # merge into an existing KB's folders
+tbuk import --force ~/backups/kb.tar            # overwrite existing files
+```
+
+By default import **adopts the archive's config** and re-homes each data folder
+at the target root's default locations. With `--merge` it keeps the target's
+existing `config.yaml` (or the defaults when there is none) and copies the
+imported folders into the paths that config names — use it to fold a snapshot
+into an existing knowledge base. Existing files are left untouched unless
+`--force` is passed, so an import never clobbers a live database by accident.
+Archive entries that would escape the target via an absolute path or `..` are
+rejected.
 
 ## Architecture
 
@@ -323,6 +344,7 @@ internal/
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
+  importer/         Import — restore a tar snapshot under a target root (re-home or --merge)
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces defined in `internal/llm` and `internal/embeddings`.
