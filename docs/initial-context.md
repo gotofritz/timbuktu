@@ -13,7 +13,7 @@ cmd/tbuk/           cobra entry point
 
 internal/
   config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML(), ExportYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta, export)
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta, export, import)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
@@ -24,6 +24,7 @@ internal/
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
   export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
+  importer/         Import() — restore a tar snapshot under a target root (re-home or --merge)
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces.
@@ -405,7 +406,46 @@ CLI seams (`internal/cli/export.go`), exported for unit testing like
   existing target unless `force`; writes to a temp file in the destination dir
   then renames into place (crash-safe, `0o600`).
 
-Import is a planned follow-up (issue #93).
+## Import
+
+`tbuk import <archive>` is the inverse of export — it unpacks a snapshot back
+under a target root.
+
+```go
+// Import extracts the tar in r according to opts. Each entry maps to a
+// destination under opts.Config's component paths (db, extracted, raw, prompts)
+// or, failing that, verbatim under opts.Root. Existing files are overwritten
+// only with opts.Force, else skipped (recorded in Result.Skipped). Entries that
+// would escape via an absolute path or ".." are rejected.
+func Import(r io.Reader, opts Options) (Result, error)
+
+type Options struct {
+    Root       string        // target data root; fallback for unknown/disabled components
+    Config     config.Config // component destination paths
+    ConfigDest string        // where the archive's config.yaml is written ("" = keep target config)
+    Force      bool
+}
+```
+
+The archive is only self-describing for the **default** relative layout
+(`tbuk.sqlite`, `extracted/`, `raw/`, `prompts/`) — `ExportYAML` comments data
+paths out, so a custom source `output_dir` name can't be recovered from the
+config. `Import` maps those four canonical components onto the target config's
+paths; any other entry is re-homed verbatim under the root. Files are written
+`0o600`.
+
+CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
+- `RunImport(out, archivePath, cfg, root, configPath, merge, force)` — opens the
+  archive and dispatches by mode. **Non-merge** (default): placement uses
+  `DefaultsForRoot(root)` and the archive's `config.yaml` is written to
+  `configPath`, so the adopted config and the re-homed folders agree (the
+  archive's commented paths resolve to those same defaults). **Merge**
+  (`--merge`): placement uses the loaded target `cfg` and the archive config is
+  discarded, folding the snapshot into the existing KB's folders.
+
+Because the target may be a fresh machine, import works with no pre-existing
+config — the root `PersistentPreRunE` loads `DefaultsForRoot(root)`, which passes
+`Validate()`.
 
 ---
 
@@ -430,6 +470,7 @@ tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--fo
 tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
 tbuk list                      list indexed documents: path, title, chunk count, updated_at (--limit, --format text|json)
 tbuk export <path>             tar snapshot of config + data folders (dir→timestamped file, file→as-is; --force, --root)
+tbuk import <archive>          restore a tar snapshot under the target root (--merge keeps target config, --force overwrites)
 ```
 
 ---

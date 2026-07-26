@@ -922,12 +922,47 @@ tbuk export --root /data/work-kb ~/backups/work.tar
 ```
 
 Inside the archive, the config's data-folder paths are **commented out**. That
-keeps the export portable: when an `import` command restores it (planned in a
-future release), each folder is re-created under the target machine's own data
-root rather than pinned to the paths from the machine that made the export. Your
-provider, model, and chunking settings are preserved. If you need to pin a
-folder to a fixed location, extract the archive and uncomment that path in
-`config.yaml` before importing.
+keeps the export portable: when `tbuk import` restores it, each folder is
+re-created under the target machine's own data root rather than pinned to the
+paths from the machine that made the export. Your provider, model, and chunking
+settings are preserved.
+
+### Restoring from an archive
+
+`tbuk import` unpacks a snapshot back into a knowledge base. Point `--root` (or
+`--config`) at where it should land, just like every other command:
+
+```bash
+tbuk import ~/backups/kb.tar                        # restore into ~/.tbuk
+tbuk import --root /data/work-kb ~/backups/kb.tar   # restore into a specific root
+```
+
+By default, import **adopts the config from the archive** and re-creates every
+folder — database, extracted-text cache, raw archive, prompt templates — at the
+target root's default locations. This is the "move my knowledge base to a new
+machine" case: run it against a fresh root and you get a working copy, no `init`
+needed.
+
+To fold a snapshot **into an existing** knowledge base instead of setting up a
+new one, use `--merge`. That keeps the config already at the target and copies
+the archived folders into the locations *it* names (or the defaults when the
+target has no config yet):
+
+```bash
+tbuk import --merge ~/backups/kb.tar
+```
+
+Import never overwrites files that already exist — so it won't clobber a live
+database — and reports how many it skipped. Pass `--force` when you really do
+want the archive's copies to win:
+
+```bash
+tbuk import --force ~/backups/kb.tar
+```
+
+If you need to pin a folder to a fixed location, extract the archive and
+uncomment that path in `config.yaml`, then import with `--merge` so that config
+is honoured.
 
 ---
 
