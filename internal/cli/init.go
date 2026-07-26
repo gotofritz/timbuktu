@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -40,7 +42,8 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	}
 
 	cfgPath := filepath.Join(tbukDir, "config.yaml")
-	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+	switch existing, err := os.ReadFile(cfgPath); {
+	case errors.Is(err, os.ErrNotExist):
 		defaultYAML, err := config.DefaultYAMLForRoot(tbukDir)
 		if err != nil {
 			return fmt.Errorf("render default config: %w", err)
@@ -49,8 +52,24 @@ func runInit(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("write config: %w", err)
 		}
 		fmt.Printf("Created config: %s\n", cfgPath)
-	} else {
-		fmt.Printf("Config already exists: %s\n", cfgPath)
+	case err != nil:
+		return fmt.Errorf("read config %s: %w", cfgPath, err)
+	default:
+		// Config exists: add any default keys it is missing, preserving the
+		// user's own values, then rewrite it. If nothing is missing, leave it
+		// untouched.
+		merged, added, err := config.FillMissingDefaults(existing)
+		if err != nil {
+			return fmt.Errorf("update config %s: %w", cfgPath, err)
+		}
+		if len(added) == 0 {
+			fmt.Printf("Config already complete: %s\n", cfgPath)
+		} else {
+			if err := os.WriteFile(cfgPath, merged, 0o600); err != nil {
+				return fmt.Errorf("write config: %w", err)
+			}
+			fmt.Printf("Updated config: %s (added %s)\n", cfgPath, strings.Join(added, ", "))
+		}
 	}
 
 	if err := writeBuiltinQATemplate(qaDir); err != nil {

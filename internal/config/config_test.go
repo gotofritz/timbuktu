@@ -209,6 +209,85 @@ func TestDefaultYAMLForRoot_roundTrips(t *testing.T) {
 	}
 }
 
+// init must ship a config whose data paths are relative to the root (./raw,
+// ./prompts, ./tbuk.sqlite, ./extracted) so the file is portable — relocating
+// the root moves every component with it (#96).
+func TestDefaultYAMLForRoot_emitsRelativePaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "kb")
+	yamlStr, err := config.DefaultYAMLForRoot(root)
+	if err != nil {
+		t.Fatalf("DefaultYAMLForRoot: %v", err)
+	}
+	for _, want := range []string{"./tbuk.sqlite", "./extracted", "./raw", "./prompts"} {
+		if !strings.Contains(yamlStr, want) {
+			t.Errorf("default config missing relative path %q:\n%s", want, yamlStr)
+		}
+	}
+	if abs := filepath.Join(root, "tbuk.sqlite"); strings.Contains(yamlStr, abs) {
+		t.Errorf("default config should not hard-code the absolute path %q", abs)
+	}
+}
+
+// FillMissingDefaults adds default keys absent from an existing config while
+// preserving the user's own values, so `tbuk init` can complete a partial
+// config in place (#96).
+func TestFillMissingDefaults_addsMissingPreservesExisting(t *testing.T) {
+	existing := []byte("chunking:\n  size: 999\ningest:\n  embed_concurrency: 2\n")
+
+	merged, added, err := config.FillMissingDefaults(existing)
+	if err != nil {
+		t.Fatalf("FillMissingDefaults: %v", err)
+	}
+
+	// A previously-missing whole section and a missing leaf are both reported.
+	have := map[string]bool{}
+	for _, a := range added {
+		have[a] = true
+	}
+	if !have["database"] || !have["ingest.raw_dir"] {
+		t.Errorf("added = %v, want it to include \"database\" and \"ingest.raw_dir\"", added)
+	}
+
+	// The merged config must load with user values preserved and defaults filled.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, merged, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "kb")
+	cfg, err := config.LoadForRoot(path, root)
+	if err != nil {
+		t.Fatalf("LoadForRoot(merged): %v", err)
+	}
+	if cfg.Chunking.Size != 999 {
+		t.Errorf("chunking.size = %d, want preserved 999", cfg.Chunking.Size)
+	}
+	if cfg.Ingest.EmbedConcurrency != 2 {
+		t.Errorf("ingest.embed_concurrency = %d, want preserved 2", cfg.Ingest.EmbedConcurrency)
+	}
+	if want := filepath.Join(root, "raw"); cfg.Ingest.RawDir != want {
+		t.Errorf("ingest.raw_dir = %q, want filled default %q", cfg.Ingest.RawDir, want)
+	}
+	if cfg.LLM.Provider != "llama" {
+		t.Errorf("llm.provider = %q, want filled default llama", cfg.LLM.Provider)
+	}
+}
+
+// A config already carrying every default key is reported as complete (no keys
+// added) so init can leave it untouched.
+func TestFillMissingDefaults_completeConfigAddsNothing(t *testing.T) {
+	full, err := config.DefaultYAML()
+	if err != nil {
+		t.Fatalf("DefaultYAML: %v", err)
+	}
+	_, added, err := config.FillMissingDefaults([]byte(full))
+	if err != nil {
+		t.Fatalf("FillMissingDefaults: %v", err)
+	}
+	if len(added) != 0 {
+		t.Errorf("added = %v, want none for a complete config", added)
+	}
+}
+
 func TestLoad_missingFile(t *testing.T) {
 	cfg, err := config.Load("/nonexistent/path/config.yaml")
 	if err != nil {
