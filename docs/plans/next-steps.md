@@ -38,6 +38,7 @@ engineering cost against the current architecture.
            │  • Richer doctor output        │  • Plugin system               │
            │  • Colorized / paged output    │  • Encryption at rest          │
            │  • Config validation           │  • Multi-user / sync           │
+           │  • OpenTelemetry (opt-in)      │                                │
            └────────────────────────────────┴────────────────────────────────┘
 ```
 
@@ -120,6 +121,19 @@ scattered across it; the matrix above points at them by group.
     modes for scripting.
 13. **Config validation** — friendlier errors for bad provider/model/dimension
     combinations at load time rather than at call time.
+31. **OpenTelemetry instrumentation (opt-in).** *(user-requested)* Add traces /
+    metrics via [compile-time auto-instrumentation (`otelc`
+    v1)](https://opentelemetry.io/blog/2026/go-compile-time-instrumentation-v1/):
+    swap `go build` for `otelc go build` (or
+    `-toolexec=otelc toolexec`) and `net/http`, `database/sql`, etc. are
+    instrumented with no source changes (needs Go 1.24+ — we're on 1.26;
+    install: `go get -tool go.opentelemetry.io/otelc/tool/cmd/otelc`).
+    **Switched off by default**: gate the SDK behind `telemetry.enabled: false`
+    in `config.yaml` (and respect `OTEL_SDK_DISABLED`), with exporter
+    endpoint / protocol configurable via standard `OTEL_*` env vars and config
+    keys. Hand-written spans only where auto coverage is thin (ingest /
+    retrieval pipeline stages). *(Numbered 31 to avoid renumbering the
+    cross-referenced items below.)*
 
 ---
 
