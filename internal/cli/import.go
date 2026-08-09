@@ -65,7 +65,7 @@ func RunImport(out io.Writer, archivePath string, cfg config.Config, root, confi
 
 	res, err := importer.Import(f, opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", archivePath, err)
 	}
 
 	fmt.Fprintf(out, "Imported %d file(s) to %s", len(res.Written), root) //nolint:errcheck

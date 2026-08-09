@@ -323,6 +323,13 @@ existing `config.yaml` (or the defaults when there is none) and copies the
 imported folders into the paths that config names — use it to fold a snapshot
 into an existing knowledge base. Existing files are left untouched unless
 `--force` is passed, so an import never clobbers a live database by accident.
+
+Export re-reads the archive before putting it in place, so a damaged snapshot
+fails at export time rather than on restore. If import still rejects a file, the
+error says why — the file is empty, truncated part-way (an incomplete copy or a
+cloud folder that has not finished syncing), corrupt at a given entry, or not a
+tar at all. A `.tar.gz`/`.tgz` must be decompressed first: `tbuk export` writes
+an uncompressed `.tar`.
 Archive entries that would escape the target via an absolute path or `..` are
 rejected.
 

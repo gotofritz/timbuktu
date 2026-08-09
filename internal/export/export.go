@@ -63,6 +63,34 @@ func Create(w io.Writer, cfg config.Config, root string) error {
 	return nil
 }
 
+// Verify reads r as a tar archive and reports whether it is a complete,
+// well-formed export: every header parses, no entry is truncated, and the
+// config entry is present. It walks headers only — on an io.Seeker (such as an
+// open file) entry bodies are skipped rather than read — so verifying a
+// multi-gigabyte archive costs little. Callers use it to catch a damaged
+// archive at export time, before it is handed to a user who would otherwise
+// only discover the damage on import.
+func Verify(r io.Reader) error {
+	tr := tar.NewReader(r)
+	sawConfig := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("verify archive: %w", err)
+		}
+		if hdr.Name == ConfigName {
+			sawConfig = true
+		}
+	}
+	if !sawConfig {
+		return fmt.Errorf("verify archive: missing %s entry", ConfigName)
+	}
+	return nil
+}
+
 // archiveName maps a source path to its archive entry name: relative to root
 // when it lives under root, otherwise its basename. Names always use forward
 // slashes, the tar convention.
@@ -120,7 +148,10 @@ func addFile(tw *tar.Writer, path, name string) error {
 		}
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	if info.IsDir() {
+	// Only regular files are archivable content. Directories, sockets, devices
+	// and named pipes are skipped — opening a pipe blocks until a writer appears,
+	// which would hang the export.
+	if !info.Mode().IsRegular() {
 		return nil
 	}
 	f, err := os.Open(path)

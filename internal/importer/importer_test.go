@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/config"
@@ -379,5 +380,97 @@ func TestImport_corruptArchiveErrors(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for a corrupt archive")
+	}
+}
+
+func TestImport_corruptArchiveErrorNamesTarArchive(t *testing.T) {
+	root := t.TempDir()
+	_, err := importer.Import(bytes.NewReader(bytes.Repeat([]byte("x"), 2048)), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for a corrupt archive")
+	}
+	if !strings.Contains(err.Error(), "not a tar archive") {
+		t.Errorf("error should say the file is not a tar archive, got %q", err)
+	}
+}
+
+func TestImport_compressedArchiveErrorNamesFormat(t *testing.T) {
+	cases := []struct {
+		name  string
+		magic []byte
+		want  string
+	}{
+		{"gzip", []byte{0x1f, 0x8b, 0x08, 0x00}, "gzip"},
+		{"zip", []byte("PK\x03\x04"), "zip"},
+		{"zstd", []byte{0x28, 0xb5, 0x2f, 0xfd}, "zstd"},
+		{"bzip2", []byte("BZh9"), "bzip2"},
+		{"xz", []byte{0xfd, '7', 'z', 'X', 'Z', 0x00}, "xz"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			data := append(append([]byte{}, tc.magic...), bytes.Repeat([]byte("x"), 1024)...)
+			_, err := importer.Import(bytes.NewReader(data), importer.Options{
+				Root:   root,
+				Config: config.DefaultsForRoot(root),
+			})
+			if err == nil {
+				t.Fatal("expected error for a compressed archive")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should name the %s format, got %q", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestImport_truncatedArchiveErrorSaysTruncated(t *testing.T) {
+	root := t.TempDir()
+	data := buildTar(t, map[string]string{
+		"config.yaml": "database:\n",
+		"tbuk.sqlite": strings.Repeat("d", 4096),
+	})
+	_, err := importer.Import(bytes.NewReader(data[:len(data)/2]), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for a truncated archive")
+	}
+	if !strings.Contains(err.Error(), "ends mid-entry") {
+		t.Errorf("error should say the archive ends mid-entry, got %q", err)
+	}
+}
+
+func TestImport_emptyArchiveErrors(t *testing.T) {
+	root := t.TempDir()
+	_, err := importer.Import(bytes.NewReader(nil), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for an empty archive")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error should say the archive is empty, got %q", err)
+	}
+}
+
+func TestImport_archiveWithoutEntriesErrors(t *testing.T) {
+	root := t.TempDir()
+	// A well-formed tar holding nothing restores nothing: report it rather than
+	// claiming a successful import of zero files.
+	_, err := importer.Import(bytes.NewReader(buildTar(t, nil)), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for an archive with no entries")
+	}
+	if !strings.Contains(err.Error(), "no entries") {
+		t.Errorf("error should say the archive has no entries, got %q", err)
 	}
 }

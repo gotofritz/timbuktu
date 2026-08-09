@@ -240,3 +240,80 @@ func TestCreate_fileWhereDirExpectedIsArchived(t *testing.T) {
 		t.Error("a file configured where a directory is expected should be archived as 'prompts'")
 	}
 }
+
+func TestVerify_acceptsArchiveFromCreate(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, []byte("db"))
+	writeFile(t, filepath.Join(cfg.Preprocess.OutputDir, "a.txt"), []byte("text"))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := export.Verify(bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestVerify_rejectsCorruptArchive(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, []byte("db"))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data := buf.Bytes()
+	// Flip a byte in the database entry's header block: the stored checksum no
+	// longer matches, which is exactly how a damaged archive presents itself.
+	// LastIndex: the exported config mentions the path too, in its body.
+	at := bytes.LastIndex(data, []byte("tbuk.sqlite"))
+	if at < 0 {
+		t.Fatal("archive missing the database entry")
+	}
+	data[at] ^= 0xff
+
+	if err := export.Verify(bytes.NewReader(data)); err == nil {
+		t.Fatal("expected Verify to reject a corrupt archive")
+	}
+}
+
+func TestVerify_rejectsTruncatedArchive(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 4096))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	half := buf.Bytes()[:buf.Len()/2]
+
+	if err := export.Verify(bytes.NewReader(half)); err == nil {
+		t.Fatal("expected Verify to reject a truncated archive")
+	}
+}
+
+func TestVerify_rejectsArchiveWithoutConfig(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: "tbuk.sqlite", Mode: 0o600, Size: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("db")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err := export.Verify(bytes.NewReader(buf.Bytes()))
+	if err == nil {
+		t.Fatal("expected Verify to reject an archive without config.yaml")
+	}
+	if !strings.Contains(err.Error(), export.ConfigName) {
+		t.Errorf("error should name the missing entry, got %q", err)
+	}
+}

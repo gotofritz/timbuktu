@@ -403,8 +403,18 @@ CLI seams (`internal/cli/export.go`), exported for unit testing like
   it; existing file or non-existent path → used as-is; non-existent path with a
   trailing separator → error.
 - `RunExport(in, out, cfg, root, target, force)` — prompts before overwriting an
-  existing target unless `force`; writes to a temp file in the destination dir
-  then renames into place (crash-safe, `0o600`).
+  existing target unless `force`; writes to a temp file in the destination dir,
+  re-reads it through `export.Verify` and only then renames into place
+  (crash-safe, `0o600`).
+
+Only regular files are archived: directories, sockets, devices and named pipes
+are skipped, so a FIFO left in a data folder cannot block the export.
+
+```go
+// Verify walks every header of a tar stream and reports a corrupt, truncated or
+// config-less archive. Header-only, so it is cheap on an io.Seeker.
+func Verify(r io.Reader) error
+```
 
 ## Import
 
@@ -442,6 +452,12 @@ CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
   archive's commented paths resolve to those same defaults). **Merge**
   (`--merge`): placement uses the loaded target `cfg` and the archive config is
   discarded, folding the snapshot into the existing KB's folders.
+
+Archive faults are named rather than surfaced raw: `Import` keeps the first 512
+bytes for format sniffing and reports an empty file, an entry-less archive, a
+mid-entry truncation, a corrupt entry (with its index), or a non-tar file —
+including the format it looks like (`gzip`, `zip`, `zstd`, `bzip2`, `xz`, a
+SQLite database). `RunImport` prefixes the archive path.
 
 Because the target may be a fresh machine, import works with no pre-existing
 config — the root `PersistentPreRunE` loads `DefaultsForRoot(root)`, which passes

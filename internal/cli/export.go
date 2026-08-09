@@ -96,6 +96,15 @@ func RunExport(in io.Reader, out io.Writer, cfg config.Config, root, target stri
 		_ = tmp.Close()
 		return err
 	}
+	// Read the archive back before publishing it: a damaged snapshot must fail
+	// here rather than at import time, when the source may be long gone.
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind temp archive: %w", err)
+	}
+	if err := export.Verify(tmp); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp archive: %w", err)
 	}
