@@ -7,6 +7,9 @@ package importer
 
 import (
 	"archive/tar"
+	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,15 +63,22 @@ type Result struct {
 // rejected.
 func Import(r io.Reader, opts Options) (Result, error) {
 	var res Result
-	tr := tar.NewReader(r)
+	// Keep the opening bytes: if the stream turns out not to be a tar archive,
+	// they identify what the user actually pointed us at.
+	br := bufio.NewReader(r)
+	head, _ := br.Peek(headSize) // a short read is itself diagnostic
+
+	tr := tar.NewReader(br)
+	entries := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return res, fmt.Errorf("read archive: %w", err)
+			return res, archiveError(err, entries, head)
 		}
+		entries++
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
@@ -82,7 +92,7 @@ func Import(r io.Reader, opts Options) (Result, error) {
 				continue // merge: keep the target's existing config
 			}
 			if err := writeFile(opts.ConfigDest, tr, opts.Force, &res); err != nil {
-				return res, err
+				return res, entryError(err, entries, head)
 			}
 			continue
 		}
@@ -92,10 +102,73 @@ func Import(r io.Reader, opts Options) (Result, error) {
 			dest = filepath.Join(opts.Root, filepath.FromSlash(name))
 		}
 		if err := writeFile(dest, tr, opts.Force, &res); err != nil {
-			return res, err
+			return res, entryError(err, entries, head)
 		}
 	}
+	if entries == 0 {
+		return res, archiveError(errNoEntries, entries, head)
+	}
 	return res, nil
+}
+
+// headSize is how many opening bytes are kept for format sniffing — one tar
+// block, enough to cover every magic number in formatOf.
+const headSize = 512
+
+var errNoEntries = errors.New("no entries")
+
+// archiveError turns a tar-level failure into a message that says what is wrong
+// with the file the user named. entries is how many entries were read before
+// the failure, and head the archive's opening bytes.
+func archiveError(err error, entries int, head []byte) error {
+	switch {
+	case errors.Is(err, errNoEntries) && len(head) == 0:
+		return fmt.Errorf("read archive: file is empty; re-run `tbuk export` to produce a new archive")
+	case errors.Is(err, errNoEntries):
+		return fmt.Errorf("read archive: archive contains no entries; re-run `tbuk export` to produce a new archive")
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return fmt.Errorf("read archive: archive ends mid-entry after %d complete entries; the copy or download is incomplete", entries)
+	case errors.Is(err, tar.ErrHeader) && entries == 0:
+		if format := formatOf(head); format != "" {
+			return fmt.Errorf("read archive: not a tar archive — the file looks like %s data; `tbuk export` writes an uncompressed .tar, so decompress it first: %w", format, err)
+		}
+		return fmt.Errorf("read archive: not a tar archive; expected a file written by `tbuk export`: %w", err)
+	case errors.Is(err, tar.ErrHeader):
+		return fmt.Errorf("read archive: archive is corrupt at entry %d; re-run `tbuk export` to produce a new archive: %w", entries+1, err)
+	default:
+		return fmt.Errorf("read archive: %w", err)
+	}
+}
+
+// entryError reports a failure while copying an entry out. A short read means
+// the archive itself is cut off; anything else is a problem with the
+// destination and is passed through unchanged.
+func entryError(err error, entries int, head []byte) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return archiveError(io.ErrUnexpectedEOF, entries-1, head)
+	}
+	return err
+}
+
+// formatOf names the archive format the opening bytes belong to, or "" when
+// they match no format tbuk recognises.
+func formatOf(head []byte) string {
+	for _, f := range []struct {
+		magic []byte
+		name  string
+	}{
+		{[]byte{0x1f, 0x8b}, "gzip"},
+		{[]byte("PK\x03\x04"), "zip"},
+		{[]byte{0x28, 0xb5, 0x2f, 0xfd}, "zstd"},
+		{[]byte("BZh"), "bzip2"},
+		{[]byte{0xfd, '7', 'z', 'X', 'Z', 0x00}, "xz"},
+		{[]byte("SQLite format 3\x00"), "SQLite database"},
+	} {
+		if bytes.HasPrefix(head, f.magic) {
+			return f.name
+		}
+	}
+	return ""
 }
 
 // destFor maps a slash-separated archive entry name to its destination under
