@@ -383,6 +383,30 @@ A template's `manifest.yaml` drives the LLM call: `model`, `temperature`, and
 `temperature` to use the provider default; set `temperature: 0` for a
 deterministic answer (an explicit `0` is honored, not treated as "unset").
 
+A template can also declare how its output should be repaired. Models hold a
+requested format for a while and then slide back into markdown lists, so
+`normalize` re-imposes the shape after the call instead of only asking for it:
+
+```yaml
+normalize:
+  filters: [strip_preamble, strip_fences, strip_list_markers, collapse_blank_lines]
+  records:
+    separator: "----"
+    fields: [lead, note, body]
+```
+
+`filters` are line-level cleanups (`strip_fences`, `strip_headings`,
+`strip_list_markers`, `strip_preamble`, `collapse_blank_lines`,
+`trim_trailing_space`); the optional `records` block rebuilds the output as
+separator-delimited records. `fields` names the positional line roles: `lead`
+(the first line), an optional `note` (a parenthesised second line, kept even
+when empty), and `body` (the rest, one item per line). Omit `fields` for the
+`[lead, body]` default. The builtin `anki` template uses both parts — its cards
+are records of `[lead, note, body]`. An unknown filter or field name fails when
+the template loads. Declaring a pipeline turns
+streaming off for that template, since the whole completion is needed before
+anything can be rewritten.
+
 ### Re-ingesting
 
 `tbuk ingest --force` and `tbuk update` replace a document's chunks atomically:

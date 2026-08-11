@@ -374,6 +374,54 @@ Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperat
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
+#### Output normalization
+
+Long generations drift away from whatever shape `system.tmpl` asked for —
+markdown lists come back, separators stop being emitted — and no prompt wording
+fixes it. A template therefore *declares* the shape it needs and
+`internal/normalize` enforces it on the completion:
+
+```yaml
+normalize:
+  filters: [strip_preamble, strip_fences, strip_list_markers, collapse_blank_lines]
+  records:
+    separator: "----"
+    fields: [lead, note, body]
+```
+
+```go
+type Config struct {
+    Filters []string       `yaml:"filters"`
+    Records *RecordsConfig `yaml:"records"`
+}
+
+func (c Config) Declared() bool   // template asked for normalization
+func (c Config) Validate() error  // unknown filter / empty separator
+func Apply(raw string, cfg Config) (string, error)
+func FilterNames() []string
+```
+
+`filters` are line-level cleanups run in the order listed (`strip_fences`,
+`strip_headings`, `strip_list_markers`, `strip_preamble`, `collapse_blank_lines`,
+`trim_trailing_space`). The optional `records` block is the one structured
+primitive, and it carries no template-specific vocabulary: `fields` lists
+positional line roles — `lead` (first line), optional `note` (a parenthesised
+second line), `body` (the rest, one item per line). It starts with `lead`, ends
+with `body`, and defaults to `[lead, body]`. The `note` field is emitted even
+when empty, since dropping it shifts the first body line into the note.
+Record boundaries come from separator lines where the model still emitted them,
+and otherwise from a lead line (trailing `?`) after a blank line; output with no
+question marks falls back to blank-line-delimited blocks.
+
+`Manifest.Normalize` carries the config and `loadManifest` validates it, so a
+misspelt filter or field name fails at template load rather than after a model
+call. `RunAsk`
+buffers the completion whenever a pipeline is declared — normalization rewrites
+whole records, so those templates cannot stream. Templates that declare nothing
+(`qa`, `brief`) are untouched, streaming included. The builtin `anki` template
+declares the pipeline above; `anki` is the only template that calls its records
+"cards", and that name lives in its prompt, not in the mechanism.
+
 ---
 
 ## Export

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/llm"
+	"github.com/gotofritz/timbuktu/internal/normalize"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
 	"github.com/gotofritz/timbuktu/internal/search"
@@ -217,7 +218,10 @@ func RunAsk(
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
-	if noStream {
+	// A declared normalize pipeline rewrites whole cards, so the completion has
+	// to be in hand before anything is printed — streaming is not available for
+	// those templates.
+	if noStream || manifest.Normalize.Declared() {
 		var sb strings.Builder
 		for tok := range tokenCh {
 			if tok.Error != nil {
@@ -228,7 +232,11 @@ func RunAsk(
 				break
 			}
 		}
-		_, _ = fmt.Fprint(out, sb.String())
+		text, err := normalize.Apply(sb.String(), manifest.Normalize)
+		if err != nil {
+			return fmt.Errorf("normalize output: %w", err)
+		}
+		_, _ = fmt.Fprint(out, text)
 	} else {
 		for tok := range tokenCh {
 			if tok.Error != nil {
