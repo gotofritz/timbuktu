@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/gotofritz/timbuktu/internal/normalize"
 )
 
 // RetrievalConfig controls how many chunks to fetch for this template.
@@ -28,6 +30,9 @@ type Manifest struct {
 	Retrieval   RetrievalConfig            `yaml:"retrieval"`
 	Variables   map[string]VariableDefault `yaml:"variables"`
 	Output      string                     `yaml:"output"`
+	// Normalize repairs model output that drifted from the shape system.tmpl
+	// asked for. Empty means the completion is passed through untouched.
+	Normalize normalize.Config `yaml:"normalize"`
 }
 
 func loadManifest(path string) (Manifest, error) {
@@ -38,6 +43,9 @@ func loadManifest(path string) (Manifest, error) {
 	var m Manifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return Manifest{}, fmt.Errorf("parse manifest %s: %w", path, err)
+	}
+	if err := m.Normalize.Validate(); err != nil {
+		return Manifest{}, fmt.Errorf("manifest %s: %w", path, err)
 	}
 	return m, nil
 }

@@ -555,3 +555,94 @@ func TestAskCommand_templateEditCommand(t *testing.T) {
 		t.Errorf("template edit did not run editor on manifest; content = %q", got)
 	}
 }
+
+// buildNormalizingTemplate returns a template that declares a normalize
+// pipeline, as the builtin anki template does.
+func buildNormalizingTemplate(t *testing.T) *prompts.Template {
+	t.Helper()
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `name: cards
+output: text
+normalize:
+  filters: [strip_preamble, strip_fences, strip_list_markers, collapse_blank_lines]
+  records:
+    separator: "----"
+    fields: [lead, note, body]
+`
+	for name, content := range map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   "Make cards.",
+		"user.tmpl":     "Topic: {{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tmpl, err := prompts.NewTemplateDir(dir).Load("cards")
+	if err != nil {
+		t.Fatalf("load template: %v", err)
+	}
+	return tmpl
+}
+
+// A template that declares a pipeline gets its completion repaired, whatever
+// the model streamed.
+func TestRunAsk_appliesTemplateNormalization(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out bytes.Buffer
+
+	drifted := []string{
+		"Here are the cards:\n\n",
+		"What is tokenization?\n- Converting text into tokens\n\n",
+		"What is decode?\n1. Generating tokens one at a time\n",
+	}
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		mockChat(drifted, nil),
+		tmpl,
+		"topic",
+		nil,
+		0,
+		false, // streaming requested: normalization must still buffer and repair
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+
+	want := "----\n\nWhat is tokenization?\n\nConverting text into tokens\n\n" +
+		"----\n\nWhat is decode?\n\nGenerating tokens one at a time\n"
+	if got := out.String(); !strings.Contains(got, want) {
+		t.Errorf("normalized output missing\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// Templates without a pipeline keep the model's output verbatim.
+func TestRunAsk_leavesOutputAloneWithoutPipeline(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out bytes.Buffer
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		mockChat([]string{"- a bullet\n- another\n"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(out.String(), "- a bullet") {
+		t.Errorf("output should be untouched, got %q", out.String())
+	}
+}

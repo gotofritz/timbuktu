@@ -3,10 +3,12 @@ package cli_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
+	"github.com/gotofritz/timbuktu/internal/prompts"
 )
 
 func runCLI(args ...string) error {
@@ -368,4 +370,79 @@ func TestInitCommand_templateIdempotent(t *testing.T) {
 	if string(data) != sentinel {
 		t.Error("second init overwrote existing template file")
 	}
+}
+
+// The builtin anki system prompt must model the card format it demands: the
+// separator opening every card, and line 2 as a note field that stays present
+// even when empty. Wording that called it "one blank line separating question
+// from answer" invited models to drop it, and single-card examples gave them no
+// separator to copy.
+func TestInitCommand_ankiSystemPromptDemonstratesCardFormat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".tbuk", "prompts", "anki", "system.tmpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(data)
+
+	if n := strings.Count(prompt, "\n----\n"); n < 4 {
+		t.Errorf("system prompt should open several example cards with the separator, found %d", n)
+	}
+	if strings.Contains(prompt, "unless source material requires") {
+		t.Error("the bullet ban must be unconditional: models take any escape hatch")
+	}
+	if strings.Contains(prompt, "markdown document") {
+		t.Error("asking for a markdown document invites the bullets and headings the format forbids")
+	}
+	// The note line is a field, not spacing: say so, and show a card that fills it.
+	for _, want := range []string{"note field", "Never drop", "Do not start any line with", "no blank lines"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("system prompt missing rule %q", want)
+		}
+	}
+	if !strings.Contains(prompt, "(LLM inference)\n") {
+		t.Error("examples should include a card whose note line is filled in")
+	}
+}
+
+// The anki template must declare its normalize pipeline: prompt wording alone
+// does not survive a long generation.
+func TestInitCommand_ankiManifestDeclaresNormalizePipeline(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+	tmpl, err := prompts.NewTemplateDir(filepath.Join(home, ".tbuk", "prompts")).Load("anki")
+	if err != nil {
+		t.Fatalf("load anki template: %v", err)
+	}
+	cfg := tmpl.Manifest().Normalize
+	if !cfg.Declared() {
+		t.Fatal("anki manifest should declare a normalize pipeline")
+	}
+	if cfg.Records == nil || cfg.Records.Separator != "----" {
+		t.Errorf("records config = %+v, want separator ----", cfg.Records)
+	}
+	if want := []string{"lead", "note", "body"}; !slices.Equal(cfg.Records.Fields, want) {
+		t.Errorf("record fields = %v, want %v", cfg.Records.Fields, want)
+	}
+	if !contains(cfg.Filters, "strip_list_markers") {
+		t.Errorf("filters %v should strip list markers", cfg.Filters)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
