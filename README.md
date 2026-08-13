@@ -325,8 +325,9 @@ into an existing knowledge base. Existing files are left untouched unless
 `--force` is passed, so an import never clobbers a live database by accident.
 
 Export re-reads the archive before putting it in place, so a damaged snapshot
-fails at export time rather than on restore. If import still rejects a file, the
-error says why — the file is empty, truncated part-way (an incomplete copy or a
+fails at export time rather than on restore, and import checks the same thing
+before writing anything — an incomplete archive is refused rather than restoring
+part of a knowledge base. If import rejects a file, the error says why — the file is empty, truncated part-way (an incomplete copy or a
 cloud folder that has not finished syncing), corrupt at a given entry, or not a
 tar at all. A `.tar.gz`/`.tgz` must be decompressed first: `tbuk export` writes
 an uncompressed `.tar`.

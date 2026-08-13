@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -515,5 +516,51 @@ func TestImport_shortNonTarFilesAreNotReportedAsTruncated(t *testing.T) {
 				t.Errorf("a short non-tar file is not a truncated archive, got %q", err)
 			}
 		})
+	}
+}
+
+// An archive cut at a block boundary reads back as a clean EOF, so the entries
+// that survived would import as if nothing were missing. When the reader can
+// seek, refuse it instead of restoring half a knowledge base.
+func TestImport_rejectsArchiveTruncatedAtBlockBoundary(t *testing.T) {
+	root := t.TempDir()
+	arc := buildTar(t, standardArchive())
+	stripped := arc[:len(arc)-1024] // drop the end-of-archive marker
+
+	res, err := importer.Import(bytes.NewReader(stripped), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected an error for an archive with no end-of-archive marker")
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("error should say the archive is truncated, got %q", err)
+	}
+	if len(res.Written) > 0 {
+		t.Errorf("nothing should be written from an incomplete archive, wrote %v", res.Written)
+	}
+}
+
+// nonSeeker hides the seek capability of the underlying reader.
+type nonSeeker struct{ r io.Reader }
+
+func (n nonSeeker) Read(p []byte) (int, error) { return n.r.Read(p) }
+
+// A stream that cannot seek keeps the old behaviour: entries are restored as
+// they arrive, since completeness cannot be established up front.
+func TestImport_nonSeekableStreamStillImports(t *testing.T) {
+	root := t.TempDir()
+	arc := buildTar(t, standardArchive())
+
+	res, err := importer.Import(nonSeeker{r: bytes.NewReader(arc)}, importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(res.Written) == 0 {
+		t.Error("expected entries to be written from a non-seekable stream")
 	}
 }

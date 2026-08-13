@@ -63,6 +63,25 @@ type Result struct {
 // rejected.
 func Import(r io.Reader, opts Options) (Result, error) {
 	var res Result
+	// A seekable source can be checked for completeness before a single file is
+	// written: an archive cut at a block boundary reads back as a clean EOF, and
+	// restoring the entries that survived would leave a knowledge base silently
+	// missing the rest. A stream that cannot seek is read as it arrives.
+	if rs, ok := r.(io.ReadSeeker); ok {
+		head, err := peekHead(rs)
+		if err != nil {
+			return res, fmt.Errorf("read archive: %w", err)
+		}
+		if n, err := export.CheckComplete(rs); err != nil {
+			// Same classification the streaming path uses: a stray .tar.gz is not
+			// a truncated archive, whatever the tar reader says.
+			return res, archiveError(err, n, head)
+		}
+		if _, err := rs.Seek(0, io.SeekStart); err != nil {
+			return res, fmt.Errorf("rewind archive: %w", err)
+		}
+	}
+
 	// Keep the opening bytes: if the stream turns out not to be a tar archive,
 	// they identify what the user actually pointed us at.
 	br := bufio.NewReader(r)
@@ -111,6 +130,19 @@ func Import(r io.Reader, opts Options) (Result, error) {
 	return res, nil
 }
 
+// peekHead reads the opening bytes used for format sniffing and rewinds.
+func peekHead(rs io.ReadSeeker) ([]byte, error) {
+	head := make([]byte, headSize)
+	n, err := io.ReadFull(rs, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return head[:n], nil
+}
+
 // headSize is how many opening bytes are kept for format sniffing — one tar
 // block, enough to cover every magic number in formatOf.
 const headSize = 512
@@ -133,6 +165,8 @@ func archiveError(err error, entries int, head []byte) error {
 		}
 	}
 	switch {
+	case errors.Is(err, export.ErrIncomplete):
+		return fmt.Errorf("read archive: %w; the copy or download is incomplete", err)
 	case errors.Is(err, io.ErrUnexpectedEOF):
 		return fmt.Errorf("read archive: archive ends mid-entry after %d complete entries; the copy or download is incomplete", entries)
 	case errors.Is(err, tar.ErrHeader):

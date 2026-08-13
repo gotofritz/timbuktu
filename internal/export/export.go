@@ -6,6 +6,7 @@ package export
 
 import (
 	"archive/tar"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -63,21 +64,28 @@ func Create(w io.Writer, cfg config.Config, root string) error {
 	return nil
 }
 
-// Verify reads r as a tar archive and reports whether it is a complete,
-// well-formed export: every header parses, no entry is truncated, and the
-// config entry is present.
+// blockSize is the tar block size; entry bodies are padded up to it, and an
+// archive is terminated by two zero blocks.
+const blockSize = 512
+
+// Verify reads rs as a tar archive and reports whether it is a complete,
+// well-formed export: CheckComplete passes and the config entry is present.
 //
-// Cost depends on what r turns out to be. archive/tar type-asserts its reader
-// for io.Seeker at run time, so an argument whose dynamic type can seek — an
-// *os.File, as RunExport passes — has its entry bodies skipped, and verifying a
-// multi-gigabyte archive costs little more than its headers. A reader that
-// cannot seek is streamed in full instead.
+// It takes an io.ReadSeeker rather than an io.Reader because archive/tar skips
+// entry bodies by seeking — verifying a multi-gigabyte archive costs little more
+// than reading its headers — and because completeness cannot be established
+// without knowing the file's length (see CheckComplete).
 //
 // Callers use it to catch a damaged archive at export time, before it is handed
 // to a user who would otherwise only discover the damage on import.
-func Verify(r io.Reader) error {
-	tr := tar.NewReader(r)
-	sawConfig := false
+func Verify(rs io.ReadSeeker) error {
+	if _, err := CheckComplete(rs); err != nil {
+		return fmt.Errorf("verify archive: %w", err)
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("verify archive: %w", err)
+	}
+	tr := tar.NewReader(rs)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -87,13 +95,63 @@ func Verify(r io.Reader) error {
 			return fmt.Errorf("verify archive: %w", err)
 		}
 		if hdr.Name == ConfigName {
-			sawConfig = true
+			return nil
 		}
 	}
-	if !sawConfig {
-		return fmt.Errorf("verify archive: missing %s entry", ConfigName)
+	return fmt.Errorf("verify archive: missing %s entry", ConfigName)
+}
+
+// ErrIncomplete reports an archive shorter than the entries it declares.
+var ErrIncomplete = errors.New("archive is truncated")
+
+// CheckComplete reports whether rs holds a whole tar archive: every header
+// parses, no entry body is cut short, and the file is long enough for the
+// entries it declares plus the two zero blocks that terminate a tar. It returns
+// how many entries were read, which callers use to say where a damaged archive
+// went wrong, and leaves the read position at the end of the stream.
+//
+// The last part is why the walk alone is not enough. A tar cut at a block
+// boundary — with its terminating blocks gone — reads back as a clean EOF,
+// indistinguishable from a complete archive, so the surviving entries would be
+// restored as if nothing were missing. Comparing the file's length against the
+// extent the headers declare is what catches it.
+func CheckComplete(rs io.ReadSeeker) (int, error) {
+	tr := tar.NewReader(rs)
+	entries := 0
+	var declared int64 // end offset of the furthest entry's padded body
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return entries, err
+		}
+		entries++
+		// Next leaves the stream at the start of this entry's body.
+		pos, err := rs.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return entries, err
+		}
+		if end := pos + padded(hdr.Size); end > declared {
+			declared = end
+		}
 	}
-	return nil
+
+	size, err := rs.Seek(0, io.SeekEnd)
+	if err != nil {
+		return entries, err
+	}
+	if want := declared + 2*blockSize; size < want {
+		return entries, fmt.Errorf("%w: archive is %d bytes but its entries and "+
+			"end-of-archive marker need %d", ErrIncomplete, size, want)
+	}
+	return entries, nil
+}
+
+// padded rounds an entry size up to a whole number of tar blocks.
+func padded(n int64) int64 {
+	return (n + blockSize - 1) / blockSize * blockSize
 }
 
 // archiveName maps a source path to its archive entry name: relative to root

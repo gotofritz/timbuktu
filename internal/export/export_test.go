@@ -359,3 +359,43 @@ func TestVerify_skipsEntryBodiesOnASeeker(t *testing.T) {
 		t.Errorf("Verify read %d of %d bytes; entry bodies should be seeked over", counter.read, len(archive))
 	}
 }
+
+// A tar ends with two zero blocks. Cut those off and the reader sees a clean
+// EOF at a block boundary, indistinguishable from a complete archive — so
+// Verify has to check the extent itself.
+func TestVerify_rejectsArchiveMissingEndOfArchiveMarker(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 1024)) // block-aligned
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data := buf.Bytes()
+	stripped := data[:len(data)-1024] // drop the two terminating zero blocks
+
+	if err := export.Verify(bytes.NewReader(stripped)); err == nil {
+		t.Fatal("expected Verify to reject an archive with no end-of-archive marker")
+	}
+}
+
+// Cutting inside the final entry's body must be rejected too, block-aligned or
+// not.
+func TestVerify_rejectsArchiveCutAtEntryBoundary(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 2048))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data := buf.Bytes()
+
+	for _, cut := range []int{1024, 1536, 2048} {
+		if err := export.Verify(bytes.NewReader(data[:len(data)-cut])); err == nil {
+			t.Errorf("expected Verify to reject an archive cut %d bytes short", cut)
+		}
+	}
+}

@@ -459,10 +459,22 @@ Only regular files are archived: directories, sockets, devices and named pipes
 are skipped, so a FIFO left in a data folder cannot block the export.
 
 ```go
-// Verify walks every header of a tar stream and reports a corrupt, truncated or
-// config-less archive. Header-only, so it is cheap on an io.Seeker.
-func Verify(r io.Reader) error
+// CheckComplete walks every header, then compares the file's length against the
+// extent those headers declare plus the two zero blocks that terminate a tar.
+// Returns how many entries were read. Header-only: bodies are seeked over.
+func CheckComplete(rs io.ReadSeeker) (int, error)
+
+// Verify is CheckComplete plus a config.yaml entry.
+func Verify(rs io.ReadSeeker) error
+
+var ErrIncomplete = errors.New("archive is truncated")
 ```
+
+The length comparison is the part the header walk cannot do on its own: a tar
+cut at a block boundary — its terminating zero blocks gone — reads back as a
+clean `io.EOF`, indistinguishable from a complete archive. A cut *inside* an
+entry body is caught by the walk itself, since `archive/tar` reads the last byte
+of each body it seeks over.
 
 ## Import
 
@@ -501,11 +513,20 @@ CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
   (`--merge`): placement uses the loaded target `cfg` and the archive config is
   discarded, folding the snapshot into the existing KB's folders.
 
+`Import` runs `export.CheckComplete` first when its reader is an `io.ReadSeeker`
+(as the CLI's `*os.File` is), so an incomplete archive is refused before a single
+file is written rather than restoring a silently partial knowledge base. A
+non-seekable stream keeps the old behaviour — completeness cannot be established
+up front — and is read as it arrives.
+
 Archive faults are named rather than surfaced raw: `Import` keeps the first 512
 bytes for format sniffing and reports an empty file, an entry-less archive, a
 mid-entry truncation, a corrupt entry (with its index), or a non-tar file —
 including the format it looks like (`gzip`, `zip`, `zstd`, `bzip2`, `xz`, a
-SQLite database). `RunImport` prefixes the archive path.
+SQLite database), or an archive shorter than the entries it declares. Failures
+on the first entry are classified before the generic cases, since a file too
+short to hold a tar header fails identically to a truncated archive.
+`RunImport` prefixes the archive path.
 
 Because the target may be a fresh machine, import works with no pre-existing
 config — the root `PersistentPreRunE` loads `DefaultsForRoot(root)`, which passes
