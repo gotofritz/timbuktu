@@ -953,12 +953,18 @@ tbuk import --merge ~/backups/kb.tar
 ```
 
 Import never overwrites files that already exist — so it won't clobber a live
-database — and reports how many it skipped. Pass `--force` when you really do
-want the archive's copies to win:
+database — and reports how many it skipped. Two flags let the archive's copies
+win, and they are separate because replacing your settings and replacing your
+documents are rarely the same decision:
 
 ```bash
-tbuk import --force ~/backups/kb.tar
+tbuk import --force-data ~/backups/kb.tar      # database, extracted text, raw archive, prompts
+tbuk import --force-config ~/backups/kb.tar    # adopt the archive's config.yaml, leave the data alone
+tbuk import --force-config --force-data ~/backups/kb.tar   # replace everything
 ```
+
+Neither flag is needed for a fresh knowledge base: anything that does not exist
+yet is written either way.
 
 If you need to pin a folder to a fixed location, extract the archive and
 uncomment that path in `config.yaml`, then import with `--merge` so that config
