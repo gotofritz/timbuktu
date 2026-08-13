@@ -410,7 +410,8 @@ second line), `body` (the rest, one item per line). It starts with `lead`, ends
 with `body`, and defaults to `[lead, body]`. The `note` field is emitted even
 when empty, since dropping it shifts the first body line into the note.
 Record boundaries come from the declared `separator` where the model still
-emitted it, and otherwise from a lead line (trailing `?`) after a blank line;
+emitted it — whatever follows one opens a record, lead-shaped or not — and
+otherwise from a lead line (trailing `?`) after a blank line;
 output with no question marks falls back to blank-line-delimited blocks.
 Anything ahead of the first separator or question line is chatter ("Here are the
 cards.") and is dropped — but only in that question-mark mode, since with no

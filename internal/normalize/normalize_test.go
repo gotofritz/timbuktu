@@ -373,3 +373,22 @@ func TestApply_keepsFirstRecordWhenNoQuestionsExist(t *testing.T) {
 		t.Errorf("Apply() = %q, want %q", got, want)
 	}
 }
+
+// An explicit separator is the strongest boundary there is: whatever follows it
+// opens a new record, even a lead that is not phrased as a question while other
+// records in the same output are.
+func TestApply_separatorStartsARecordWhateverTheLeadLooksLike(t *testing.T) {
+	cfg := normalize.Config{Records: &normalize.RecordsConfig{Separator: "----"}}
+	in := "----\n\nWhat is tokenization?\nConverting text into tokens\n\n" +
+		"----\n\nGlossary term\nIts meaning\n"
+	want := "----\n\nWhat is tokenization?\n\nConverting text into tokens\n\n" +
+		"----\n\nGlossary term\n\nIts meaning\n"
+
+	got, err := normalize.Apply(in, cfg)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got != want {
+		t.Errorf("Apply() mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}

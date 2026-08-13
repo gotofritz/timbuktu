@@ -91,7 +91,10 @@ func Import(r io.Reader, opts Options) (Result, error) {
 	// Keep the opening bytes: if the stream turns out not to be a tar archive,
 	// they identify what the user actually pointed us at.
 	br := bufio.NewReader(r)
-	head, _ := br.Peek(headSize) // a short read is itself diagnostic
+	peeked, _ := br.Peek(headSize) // a short read is itself diagnostic
+	// Peek returns a window into the reader's own buffer, which later reads
+	// refill; these bytes outlive those reads, so they have to be a copy.
+	head := append([]byte(nil), peeked...)
 
 	tr := tar.NewReader(br)
 	entries := 0

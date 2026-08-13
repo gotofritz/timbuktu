@@ -266,13 +266,17 @@ func buildRecords(lines []string, cfg RecordsConfig) string {
 	rulesToo := separatorRe.MatchString(sep)
 
 	var records []record
-	blank := true // the start of the input behaves like a boundary
+	blank := true  // the start of the input behaves like a boundary
+	forced := true // a separator (or the start of input) opens the next record
 	for _, ln := range lines {
 		text := strings.TrimRight(ln, " \t")
 		switch {
 		case strings.TrimSpace(text) == sep || (rulesToo && separatorRe.MatchString(text)):
 			records = closeEmpty(records)
 			blank = true
+			// An explicit separator is the strongest boundary in the input: what
+			// follows opens a record whether or not it looks like a lead line.
+			forced = true
 			continue
 		case strings.TrimSpace(text) == "":
 			blank = true
@@ -280,7 +284,7 @@ func buildRecords(lines []string, cfg RecordsConfig) string {
 		}
 
 		switch {
-		case len(records) == 0 || (blank && startsRecord(records[len(records)-1], text, questionMode)):
+		case forced || len(records) == 0 || (blank && startsRecord(records[len(records)-1], text, questionMode)):
 			records = append(records, record{lead: text})
 		case noteField && records[len(records)-1].note == "" &&
 			len(records[len(records)-1].body) == 0 && noteRe.MatchString(text):
@@ -290,6 +294,7 @@ func buildRecords(lines []string, cfg RecordsConfig) string {
 			last.body = append(last.body, text)
 		}
 		blank = false
+		forced = false
 	}
 
 	var sb strings.Builder
