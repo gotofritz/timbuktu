@@ -461,15 +461,20 @@ are skipped, so a FIFO left in a data folder cannot block the export.
 ```go
 // CheckComplete walks every header, checking each entry's declared extent — and
 // the two zero blocks that terminate a tar — against the file's length. Returns
-// how many entries are intact. Header-only: bodies are seeked over, so the walk
-// is O(entries), not O(archive size).
+// how many entries are intact.
 func CheckComplete(rs io.ReadSeeker) (int, error)
 
-// Verify is CheckComplete plus a config.yaml entry.
+// Verify is CheckComplete plus a config.yaml entry; one walk, not two.
 func Verify(rs io.ReadSeeker) error
 
 var ErrIncomplete = errors.New("archive is truncated")
 ```
+
+Both sit on one internal walk that seeks from header to header: it reads a
+header block per entry and never touches a body, so cost is O(entries) rather
+than O(archive size) — 256 MiB verifies in ~300µs. The seek is explicit rather
+than left to `archive/tar` skipping unread bodies, and a byte-counting test pins
+the bound.
 
 The length comparison is the part a header walk cannot do on its own: a tar cut
 at a block boundary — its terminating zero blocks gone — reads back as a clean

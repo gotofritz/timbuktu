@@ -358,7 +358,7 @@ func TestCheckComplete_andVerify_skipEntryBodiesOnASeeker(t *testing.T) {
 
 	// A few blocks per entry, not megabytes: headers, the config body, and the
 	// single byte archive/tar reads at the end of each body it seeks past.
-	const budget = 64 << 10
+	const budget = 16 << 10
 
 	counter := &countingSeeker{rs: bytes.NewReader(archive)}
 	if _, err := export.CheckComplete(counter); err != nil {

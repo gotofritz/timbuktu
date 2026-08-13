@@ -71,34 +71,26 @@ const blockSize = 512
 // Verify reads rs as a tar archive and reports whether it is a complete,
 // well-formed export: CheckComplete passes and the config entry is present.
 //
-// It takes an io.ReadSeeker rather than an io.Reader because archive/tar skips
-// entry bodies by seeking — verifying a multi-gigabyte archive costs little more
-// than reading its headers — and because completeness cannot be established
-// without knowing the file's length (see CheckComplete).
+// It takes an io.ReadSeeker rather than an io.Reader because the walk seeks from
+// header to header — verifying a multi-gigabyte archive costs little more than
+// reading its headers — and because completeness cannot be established without
+// knowing the file's length (see CheckComplete).
 //
 // Callers use it to catch a damaged archive at export time, before it is handed
 // to a user who would otherwise only discover the damage on import.
 func Verify(rs io.ReadSeeker) error {
-	if _, err := CheckComplete(rs); err != nil {
-		return fmt.Errorf("verify archive: %w", err)
-	}
-	if _, err := rs.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("verify archive: %w", err)
-	}
-	tr := tar.NewReader(rs)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("verify archive: %w", err)
-		}
+	sawConfig := false
+	if _, err := walkHeaders(rs, func(hdr *tar.Header) {
 		if hdr.Name == ConfigName {
-			return nil
+			sawConfig = true
 		}
+	}); err != nil {
+		return fmt.Errorf("verify archive: %w", err)
 	}
-	return fmt.Errorf("verify archive: missing %s entry", ConfigName)
+	if !sawConfig {
+		return fmt.Errorf("verify archive: missing %s entry", ConfigName)
+	}
+	return nil
 }
 
 // ErrIncomplete reports an archive shorter than the entries it declares.
@@ -110,46 +102,61 @@ var ErrIncomplete = errors.New("archive is truncated")
 // which callers use to say where a damaged archive went wrong.
 //
 // Each entry's extent is checked against the file's length rather than inferred
-// from a read failure, which keeps the count honest — an entry whose body is cut
-// short is not counted — and keeps the walk O(entries): archive/tar seeks over
-// bodies, so nothing but headers is read.
+// from a read failure, which keeps the count honest: an entry whose body is cut
+// short is not counted. Bodies are never read — the walk seeks from one header
+// to the next — so its cost is O(entries), not O(archive size).
 //
-// The last part is why the walk alone is not enough. A tar cut at a block
-// boundary — with its terminating blocks gone — reads back as a clean EOF,
-// indistinguishable from a complete archive, so the surviving entries would be
-// restored as if nothing were missing. Comparing the file's length against the
-// extent the headers declare is what catches it.
+// The length comparison is also what catches the case a walk cannot: a tar cut
+// at a block boundary, with its terminating blocks gone, reads back as a clean
+// EOF, indistinguishable from a complete archive, and its surviving entries
+// would be restored as if nothing were missing.
 func CheckComplete(rs io.ReadSeeker) (int, error) {
+	return walkHeaders(rs, nil)
+}
+
+// walkHeaders visits every entry header, checking as it goes that the archive
+// is long enough to hold each declared body and the end-of-archive marker. It
+// returns the number of intact entries. visit may be nil.
+func walkHeaders(rs io.ReadSeeker, visit func(*tar.Header)) (int, error) {
 	size, err := rs.Seek(0, io.SeekEnd)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := rs.Seek(0, io.SeekStart); err != nil {
-		return 0, err
-	}
 
-	tr := tar.NewReader(rs)
 	entries := 0
+	var offset int64 // start of the next header block
 	for {
-		hdr, err := tr.Next()
+		if _, err := rs.Seek(offset, io.SeekStart); err != nil {
+			return entries, err
+		}
+		// A fresh reader per header. It parses this header — including any PAX or
+		// GNU extension blocks that precede it — and stops at the body, so the
+		// walk reads header blocks and nothing else. Seeking to the next header
+		// ourselves is what makes that true: reusing one reader would leave it to
+		// skip the body on the way to the next entry.
+		hdr, err := tar.NewReader(rs).Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return entries, err
 		}
-		// Next leaves the stream at the start of this entry's body. Check the
-		// body fits before counting the entry: the count tells the user how much
-		// of their archive is intact, so an entry cut short is not one of them.
-		pos, err := rs.Seek(0, io.SeekCurrent)
+		body, err := rs.Seek(0, io.SeekCurrent)
 		if err != nil {
 			return entries, err
 		}
-		if end := pos + padded(hdr.Size); end+2*blockSize > size {
+		// Check the body fits before counting the entry: the count tells the user
+		// how much of the archive is intact, so an entry cut short is not one.
+		end := body + padded(hdr.Size)
+		if end+2*blockSize > size {
 			return entries, fmt.Errorf("%w: %d bytes present, %d needed for %q and the "+
 				"end-of-archive marker", ErrIncomplete, size, end+2*blockSize, hdr.Name)
 		}
+		if visit != nil {
+			visit(hdr)
+		}
 		entries++
+		offset = end
 	}
 	return entries, nil
 }
