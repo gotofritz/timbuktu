@@ -317,3 +317,45 @@ func TestVerify_rejectsArchiveWithoutConfig(t *testing.T) {
 		t.Errorf("error should name the missing entry, got %q", err)
 	}
 }
+
+// countingSeeker reports how many bytes were actually read, so the test can
+// tell a header-only walk from a full re-read.
+type countingSeeker struct {
+	rs   io.ReadSeeker
+	read int64
+}
+
+func (c *countingSeeker) Read(p []byte) (int, error) {
+	n, err := c.rs.Read(p)
+	c.read += int64(n)
+	return n, err
+}
+
+func (c *countingSeeker) Seek(offset int64, whence int) (int64, error) {
+	return c.rs.Seek(offset, whence)
+}
+
+// Verify must not stream entry bodies when the reader can seek: archive/tar
+// skips over them, which is what keeps verification cheap on a large export.
+func TestVerify_skipsEntryBodiesOnASeeker(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 1<<20))
+	writeFile(t, filepath.Join(cfg.Preprocess.OutputDir, "a.txt"), bytes.Repeat([]byte("t"), 1<<20))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	archive := buf.Bytes()
+
+	counter := &countingSeeker{rs: bytes.NewReader(archive)}
+	if err := export.Verify(counter); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	// Headers, the small config entry and a probe byte per skipped body only —
+	// nothing close to the 2 MiB of file data in the archive.
+	if counter.read > int64(len(archive))/4 {
+		t.Errorf("Verify read %d of %d bytes; entry bodies should be seeked over", counter.read, len(archive))
+	}
+}

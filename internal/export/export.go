@@ -65,11 +65,16 @@ func Create(w io.Writer, cfg config.Config, root string) error {
 
 // Verify reads r as a tar archive and reports whether it is a complete,
 // well-formed export: every header parses, no entry is truncated, and the
-// config entry is present. It walks headers only — on an io.Seeker (such as an
-// open file) entry bodies are skipped rather than read — so verifying a
-// multi-gigabyte archive costs little. Callers use it to catch a damaged
-// archive at export time, before it is handed to a user who would otherwise
-// only discover the damage on import.
+// config entry is present.
+//
+// Cost depends on what r turns out to be. archive/tar type-asserts its reader
+// for io.Seeker at run time, so an argument whose dynamic type can seek — an
+// *os.File, as RunExport passes — has its entry bodies skipped, and verifying a
+// multi-gigabyte archive costs little more than its headers. A reader that
+// cannot seek is streamed in full instead.
+//
+// Callers use it to catch a damaged archive at export time, before it is handed
+// to a user who would otherwise only discover the damage on import.
 func Verify(r io.Reader) error {
 	tr := tar.NewReader(r)
 	sawConfig := false

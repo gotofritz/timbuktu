@@ -3,6 +3,7 @@ package importer_test
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -472,5 +473,47 @@ func TestImport_archiveWithoutEntriesErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no entries") {
 		t.Errorf("error should say the archive has no entries, got %q", err)
+	}
+}
+
+// A file too small to hold a tar header must not be reported as a truncated
+// archive: the tar reader returns io.ErrUnexpectedEOF for those too, but the
+// user's file is a different kind of thing entirely.
+func TestImport_shortNonTarFilesAreNotReportedAsTruncated(t *testing.T) {
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{name: "short gzip names the format", data: gz.Bytes(), want: "gzip"},
+		{name: "short text says it is too short", data: []byte("hello\n"), want: "too short"},
+		{name: "short sqlite names the format", data: []byte("SQLite format 3\x00short"), want: "SQLite"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, err := importer.Import(bytes.NewReader(tc.data), importer.Options{
+				Root:   root,
+				Config: config.DefaultsForRoot(root),
+			})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should mention %q, got %q", tc.want, err)
+			}
+			if strings.Contains(err.Error(), "ends mid-entry") {
+				t.Errorf("a short non-tar file is not a truncated archive, got %q", err)
+			}
+		})
 	}
 }

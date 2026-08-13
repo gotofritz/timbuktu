@@ -120,24 +120,48 @@ var errNoEntries = errors.New("no entries")
 // archiveError turns a tar-level failure into a message that says what is wrong
 // with the file the user named. entries is how many entries were read before
 // the failure, and head the archive's opening bytes.
+//
+// Nothing about the file is established yet while entries is 0, so those cases
+// are classified first: a file shorter than one tar block fails with
+// io.ErrUnexpectedEOF exactly as a truncated archive does, and calling a stray
+// .tar.gz "truncated" sends the user looking for a broken copy that does not
+// exist.
 func archiveError(err error, entries int, head []byte) error {
+	if entries == 0 {
+		if e := openingError(err, head); e != nil {
+			return e
+		}
+	}
 	switch {
-	case errors.Is(err, errNoEntries) && len(head) == 0:
-		return fmt.Errorf("read archive: file is empty; re-run `tbuk export` to produce a new archive")
-	case errors.Is(err, errNoEntries):
-		return fmt.Errorf("read archive: archive contains no entries; re-run `tbuk export` to produce a new archive")
 	case errors.Is(err, io.ErrUnexpectedEOF):
 		return fmt.Errorf("read archive: archive ends mid-entry after %d complete entries; the copy or download is incomplete", entries)
-	case errors.Is(err, tar.ErrHeader) && entries == 0:
-		if format := formatOf(head); format != "" {
-			return fmt.Errorf("read archive: not a tar archive — the file looks like %s data; `tbuk export` writes an uncompressed .tar, so decompress it first: %w", format, err)
-		}
-		return fmt.Errorf("read archive: not a tar archive; expected a file written by `tbuk export`: %w", err)
 	case errors.Is(err, tar.ErrHeader):
 		return fmt.Errorf("read archive: archive is corrupt at entry %d; re-run `tbuk export` to produce a new archive: %w", entries+1, err)
 	default:
 		return fmt.Errorf("read archive: %w", err)
 	}
+}
+
+// openingError classifies a failure on the archive's very first entry, where
+// the file may well not be a tar archive at all. It returns nil when the
+// failure is better described by the generic cases.
+func openingError(err error, head []byte) error {
+	switch {
+	case len(head) == 0:
+		return fmt.Errorf("read archive: file is empty; re-run `tbuk export` to produce a new archive")
+	case errors.Is(err, errNoEntries):
+		return fmt.Errorf("read archive: archive contains no entries; re-run `tbuk export` to produce a new archive")
+	}
+	if format := formatOf(head); format != "" {
+		return fmt.Errorf("read archive: not a tar archive — the file looks like %s data; `tbuk export` writes an uncompressed .tar, so decompress it first", format)
+	}
+	if len(head) < headSize {
+		return fmt.Errorf("read archive: not a tar archive — the file is %d bytes, too short to hold a tar header; expected a file written by `tbuk export`", len(head))
+	}
+	if errors.Is(err, tar.ErrHeader) {
+		return fmt.Errorf("read archive: not a tar archive; expected a file written by `tbuk export`: %w", err)
+	}
+	return nil
 }
 
 // entryError reports a failure while copying an entry out. A short read means
