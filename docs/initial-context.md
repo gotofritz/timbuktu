@@ -459,9 +459,10 @@ Only regular files are archived: directories, sockets, devices and named pipes
 are skipped, so a FIFO left in a data folder cannot block the export.
 
 ```go
-// CheckComplete walks every header, then compares the file's length against the
-// extent those headers declare plus the two zero blocks that terminate a tar.
-// Returns how many entries were read. Header-only: bodies are seeked over.
+// CheckComplete walks every header, checking each entry's declared extent — and
+// the two zero blocks that terminate a tar — against the file's length. Returns
+// how many entries are intact. Header-only: bodies are seeked over, so the walk
+// is O(entries), not O(archive size).
 func CheckComplete(rs io.ReadSeeker) (int, error)
 
 // Verify is CheckComplete plus a config.yaml entry.
@@ -470,11 +471,14 @@ func Verify(rs io.ReadSeeker) error
 var ErrIncomplete = errors.New("archive is truncated")
 ```
 
-The length comparison is the part the header walk cannot do on its own: a tar
-cut at a block boundary — its terminating zero blocks gone — reads back as a
-clean `io.EOF`, indistinguishable from a complete archive. A cut *inside* an
-entry body is caught by the walk itself, since `archive/tar` reads the last byte
-of each body it seeks over.
+The length comparison is the part a header walk cannot do on its own: a tar cut
+at a block boundary — its terminating zero blocks gone — reads back as a clean
+`io.EOF`, indistinguishable from a complete archive. Checking extents rather
+than waiting for a read to fail also keeps the entry count honest: an entry
+whose body is cut short is not counted among the intact ones, so the error can
+name it. The streaming import path tracks the same thing by remembering whether
+an entry's body was consumed, since `tar.Next` swallows an unread body on its
+way to the next header.
 
 ## Import
 

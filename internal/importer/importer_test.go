@@ -435,8 +435,24 @@ func TestImport_truncatedArchiveErrorSaysTruncated(t *testing.T) {
 		"config.yaml": "database:\n",
 		"tbuk.sqlite": strings.Repeat("d", 4096),
 	})
-	_, err := importer.Import(bytes.NewReader(data[:len(data)/2]), importer.Options{
+	half := data[:len(data)/2]
+
+	// Seekable: the pre-flight compares extents, so it can name the entry that
+	// does not fit.
+	_, err := importer.Import(bytes.NewReader(half), importer.Options{
 		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for a truncated archive")
+	}
+	if !strings.Contains(err.Error(), "truncated") || !strings.Contains(err.Error(), "tbuk.sqlite") {
+		t.Errorf("error should say which entry is truncated, got %q", err)
+	}
+
+	// Non-seekable: the read loop reports how far it got instead.
+	_, err = importer.Import(nonSeeker{r: bytes.NewReader(half)}, importer.Options{
+		Root:   t.TempDir(),
 		Config: config.DefaultsForRoot(root),
 	})
 	if err == nil {
@@ -562,5 +578,34 @@ func TestImport_nonSeekableStreamStillImports(t *testing.T) {
 	}
 	if len(res.Written) == 0 {
 		t.Error("expected entries to be written from a non-seekable stream")
+	}
+}
+
+// On a non-seekable stream the count comes from the read loop. An entry whose
+// body is skipped (no --force) and then turns out to be truncated must not be
+// counted as complete either.
+func TestImport_streamingCountExcludesTheTruncatedEntry(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "tbuk.sqlite")
+	if err := os.WriteFile(dbPath, []byte("OLD"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// tbuk.sqlite sorts after config.yaml, so it is entry 2 and gets skipped
+	// because it already exists; cut inside its body.
+	arc := buildTar(t, map[string]string{
+		"config.yaml": "llm:\n",
+		"tbuk.sqlite": strings.Repeat("d", 4096),
+	})
+	cut := len(arc) - 1024 - 2048 // inside the database body
+
+	_, err := importer.Import(nonSeeker{r: bytes.NewReader(arc[:cut])}, importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected an error for a truncated archive")
+	}
+	if !strings.Contains(err.Error(), "after 1 complete") {
+		t.Errorf("only config.yaml is complete, got %q", err)
 	}
 }

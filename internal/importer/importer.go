@@ -89,15 +89,23 @@ func Import(r io.Reader, opts Options) (Result, error) {
 
 	tr := tar.NewReader(br)
 	entries := 0
+	// Set while an entry's body has been left unread: tar.Next consumes it on the
+	// way to the next header, so a failure there belongs to that entry, which is
+	// then not one of the complete ones.
+	bodyPending := false
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			if bodyPending && errors.Is(err, io.ErrUnexpectedEOF) {
+				entries--
+			}
 			return res, archiveError(err, entries, head)
 		}
 		entries++
+		bodyPending = true
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
@@ -110,9 +118,11 @@ func Import(r io.Reader, opts Options) (Result, error) {
 			if opts.ConfigDest == "" {
 				continue // merge: keep the target's existing config
 			}
-			if err := writeFile(opts.ConfigDest, tr, opts.Force, &res); err != nil {
+			consumed, err := writeFile(opts.ConfigDest, tr, opts.Force, &res)
+			if err != nil {
 				return res, entryError(err, entries, head)
 			}
+			bodyPending = !consumed
 			continue
 		}
 
@@ -120,9 +130,11 @@ func Import(r io.Reader, opts Options) (Result, error) {
 		if !ok {
 			dest = filepath.Join(opts.Root, filepath.FromSlash(name))
 		}
-		if err := writeFile(dest, tr, opts.Force, &res); err != nil {
+		consumed, err := writeFile(dest, tr, opts.Force, &res)
+		if err != nil {
 			return res, entryError(err, entries, head)
 		}
+		bodyPending = !consumed
 	}
 	if entries == 0 {
 		return res, archiveError(errNoEntries, entries, head)
@@ -276,31 +288,33 @@ func safeEntryName(name string) bool {
 
 // writeFile copies the current archive entry to dest, creating parent dirs. An
 // existing dest is overwritten only when force is set; otherwise it is left
-// intact and recorded as skipped. Written files are owner-only (0o600).
-func writeFile(dest string, r io.Reader, force bool, res *Result) error {
+// intact and recorded as skipped. Written files are owner-only (0o600). The
+// bool reports whether the entry's body was read, which the caller needs to
+// attribute a later short read to the right entry.
+func writeFile(dest string, r io.Reader, force bool, res *Result) (bool, error) {
 	if !force {
 		switch _, err := os.Stat(dest); {
 		case err == nil:
 			res.Skipped = append(res.Skipped, dest)
-			return nil
+			return false, nil
 		case !os.IsNotExist(err):
-			return fmt.Errorf("stat %s: %w", dest, err)
+			return false, fmt.Errorf("stat %s: %w", dest, err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-		return fmt.Errorf("create dir for %s: %w", dest, err)
+		return false, fmt.Errorf("create dir for %s: %w", dest, err)
 	}
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", dest, err)
+		return false, fmt.Errorf("create %s: %w", dest, err)
 	}
 	if _, err := io.Copy(f, r); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("write %s: %w", dest, err)
+		return true, fmt.Errorf("write %s: %w", dest, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", dest, err)
+		return true, fmt.Errorf("close %s: %w", dest, err)
 	}
 	res.Written = append(res.Written, dest)
-	return nil
+	return true, nil
 }

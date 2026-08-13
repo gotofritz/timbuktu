@@ -105,10 +105,14 @@ func Verify(rs io.ReadSeeker) error {
 var ErrIncomplete = errors.New("archive is truncated")
 
 // CheckComplete reports whether rs holds a whole tar archive: every header
-// parses, no entry body is cut short, and the file is long enough for the
-// entries it declares plus the two zero blocks that terminate a tar. It returns
-// how many entries were read, which callers use to say where a damaged archive
-// went wrong, and leaves the read position at the end of the stream.
+// parses, and the file is long enough for each entry body it declares plus the
+// two zero blocks that terminate a tar. It returns how many entries are intact,
+// which callers use to say where a damaged archive went wrong.
+//
+// Each entry's extent is checked against the file's length rather than inferred
+// from a read failure, which keeps the count honest — an entry whose body is cut
+// short is not counted — and keeps the walk O(entries): archive/tar seeks over
+// bodies, so nothing but headers is read.
 //
 // The last part is why the walk alone is not enough. A tar cut at a block
 // boundary — with its terminating blocks gone — reads back as a clean EOF,
@@ -116,9 +120,16 @@ var ErrIncomplete = errors.New("archive is truncated")
 // restored as if nothing were missing. Comparing the file's length against the
 // extent the headers declare is what catches it.
 func CheckComplete(rs io.ReadSeeker) (int, error) {
+	size, err := rs.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return 0, err
+	}
+
 	tr := tar.NewReader(rs)
 	entries := 0
-	var declared int64 // end offset of the furthest entry's padded body
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -127,24 +138,18 @@ func CheckComplete(rs io.ReadSeeker) (int, error) {
 		if err != nil {
 			return entries, err
 		}
-		entries++
-		// Next leaves the stream at the start of this entry's body.
+		// Next leaves the stream at the start of this entry's body. Check the
+		// body fits before counting the entry: the count tells the user how much
+		// of their archive is intact, so an entry cut short is not one of them.
 		pos, err := rs.Seek(0, io.SeekCurrent)
 		if err != nil {
 			return entries, err
 		}
-		if end := pos + padded(hdr.Size); end > declared {
-			declared = end
+		if end := pos + padded(hdr.Size); end+2*blockSize > size {
+			return entries, fmt.Errorf("%w: %d bytes present, %d needed for %q and the "+
+				"end-of-archive marker", ErrIncomplete, size, end+2*blockSize, hdr.Name)
 		}
-	}
-
-	size, err := rs.Seek(0, io.SeekEnd)
-	if err != nil {
-		return entries, err
-	}
-	if want := declared + 2*blockSize; size < want {
-		return entries, fmt.Errorf("%w: archive is %d bytes but its entries and "+
-			"end-of-archive marker need %d", ErrIncomplete, size, want)
+		entries++
 	}
 	return entries, nil
 }

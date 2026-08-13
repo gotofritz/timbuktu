@@ -335,28 +335,45 @@ func (c *countingSeeker) Seek(offset int64, whence int) (int64, error) {
 	return c.rs.Seek(offset, whence)
 }
 
-// Verify must not stream entry bodies when the reader can seek: archive/tar
-// skips over them, which is what keeps verification cheap on a large export.
-func TestVerify_skipsEntryBodiesOnASeeker(t *testing.T) {
+// Neither entry point may stream entry bodies when the reader can seek:
+// archive/tar skips over them, which is what keeps the walk O(entries) rather
+// than O(archive size).
+func TestCheckComplete_andVerify_skipEntryBodiesOnASeeker(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.DefaultsForRoot(root)
-	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 1<<20))
-	writeFile(t, filepath.Join(cfg.Preprocess.OutputDir, "a.txt"), bytes.Repeat([]byte("t"), 1<<20))
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 4<<20))
+	for i := range 8 {
+		writeFile(t, filepath.Join(cfg.Preprocess.OutputDir, string(rune('a'+i))+".txt"),
+			bytes.Repeat([]byte("t"), 512<<10))
+	}
 
 	var buf bytes.Buffer
 	if err := export.Create(&buf, cfg, root); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	archive := buf.Bytes()
+	if len(archive) < 8<<20 {
+		t.Fatalf("test needs a multi-megabyte archive, got %d bytes", len(archive))
+	}
+
+	// A few blocks per entry, not megabytes: headers, the config body, and the
+	// single byte archive/tar reads at the end of each body it seeks past.
+	const budget = 64 << 10
 
 	counter := &countingSeeker{rs: bytes.NewReader(archive)}
+	if _, err := export.CheckComplete(counter); err != nil {
+		t.Fatalf("CheckComplete: %v", err)
+	}
+	if counter.read > budget {
+		t.Errorf("CheckComplete read %d of %d bytes; bodies should be seeked over", counter.read, len(archive))
+	}
+
+	counter = &countingSeeker{rs: bytes.NewReader(archive)}
 	if err := export.Verify(counter); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	// Headers, the small config entry and a probe byte per skipped body only —
-	// nothing close to the 2 MiB of file data in the archive.
-	if counter.read > int64(len(archive))/4 {
-		t.Errorf("Verify read %d of %d bytes; entry bodies should be seeked over", counter.read, len(archive))
+	if counter.read > budget {
+		t.Errorf("Verify read %d of %d bytes; bodies should be seeked over", counter.read, len(archive))
 	}
 }
 
@@ -397,5 +414,57 @@ func TestVerify_rejectsArchiveCutAtEntryBoundary(t *testing.T) {
 		if err := export.Verify(bytes.NewReader(data[:len(data)-cut])); err == nil {
 			t.Errorf("expected Verify to reject an archive cut %d bytes short", cut)
 		}
+	}
+}
+
+// The entry count is what callers use to tell the user where the damage
+// starts, so an entry whose body is cut short must not be counted as complete.
+func TestCheckComplete_countsOnlyWholeEntries(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 4096))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data := buf.Bytes()
+
+	// config.yaml is entry 1 and the database entry 2; cut inside the database
+	// body, leaving only the first entry whole.
+	dbHeader := bytes.LastIndex(data, []byte("tbuk.sqlite"))
+	if dbHeader < 0 {
+		t.Fatal("archive missing the database entry")
+	}
+	cut := dbHeader + blockSizeForTest + 1024 // header + part of the body
+
+	n, err := export.CheckComplete(bytes.NewReader(data[:cut]))
+	if err == nil {
+		t.Fatal("expected an error for an archive cut inside an entry body")
+	}
+	if n != 1 {
+		t.Errorf("complete entries = %d, want 1 (config.yaml only)", n)
+	}
+}
+
+const blockSizeForTest = 512
+
+// Cutting inside the very first entry's body leaves nothing complete.
+func TestCheckComplete_firstEntryBodyCutCountsZero(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data := buf.Bytes()
+
+	n, err := export.CheckComplete(bytes.NewReader(data[:blockSizeForTest+16]))
+	if err == nil {
+		t.Fatal("expected an error for an archive cut inside the first entry body")
+	}
+	if n != 0 {
+		t.Errorf("complete entries = %d, want 0", n)
 	}
 }
