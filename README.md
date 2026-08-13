@@ -318,11 +318,12 @@ tbuk import --force-data ~/backups/kb.tar      # replace the database, extracted
 tbuk import --force-config ~/backups/kb.tar    # adopt the archive's config, leave the data alone
 ```
 
-By default import **adopts the archive's config** and re-homes each data folder
-at the target root's default locations. With `--merge` it keeps the target's
-existing `config.yaml` (or the defaults when there is none) and copies the
-imported folders into the paths that config names — use it to fold a snapshot
-into an existing knowledge base. Existing files are left untouched unless the
+Import **adopts the archive's config** when the target root has none yet — the
+"move my knowledge base to a new machine" case, where each data folder is
+re-homed at that root's default locations. When a `config.yaml` is already
+there it is kept, and the imported folders go into the paths *it* names, unless
+`--force-config` replaces it. `--merge` asks for that same placement explicitly
+and never adopts the archive's config, even into an empty root. Existing files are left untouched unless the
 matching flag is passed, so an import never clobbers a live database by
 accident. Config and data are forced separately — `--force-config` replaces the
 target's `config.yaml` with the archive's, `--force-data` replaces the database,

@@ -937,11 +937,17 @@ tbuk import ~/backups/kb.tar                        # restore into ~/.tbuk
 tbuk import --root /data/work-kb ~/backups/kb.tar   # restore into a specific root
 ```
 
-By default, import **adopts the config from the archive** and re-creates every
-folder — database, extracted-text cache, raw archive, prompt templates — at the
-target root's default locations. This is the "move my knowledge base to a new
-machine" case: run it against a fresh root and you get a working copy, no `init`
-needed.
+Into a **fresh root**, import **adopts the config from the archive** and
+re-creates every folder — database, extracted-text cache, raw archive, prompt
+templates — at that root's default locations. This is the "move my knowledge
+base to a new machine" case: run it against an empty directory and you get a
+working copy, no `init` needed.
+
+Into a root that **already has a `config.yaml`**, that config is kept and the
+archived folders are copied into the locations *it* names, so a knowledge base
+whose database lives on another disk stays consistent. Pass `--force-config` to
+take the archive's config instead — the data is then re-homed under the root to
+match it.
 
 To fold a snapshot **into an existing** knowledge base instead of setting up a
 new one, use `--merge`. That keeps the config already at the target and copies
