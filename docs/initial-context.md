@@ -413,6 +413,11 @@ Record boundaries come from separator lines where the model still emitted them,
 and otherwise from a lead line (trailing `?`) after a blank line; output with no
 question marks falls back to blank-line-delimited blocks.
 
+A declared `records` block also changes what else reaches stdout: the `Sources:`
+footer goes to the diagnostics stream instead, and the extra trailing newline is
+dropped, so the record stream stays parseable by whatever consumes it. Templates
+with only `filters` still produce prose and keep their citations inline.
+
 `Manifest.Normalize` carries the config and `loadManifest` validates it, so a
 misspelt filter or field name fails at template load rather than after a model
 call. `RunAsk`

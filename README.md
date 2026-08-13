@@ -408,6 +408,11 @@ the template loads. Declaring a pipeline turns
 streaming off for that template, since the whole completion is needed before
 anything can be rewritten.
 
+When a template declares `records`, its output is meant for another program, so
+`tbuk ask` keeps stdout to the records alone — the `Sources:` footer is printed
+on stderr instead of being dropped, which means `tbuk ask -t anki … > cards.txt`
+gives a clean file while the citations still show up in the terminal.
+
 ### Re-ingesting
 
 `tbuk ingest --force` and `tbuk update` replace a document's chunks atomically:

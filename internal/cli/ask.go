@@ -218,6 +218,8 @@ func RunAsk(
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
+	endsWithNewline := false
+
 	// A declared normalize pipeline rewrites whole cards, so the completion has
 	// to be in hand before anything is printed — streaming is not available for
 	// those templates.
@@ -237,6 +239,10 @@ func RunAsk(
 			return fmt.Errorf("normalize output: %w", err)
 		}
 		_, _ = fmt.Fprint(out, text)
+		// A record stream ends with its own newline; anything more is a stray
+		// blank line in a file another program parses. Prose keeps the trailing
+		// newline it has always had, streamed or buffered.
+		endsWithNewline = manifest.Normalize.Records != nil && strings.HasSuffix(text, "\n")
 	} else {
 		for tok := range tokenCh {
 			if tok.Error != nil {
@@ -248,12 +254,22 @@ func RunAsk(
 			}
 		}
 	}
-	_, _ = fmt.Fprintln(out)
+	if !endsWithNewline {
+		_, _ = fmt.Fprintln(out)
+	}
 
 	if len(chunks) > 0 {
-		_, _ = fmt.Fprintln(out, "\nSources:")
+		// Citations are provenance for whoever ran the command. When the template
+		// declares a record layout the output is meant for another program — an
+		// Anki import, a script — so the footer would corrupt it; report it on the
+		// diagnostics stream instead of dropping it.
+		sink := out
+		if manifest.Normalize.Records != nil {
+			sink = newSanitizeWriter(cfg.errOut)
+		}
+		_, _ = fmt.Fprintln(sink, "\nSources:")
 		for i, ch := range chunks {
-			_, _ = fmt.Fprintf(out, "  [%d] %s\n", i+1, ch.Citation)
+			_, _ = fmt.Fprintf(sink, "  [%d] %s\n", i+1, ch.Citation)
 		}
 	}
 	return nil

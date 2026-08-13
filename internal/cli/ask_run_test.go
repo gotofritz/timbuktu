@@ -646,3 +646,79 @@ func TestRunAsk_leavesOutputAloneWithoutPipeline(t *testing.T) {
 		t.Errorf("output should be untouched, got %q", out.String())
 	}
 }
+
+// Output that another program consumes must stay pure: the citations footer is
+// provenance for the person running the command, not part of the record stream.
+func TestRunAsk_recordsOutputKeepsCitationsOffStdout(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out, errOut bytes.Buffer
+	chunks := []retrieval.RetrievedChunk{
+		{Citation: "/docs/a.md §1", Text: "ctx", Path: "/docs/a.md", ChunkIndex: 1},
+	}
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(chunks, nil),
+		mockChat([]string{"What is tokenization?\n- Converting text into tokens\n"}, nil),
+		tmpl,
+		"topic",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errOut),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+
+	want := "----\n\nWhat is tokenization?\n\nConverting text into tokens\n"
+	if got := out.String(); got != want {
+		t.Errorf("stdout should hold records only\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+	if got := errOut.String(); !strings.Contains(got, "/docs/a.md §1") || !strings.Contains(got, "Sources:") {
+		t.Errorf("citations should still be reported on stderr, got %q", got)
+	}
+}
+
+// A template with only line filters still produces prose, so its citations stay
+// where they were.
+func TestRunAsk_filterOnlyTemplateKeepsCitationsOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "tidy")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"manifest.yaml": "name: tidy\nnormalize:\n  filters: [strip_fences]\n",
+		"system.tmpl":   "Answer.",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("tidy")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	chunks := []retrieval.RetrievedChunk{{Citation: "/docs/a.md §1", Text: "ctx", Path: "/docs/a.md"}}
+	if err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(chunks, nil),
+		mockChat([]string{"```\nprose answer\n```\n"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+	); err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "Sources:") {
+		t.Errorf("prose output should keep its citations, got %q", got)
+	}
+}
