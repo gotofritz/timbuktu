@@ -239,10 +239,11 @@ func RunAsk(
 			return fmt.Errorf("normalize output: %w", err)
 		}
 		_, _ = fmt.Fprint(out, text)
-		// A record stream ends with its own newline; anything more is a stray
-		// blank line in a file another program parses. Prose keeps the trailing
-		// newline it has always had, streamed or buffered.
-		endsWithNewline = manifest.Normalize.Records != nil && strings.HasSuffix(text, "\n")
+		// Record output manages its own trailing newline — including when there
+		// are no records and it is empty — so anything added here is a stray blank
+		// line in a file another program parses. Prose keeps the trailing newline
+		// it has always had, streamed or buffered.
+		endsWithNewline = manifest.Normalize.Records != nil
 	} else {
 		for tok := range tokenCh {
 			if tok.Error != nil {

@@ -250,13 +250,19 @@ type record struct {
 func buildRecords(lines []string, cfg RecordsConfig) string {
 	questionMode := containsQuestion(lines)
 	noteField := cfg.hasNote()
+	sep := strings.TrimSpace(cfg.Separator)
+	// A template whose separator is a markdown rule also accepts the neighbouring
+	// rules: a model asked for "----" writes "---" or "-----" often enough. One
+	// that picked something else splits on that alone, so a rule sitting in the
+	// body is left as content.
+	rulesToo := separatorRe.MatchString(sep)
 
 	var records []record
 	blank := true // the start of the input behaves like a boundary
 	for _, ln := range lines {
 		text := strings.TrimRight(ln, " \t")
 		switch {
-		case separatorRe.MatchString(text):
+		case strings.TrimSpace(text) == sep || (rulesToo && separatorRe.MatchString(text)):
 			records = closeEmpty(records)
 			blank = true
 			continue

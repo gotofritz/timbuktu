@@ -722,3 +722,27 @@ func TestRunAsk_filterOnlyTemplateKeepsCitationsOnStdout(t *testing.T) {
 		t.Errorf("prose output should keep its citations, got %q", got)
 	}
 }
+
+// A model that returns nothing usable normalizes to an empty string. The
+// records contract still holds: an empty file, not a file with a blank line.
+func TestRunAsk_emptyRecordsOutputWritesNothing(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out bytes.Buffer
+
+	if err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		mockChat([]string{"Here are the cards:\n\n"}, nil), // preamble only, no records
+		tmpl,
+		"topic",
+		nil,
+		0,
+		false,
+	); err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("empty record output should write nothing, got %q", got)
+	}
+}

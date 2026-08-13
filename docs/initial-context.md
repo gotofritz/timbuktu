@@ -409,13 +409,17 @@ positional line roles — `lead` (first line), optional `note` (a parenthesised
 second line), `body` (the rest, one item per line). It starts with `lead`, ends
 with `body`, and defaults to `[lead, body]`. The `note` field is emitted even
 when empty, since dropping it shifts the first body line into the note.
-Record boundaries come from separator lines where the model still emitted them,
-and otherwise from a lead line (trailing `?`) after a blank line; output with no
-question marks falls back to blank-line-delimited blocks.
+Record boundaries come from the declared `separator` where the model still
+emitted it, and otherwise from a lead line (trailing `?`) after a blank line;
+output with no question marks falls back to blank-line-delimited blocks. A
+separator that is itself a markdown rule (`----`) also matches neighbouring
+rules, since a model asked for four dashes often writes three or five; any other
+separator splits on itself alone, so a rule sitting in the body stays content.
 
 A declared `records` block also changes what else reaches stdout: the `Sources:`
-footer goes to the diagnostics stream instead, and the extra trailing newline is
-dropped, so the record stream stays parseable by whatever consumes it. Templates
+footer goes to the diagnostics stream instead, and the trailing newline `ask`
+adds to prose is dropped — including when normalization yields no records at
+all, where the output is an empty stream rather than a blank line. Templates
 with only `filters` still produce prose and keep their citations inline.
 
 `Manifest.Normalize` carries the config and `loadManifest` validates it, so a

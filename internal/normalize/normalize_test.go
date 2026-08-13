@@ -296,3 +296,39 @@ func TestFilterNames_listsEveryRegisteredFilter(t *testing.T) {
 		t.Errorf("every listed filter must validate: %v", err)
 	}
 }
+
+// The separator a template declares is the one that splits records. Markdown
+// rules are recognised too, because a model asked for "----" often emits "---",
+// but a template is free to pick something that is not a markdown rule at all.
+func TestApply_recognisesTheConfiguredSeparator(t *testing.T) {
+	cfg := normalize.Config{
+		Records: &normalize.RecordsConfig{Separator: "@@", Fields: []string{"lead", "body"}},
+	}
+	in := "@@\n\nTerm one\nMeaning one\n\n@@\n\nTerm two\nMeaning two\n"
+	want := "@@\n\nTerm one\n\nMeaning one\n\n@@\n\nTerm two\n\nMeaning two\n"
+
+	got, err := normalize.Apply(in, cfg)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if got != want {
+		t.Errorf("Apply() mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestApply_customSeparatorIsIdempotent(t *testing.T) {
+	cfg := normalize.Config{
+		Records: &normalize.RecordsConfig{Separator: "%%%", Fields: []string{"lead", "note", "body"}},
+	}
+	once, err := normalize.Apply("Term\nMeaning\n\nOther term\nOther meaning\n", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	twice, err := normalize.Apply(once, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if twice != once {
+		t.Errorf("custom separator round-trip differs\n--- once ---\n%s\n--- twice ---\n%s", once, twice)
+	}
+}
