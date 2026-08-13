@@ -246,3 +246,76 @@ func TestImportCommand_exposesBothForceFlags(t *testing.T) {
 		t.Error("the coarse --force flag should be gone: it overwrote config and data together")
 	}
 }
+
+// Data must land where the config that will be in effect after the import says.
+// Keeping the target's config and then restoring into the root's default
+// folders leaves a knowledge base whose config points at one place and whose
+// data sits in another.
+func TestRunImport_placesDataWhereThePreservedConfigPoints(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	cfgPath := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("MINE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultsForRoot(root)
+	cfg.Database.Path = filepath.Join(other, "custom.sqlite")
+	cfg.Preprocess.OutputDir = filepath.Join(other, "cache")
+
+	arc := buildImportArchive(t, map[string]string{
+		"config.yaml":       "chunking:\n    size: 111\n",
+		"tbuk.sqlite":       "NEW-DB",
+		"extracted/abc.txt": "extracted",
+	})
+
+	var out bytes.Buffer
+	if err := cli.RunImport(&out, arc, cfg, root, cfgPath, false, false, true); err != nil {
+		t.Fatalf("RunImport: %v", err)
+	}
+
+	if got := readImported(t, cfg.Database.Path); got != "NEW-DB" {
+		t.Errorf("db at the configured path = %q, want NEW-DB", got)
+	}
+	if got := readImported(t, filepath.Join(cfg.Preprocess.OutputDir, "abc.txt")); got != "extracted" {
+		t.Errorf("extracted file not placed under the configured OutputDir, got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tbuk.sqlite")); !os.IsNotExist(err) {
+		t.Errorf("nothing should be written to the root default while that config is preserved, stat err = %v", err)
+	}
+	if got := readImported(t, cfgPath); got != "MINE\n" {
+		t.Errorf("config = %q, want it preserved", got)
+	}
+	if !strings.Contains(out.String(), "--force-config") {
+		t.Errorf("output should say the existing config was kept, got %q", out.String())
+	}
+}
+
+// Adopting the archive's config re-homes the data under the root, since that is
+// what the adopted config resolves to.
+func TestRunImport_forceConfigRehomesDataUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	cfgPath := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("MINE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultsForRoot(root)
+	cfg.Database.Path = filepath.Join(other, "custom.sqlite")
+
+	arc := buildImportArchive(t, map[string]string{
+		"config.yaml": "chunking:\n    size: 111\n",
+		"tbuk.sqlite": "NEW-DB",
+	})
+
+	var out bytes.Buffer
+	if err := cli.RunImport(&out, arc, cfg, root, cfgPath, false, true, true); err != nil {
+		t.Fatalf("RunImport: %v", err)
+	}
+	if got := readImported(t, filepath.Join(root, "tbuk.sqlite")); got != "NEW-DB" {
+		t.Errorf("db = %q, want it re-homed under the root", got)
+	}
+	if got := readImported(t, cfgPath); !strings.Contains(got, "size: 111") {
+		t.Errorf("config = %q, want the archive's", got)
+	}
+}

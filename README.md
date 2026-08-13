@@ -330,6 +330,12 @@ extracted text, raw archive and prompts — because a machine's own settings and
 the knowledge base they point at are rarely worth replacing at the same moment.
 A config that is not there yet is written whatever the flags say.
 
+Where the data lands follows whichever config ends up in effect. Adopt the
+archive's config and the folders are re-homed under the target root; keep your
+own config — the default when one already exists — and the data is placed in the
+folders *it* names, so a knowledge base whose database lives on another disk
+stays consistent after a restore.
+
 Export re-reads the archive before putting it in place, so a damaged snapshot
 fails at export time rather than on restore, and import checks the same thing
 before writing anything — an incomplete archive is refused rather than restoring

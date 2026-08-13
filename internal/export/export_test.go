@@ -468,3 +468,27 @@ func TestCheckComplete_firstEntryBodyCutCountsZero(t *testing.T) {
 		t.Errorf("complete entries = %d, want 0", n)
 	}
 }
+
+// An archive cut exactly at an entry boundary has lost only its end-of-archive
+// marker: every entry before the cut is whole, and the count has to say so.
+func TestCheckComplete_countsEntriesWholeAtTheCut(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DefaultsForRoot(root)
+	writeFile(t, cfg.Database.Path, bytes.Repeat([]byte("d"), 1024))
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	data := buf.Bytes()
+
+	// config.yaml and tbuk.sqlite are both complete; only the two zero blocks
+	// that terminate the archive are missing.
+	n, err := export.CheckComplete(bytes.NewReader(data[:len(data)-1024]))
+	if err == nil {
+		t.Fatal("expected an error for a missing end-of-archive marker")
+	}
+	if n != 2 {
+		t.Errorf("complete entries = %d, want 2 (both bodies are whole)", n)
+	}
+}

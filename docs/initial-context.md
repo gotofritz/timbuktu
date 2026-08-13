@@ -536,12 +536,16 @@ written.
 
 CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
 - `RunImport(out, archivePath, cfg, root, configPath, merge, forceConfig, forceData)` — opens the
-  archive and dispatches by mode. **Non-merge** (default): placement uses
-  `DefaultsForRoot(root)` and the archive's `config.yaml` is written to
-  `configPath`, so the adopted config and the re-homed folders agree (the
-  archive's commented paths resolve to those same defaults). **Merge**
-  (`--merge`): placement uses the loaded target `cfg` and the archive config is
-  discarded, folding the snapshot into the existing KB's folders.
+  archive and dispatches on **which config will be in effect afterwards**, since
+  that is what the restored folders have to agree with. The archive's config is
+  *adopted* only in non-merge mode when the target has no config yet or
+  `--force-config` replaces it; placement then uses `DefaultsForRoot(root)`, which
+  is what the archive's commented paths resolve to. Otherwise the target's config
+  survives — under `--merge`, or because it exists and `--force-config` was not
+  given — and placement uses the loaded `cfg`, so data lands in the folders the
+  live config names. Restoring into the root's defaults while a config pointing
+  elsewhere survives would leave the knowledge base unable to see its own data;
+  the command says which config it kept.
 
 `Import` runs `export.CheckComplete` first when its reader is an `io.ReadSeeker`
 (as the CLI's `*os.File` is), so an incomplete archive is refused before a single

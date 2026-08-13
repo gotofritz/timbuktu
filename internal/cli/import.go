@@ -59,16 +59,20 @@ func RunImport(out io.Writer, archivePath string, cfg config.Config, root, confi
 	}
 	defer func() { _ = f.Close() }()
 
+	// Data goes where the config that will be in effect after the import says.
+	// The archive's config is adopted only when the target has none yet or
+	// --force-config replaces it; otherwise the target's config survives and
+	// therefore governs placement, or the restored folders would sit somewhere
+	// the live config does not point at.
+	adopt := !merge && (forceConfig || !exists(configPath))
+
 	opts := importer.Options{Root: root, ForceConfig: forceConfig, ForceData: forceData}
-	if merge {
-		// Place data into the folders the existing target config names; leave
-		// that config in place.
-		opts.Config = cfg
-	} else {
-		// Adopt the archive's config and re-home every folder under the root; the
-		// archive's commented paths resolve to these defaults.
+	if adopt {
+		// The archive's commented paths resolve to the root's defaults.
 		opts.Config = config.DefaultsForRoot(root)
 		opts.ConfigDest = configPath
+	} else {
+		opts.Config = cfg
 	}
 
 	res, err := importer.Import(f, opts)
@@ -81,5 +85,17 @@ func RunImport(out io.Writer, archivePath string, cfg config.Config, root, confi
 		fmt.Fprintf(out, " (%d skipped; pass --force-config / --force-data to overwrite)", len(res.Skipped)) //nolint:errcheck
 	}
 	fmt.Fprintln(out) //nolint:errcheck
+	if !merge && !adopt {
+		fmt.Fprintf(out, "Kept the existing config at %s; data was placed in the folders it names "+ //nolint:errcheck
+			"(pass --force-config to adopt the archive's config instead)\n", configPath)
+	}
 	return nil
+}
+
+// exists reports whether path is present. An unreadable path counts as present:
+// the caller's next step would fail on it anyway, and treating it as missing
+// would silently overwrite it.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }

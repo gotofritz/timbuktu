@@ -124,7 +124,8 @@ func walkHeaders(rs io.ReadSeeker, visit func(*tar.Header)) (int, error) {
 	}
 
 	entries := 0
-	var offset int64 // start of the next header block
+	var offset int64   // start of the next header block
+	var declared int64 // end of the furthest entry body seen
 	for {
 		if _, err := rs.Seek(offset, io.SeekStart); err != nil {
 			return entries, err
@@ -145,18 +146,26 @@ func walkHeaders(rs io.ReadSeeker, visit func(*tar.Header)) (int, error) {
 		if err != nil {
 			return entries, err
 		}
-		// Check the body fits before counting the entry: the count tells the user
-		// how much of the archive is intact, so an entry cut short is not one.
+		// Whether this entry's body fits is a separate question from whether the
+		// archive was terminated: a body that is whole counts as an intact entry
+		// even when the file stops right after it.
 		end := body + padded(hdr.Size)
-		if end+2*blockSize > size {
-			return entries, fmt.Errorf("%w: %d bytes present, %d needed for %q and the "+
-				"end-of-archive marker", ErrIncomplete, size, end+2*blockSize, hdr.Name)
+		if end > size {
+			return entries, fmt.Errorf("%w: %d bytes present, %d needed for the body of %q",
+				ErrIncomplete, size, end, hdr.Name)
 		}
 		if visit != nil {
 			visit(hdr)
 		}
 		entries++
 		offset = end
+		declared = end
+	}
+	// Two zero blocks terminate a tar. Without them the file was cut at a block
+	// boundary, which reads back as a clean EOF.
+	if want := declared + 2*blockSize; size < want {
+		return entries, fmt.Errorf("%w: %d bytes present, %d needed for its entries and the "+
+			"end-of-archive marker", ErrIncomplete, size, want)
 	}
 	return entries, nil
 }
