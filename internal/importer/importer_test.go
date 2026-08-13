@@ -184,10 +184,11 @@ func TestImport_forceOverwrites(t *testing.T) {
 	arc := buildTar(t, standardArchive())
 
 	res, err := importer.Import(bytes.NewReader(arc), importer.Options{
-		Root:       root,
-		Config:     config.DefaultsForRoot(root),
-		ConfigDest: filepath.Join(root, "config.yaml"),
-		Force:      true,
+		Root:        root,
+		Config:      config.DefaultsForRoot(root),
+		ConfigDest:  filepath.Join(root, "config.yaml"),
+		ForceConfig: true,
+		ForceData:   true,
 	})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
@@ -365,9 +366,9 @@ func TestImport_mkdirErrorPropagates(t *testing.T) {
 	}
 	arc := buildTar(t, map[string]string{"notes/todo.txt": "hi"})
 	if _, err := importer.Import(bytes.NewReader(arc), importer.Options{
-		Root:   root,
-		Config: config.DefaultsForRoot(root),
-		Force:  true, // skip the stat check so MkdirAll is the failing step
+		Root:      root,
+		Config:    config.DefaultsForRoot(root),
+		ForceData: true, // skip the stat check so MkdirAll is the failing step
 	}); err == nil {
 		t.Fatal("expected error when the destination directory cannot be created")
 	}
@@ -607,5 +608,72 @@ func TestImport_streamingCountExcludesTheTruncatedEntry(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "after 1 complete") {
 		t.Errorf("only config.yaml is complete, got %q", err)
+	}
+}
+
+// Config and data are forced independently: a restore may adopt the archive's
+// config while leaving a live database alone, or the reverse.
+func TestImport_forceConfigAndForceDataAreIndependent(t *testing.T) {
+	arc := buildTar(t, map[string]string{
+		"config.yaml": "NEW-CONFIG",
+		"tbuk.sqlite": "NEW-DB",
+	})
+
+	cases := []struct {
+		name                   string
+		forceConfig, forceData bool
+		wantConfig, wantDB     string
+	}{
+		{name: "neither overwrites", wantConfig: "OLD-CONFIG", wantDB: "OLD-DB"},
+		{name: "config only", forceConfig: true, wantConfig: "NEW-CONFIG", wantDB: "OLD-DB"},
+		{name: "data only", forceData: true, wantConfig: "OLD-CONFIG", wantDB: "NEW-DB"},
+		{name: "both", forceConfig: true, forceData: true, wantConfig: "NEW-CONFIG", wantDB: "NEW-DB"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfgPath := filepath.Join(root, "config.yaml")
+			dbPath := filepath.Join(root, "tbuk.sqlite")
+			for path, content := range map[string]string{cfgPath: "OLD-CONFIG", dbPath: "OLD-DB"} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if _, err := importer.Import(bytes.NewReader(arc), importer.Options{
+				Root:        root,
+				Config:      config.DefaultsForRoot(root),
+				ConfigDest:  cfgPath,
+				ForceConfig: tc.forceConfig,
+				ForceData:   tc.forceData,
+			}); err != nil {
+				t.Fatalf("Import: %v", err)
+			}
+			if got := readFile(t, cfgPath); got != tc.wantConfig {
+				t.Errorf("config = %q, want %q", got, tc.wantConfig)
+			}
+			if got := readFile(t, dbPath); got != tc.wantDB {
+				t.Errorf("db = %q, want %q", got, tc.wantDB)
+			}
+		})
+	}
+}
+
+// A config that is not there yet is written whatever the flags say — there is
+// nothing to protect.
+func TestImport_missingConfigIsWrittenWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "config.yaml")
+	arc := buildTar(t, map[string]string{"config.yaml": "NEW-CONFIG"})
+
+	if _, err := importer.Import(bytes.NewReader(arc), importer.Options{
+		Root:       root,
+		Config:     config.DefaultsForRoot(root),
+		ConfigDest: cfgPath,
+	}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if got := readFile(t, cfgPath); got != "NEW-CONFIG" {
+		t.Errorf("config = %q, want NEW-CONFIG", got)
 	}
 }

@@ -1,11 +1,15 @@
 package cli_test
 
 import (
+	"archive/tar"
 	"bytes"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
 	"github.com/gotofritz/timbuktu/internal/config"
@@ -38,6 +42,46 @@ func writeArchive(t *testing.T, srcRoot string) string {
 	return arcPath
 }
 
+// buildImportArchive writes a tar with the given entries and returns its path.
+func buildImportArchive(t *testing.T, entries map[string]string) string {
+	t.Helper()
+	arcPath := filepath.Join(t.TempDir(), "kb.tar")
+	f, err := os.Create(arcPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	tw := tar.NewWriter(f)
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		data := []byte(entries[name])
+		if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: name, Mode: 0o600, Size: int64(len(data))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return arcPath
+}
+
+func readImported(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func writeSrc(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -54,7 +98,7 @@ func TestRunImport_nonMergeRestoresUnderRoot(t *testing.T) {
 	cfgPath := filepath.Join(dest, "config.yaml")
 
 	var out bytes.Buffer
-	if err := cli.RunImport(&out, arc, config.DefaultsForRoot(dest), dest, cfgPath, false, false); err != nil {
+	if err := cli.RunImport(&out, arc, config.DefaultsForRoot(dest), dest, cfgPath, false, false, false); err != nil {
 		t.Fatalf("RunImport: %v", err)
 	}
 	for _, p := range []string{
@@ -75,7 +119,7 @@ func TestRunImport_nonMergeRestoresUnderRoot(t *testing.T) {
 func TestRunImport_missingArchiveErrors(t *testing.T) {
 	dest := t.TempDir()
 	var out bytes.Buffer
-	err := cli.RunImport(&out, filepath.Join(dest, "nope.tar"), config.DefaultsForRoot(dest), dest, filepath.Join(dest, "config.yaml"), false, false)
+	err := cli.RunImport(&out, filepath.Join(dest, "nope.tar"), config.DefaultsForRoot(dest), dest, filepath.Join(dest, "config.yaml"), false, false, false)
 	if err == nil {
 		t.Fatal("expected error for a missing archive")
 	}
@@ -92,7 +136,7 @@ func TestRunImport_mergeKeepsTargetConfig(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunImport(&out, arc, config.DefaultsForRoot(dest), dest, cfgPath, true, false); err != nil {
+	if err := cli.RunImport(&out, arc, config.DefaultsForRoot(dest), dest, cfgPath, true, false, false); err != nil {
 		t.Fatalf("RunImport: %v", err)
 	}
 	if data, _ := os.ReadFile(cfgPath); string(data) != "SENTINEL-CONFIG\n" {
@@ -137,5 +181,68 @@ func TestImportCommand_endToEnd(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("expected restored file %s: %v", p, err)
 		}
+	}
+}
+
+// The config is a machine's own settings, so it is protected separately from
+// the data: each has its own force flag and neither implies the other.
+func TestRunImport_forceFlagsAreIndependent(t *testing.T) {
+	arc := buildImportArchive(t, map[string]string{
+		"config.yaml": "chunking:\n    size: 111\n",
+		"tbuk.sqlite": "NEW-DB",
+	})
+
+	cases := []struct {
+		name                   string
+		forceConfig, forceData bool
+		wantConfig, wantDB     string
+	}{
+		{name: "no flags keep both", wantConfig: "OLD-CONFIG", wantDB: "OLD-DB"},
+		{name: "force-config takes the archive config only", forceConfig: true, wantConfig: "size: 111", wantDB: "OLD-DB"},
+		{name: "force-data replaces data only", forceData: true, wantConfig: "OLD-CONFIG", wantDB: "NEW-DB"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfgPath := filepath.Join(root, "config.yaml")
+			dbPath := filepath.Join(root, "tbuk.sqlite")
+			for path, content := range map[string]string{cfgPath: "OLD-CONFIG", dbPath: "OLD-DB"} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var out bytes.Buffer
+			if err := cli.RunImport(&out, arc, config.DefaultsForRoot(root), root, cfgPath, false, tc.forceConfig, tc.forceData); err != nil {
+				t.Fatalf("RunImport: %v", err)
+			}
+			if got := readImported(t, cfgPath); !strings.Contains(got, tc.wantConfig) {
+				t.Errorf("config = %q, want it to contain %q", got, tc.wantConfig)
+			}
+			if got := readImported(t, dbPath); got != tc.wantDB {
+				t.Errorf("db = %q, want %q", got, tc.wantDB)
+			}
+		})
+	}
+}
+
+func TestImportCommand_exposesBothForceFlags(t *testing.T) {
+	cmd := cli.New()
+	var importCmd *cobra.Command
+	for _, c := range cmd.Commands() {
+		if c.Name() == "import" {
+			importCmd = c
+		}
+	}
+	if importCmd == nil {
+		t.Fatal("import command not found")
+	}
+	for _, name := range []string{"force-config", "force-data"} {
+		if importCmd.Flags().Lookup(name) == nil {
+			t.Errorf("import should expose --%s", name)
+		}
+	}
+	if importCmd.Flags().Lookup("force") != nil {
+		t.Error("the coarse --force flag should be gone: it overwrote config and data together")
 	}
 }

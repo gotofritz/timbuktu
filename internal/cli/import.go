@@ -13,8 +13,9 @@ import (
 
 func newImportCmd() *cobra.Command {
 	var (
-		merge bool
-		force bool
+		merge       bool
+		forceConfig bool
+		forceData   bool
 	)
 
 	cmd := &cobra.Command{
@@ -27,15 +28,20 @@ func newImportCmd() *cobra.Command {
 			"re-homed under the target root (--root, else ~/.tbuk). With --merge, " +
 			"the target's existing config is kept and the imported folders are " +
 			"copied into the locations it names (defaults when there is no target " +
-			"config). Existing files are left untouched unless --force is given.",
+			"config). Existing files are left untouched unless the matching flag is " +
+			"given: --force-config replaces the target's config.yaml with the " +
+			"archive's, --force-data replaces the database, extracted text, raw " +
+			"archive and prompts. A machine's own config is protected separately " +
+			"from the knowledge base it points at.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunImport(cmd.OutOrStdout(), args[0], configFrom(cmd), rootFrom(cmd), configPathFrom(cmd), merge, force)
+			return RunImport(cmd.OutOrStdout(), args[0], configFrom(cmd), rootFrom(cmd), configPathFrom(cmd), merge, forceConfig, forceData)
 		},
 	}
 
 	cmd.Flags().BoolVar(&merge, "merge", false, "merge into the target config's folders instead of adopting the archive config")
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing files (default: skip files that already exist)")
+	cmd.Flags().BoolVar(&forceConfig, "force-config", false, "overwrite an existing config.yaml with the archive's (ignored with --merge)")
+	cmd.Flags().BoolVar(&forceData, "force-data", false, "overwrite existing database, extracted text, raw archive and prompt files")
 	return cmd
 }
 
@@ -43,15 +49,17 @@ func newImportCmd() *cobra.Command {
 // adopts the archive's config (written to configPath) and re-homes each data
 // folder at the root's default locations; with merge it keeps the target's
 // existing cfg and copies the imported folders into the paths cfg names. In both
-// modes existing files are skipped unless force is set. Exported for testing.
-func RunImport(out io.Writer, archivePath string, cfg config.Config, root, configPath string, merge, force bool) error {
+// modes existing files are skipped unless the matching force flag is set:
+// forceConfig for the archive's config, forceData for the knowledge base it
+// describes. Exported for testing.
+func RunImport(out io.Writer, archivePath string, cfg config.Config, root, configPath string, merge, forceConfig, forceData bool) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("open archive %s: %w", archivePath, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	opts := importer.Options{Root: root, Force: force}
+	opts := importer.Options{Root: root, ForceConfig: forceConfig, ForceData: forceData}
 	if merge {
 		// Place data into the folders the existing target config names; leave
 		// that config in place.
@@ -70,7 +78,7 @@ func RunImport(out io.Writer, archivePath string, cfg config.Config, root, confi
 
 	fmt.Fprintf(out, "Imported %d file(s) to %s", len(res.Written), root) //nolint:errcheck
 	if len(res.Skipped) > 0 {
-		fmt.Fprintf(out, " (%d skipped; pass --force to overwrite)", len(res.Skipped)) //nolint:errcheck
+		fmt.Fprintf(out, " (%d skipped; pass --force-config / --force-data to overwrite)", len(res.Skipped)) //nolint:errcheck
 	}
 	fmt.Fprintln(out) //nolint:errcheck
 	return nil

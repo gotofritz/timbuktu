@@ -101,7 +101,7 @@ tbuk stats               # knowledge base summary: doc/chunk counts, size (--for
 tbuk list                # list indexed documents: path, title, chunk count, updated (--limit, --format)
 tbuk export <path>       # bundle config + all data folders into a portable .tar (--root, --force)
                          #   <path> dir → timestamped file inside it; <path> file → that file (prompts before overwrite)
-tbuk import <archive>    # restore a knowledge base from a .tar snapshot (--root, --config, --merge, --force)
+tbuk import <archive>    # restore a knowledge base from a .tar snapshot (--root, --config, --merge, --force-config, --force-data)
                          #   default: adopt archive config, re-home folders under root; --merge: keep target config
 ```
 
@@ -314,15 +314,21 @@ it lands, exactly as for every other command:
 tbuk import ~/backups/kb.tar                    # restore into ~/.tbuk
 tbuk import --root /data/work-kb ~/backups/kb.tar   # restore into a specific root
 tbuk import --merge ~/backups/kb.tar            # merge into an existing KB's folders
-tbuk import --force ~/backups/kb.tar            # overwrite existing files
+tbuk import --force-data ~/backups/kb.tar      # replace the database, extracted text, raw archive, prompts
+tbuk import --force-config ~/backups/kb.tar    # adopt the archive's config, leave the data alone
 ```
 
 By default import **adopts the archive's config** and re-homes each data folder
 at the target root's default locations. With `--merge` it keeps the target's
 existing `config.yaml` (or the defaults when there is none) and copies the
 imported folders into the paths that config names — use it to fold a snapshot
-into an existing knowledge base. Existing files are left untouched unless
-`--force` is passed, so an import never clobbers a live database by accident.
+into an existing knowledge base. Existing files are left untouched unless the
+matching flag is passed, so an import never clobbers a live database by
+accident. Config and data are forced separately — `--force-config` replaces the
+target's `config.yaml` with the archive's, `--force-data` replaces the database,
+extracted text, raw archive and prompts — because a machine's own settings and
+the knowledge base they point at are rarely worth replacing at the same moment.
+A config that is not there yet is written whatever the flags say.
 
 Export re-reads the archive before putting it in place, so a damaged snapshot
 fails at export time rather than on restore, and import checks the same thing

@@ -518,8 +518,15 @@ config. `Import` maps those four canonical components onto the target config's
 paths; any other entry is re-homed verbatim under the root. Files are written
 `0o600`.
 
+Overwriting is split in two: `Options.ForceConfig` covers the archive's
+`config.yaml`, `Options.ForceData` everything else. A config describes the
+machine it lives on — paths, providers, model choices — so replacing it is a
+different decision from replacing the knowledge base it points at, and neither
+flag implies the other. A destination that does not exist yet is always
+written.
+
 CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
-- `RunImport(out, archivePath, cfg, root, configPath, merge, force)` — opens the
+- `RunImport(out, archivePath, cfg, root, configPath, merge, forceConfig, forceData)` — opens the
   archive and dispatches by mode. **Non-merge** (default): placement uses
   `DefaultsForRoot(root)` and the archive's `config.yaml` is written to
   `configPath`, so the adopted config and the re-homed folders agree (the
@@ -569,7 +576,7 @@ tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--fo
 tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
 tbuk list                      list indexed documents: path, title, chunk count, updated_at (--limit, --format text|json)
 tbuk export <path>             tar snapshot of config + data folders (dir→timestamped file, file→as-is; --force, --root)
-tbuk import <archive>          restore a tar snapshot under the target root (--merge keeps target config, --force overwrites)
+tbuk import <archive>          restore a tar snapshot under the target root (--merge keeps target config, --force-config / --force-data overwrite)
 ```
 
 ---

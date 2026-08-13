@@ -44,9 +44,13 @@ type Options struct {
 	// archive config is discarded and the target's existing config is kept
 	// (merge mode).
 	ConfigDest string
-	// Force overwrites existing destination files. When false, an existing file
-	// is left in place and recorded in Result.Skipped.
-	Force bool
+	// ForceConfig overwrites an existing file at ConfigDest. A config is a
+	// machine's own settings, so it is protected separately from the data.
+	ForceConfig bool
+	// ForceData overwrites existing database, extracted-text, raw and prompt
+	// files. When false, an existing file is left in place and recorded in
+	// Result.Skipped.
+	ForceData bool
 }
 
 // Result reports the destinations written and skipped.
@@ -58,7 +62,9 @@ type Result struct {
 // Import extracts the tar archive in r according to opts. Each entry is mapped
 // to a destination under opts.Config's component paths (database, extracted
 // store, raw archive, prompts) or, failing that, verbatim under opts.Root.
-// Existing files are overwritten only with opts.Force, otherwise skipped.
+// Existing files are overwritten only with the matching force option
+// (ForceConfig for the archive's config, ForceData for everything else),
+// otherwise skipped.
 // Entries that would escape the destination via an absolute path or `..` are
 // rejected.
 func Import(r io.Reader, opts Options) (Result, error) {
@@ -118,7 +124,7 @@ func Import(r io.Reader, opts Options) (Result, error) {
 			if opts.ConfigDest == "" {
 				continue // merge: keep the target's existing config
 			}
-			consumed, err := writeFile(opts.ConfigDest, tr, opts.Force, &res)
+			consumed, err := writeFile(opts.ConfigDest, tr, opts.ForceConfig, &res)
 			if err != nil {
 				return res, entryError(err, entries, head)
 			}
@@ -130,7 +136,7 @@ func Import(r io.Reader, opts Options) (Result, error) {
 		if !ok {
 			dest = filepath.Join(opts.Root, filepath.FromSlash(name))
 		}
-		consumed, err := writeFile(dest, tr, opts.Force, &res)
+		consumed, err := writeFile(dest, tr, opts.ForceData, &res)
 		if err != nil {
 			return res, entryError(err, entries, head)
 		}
