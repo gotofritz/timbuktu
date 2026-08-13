@@ -746,3 +746,65 @@ func TestRunAsk_emptyRecordsOutputWritesNothing(t *testing.T) {
 		t.Errorf("empty record output should write nothing, got %q", got)
 	}
 }
+
+// Whatever the pipeline, the answer ends with exactly one newline: a model that
+// already ends its text with one must not gain a blank line from it.
+func TestRunAsk_endsWithExactlyOneNewline(t *testing.T) {
+	filterOnly := buildFilterTemplate(t)
+
+	cases := []struct {
+		name   string
+		tmpl   *prompts.Template
+		tokens []string
+		want   string
+	}{
+		{name: "prose streamed", tmpl: buildQATemplate(t), tokens: []string{"an answer\n"}, want: "an answer\n"},
+		{name: "prose without its own newline", tmpl: buildQATemplate(t), tokens: []string{"an answer"}, want: "an answer\n"},
+		{name: "filters only", tmpl: filterOnly, tokens: []string{"```\nan answer\n```\n"}, want: "an answer\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := cli.RunAsk(
+				context.Background(),
+				&out,
+				mockRetrieve(nil, nil),
+				mockChat(tc.tokens, nil),
+				tc.tmpl,
+				"question",
+				nil,
+				0,
+				false,
+			); err != nil {
+				t.Fatalf("RunAsk: %v", err)
+			}
+			if got := out.String(); got != tc.want {
+				t.Errorf("output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// buildFilterTemplate returns a template declaring line filters but no records.
+func buildFilterTemplate(t *testing.T) *prompts.Template {
+	t.Helper()
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "tidy")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"manifest.yaml": "name: tidy\nnormalize:\n  filters: [strip_fences]\n",
+		"system.tmpl":   "Answer.",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("tidy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tmpl
+}

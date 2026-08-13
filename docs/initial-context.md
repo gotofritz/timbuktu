@@ -411,15 +411,20 @@ with `body`, and defaults to `[lead, body]`. The `note` field is emitted even
 when empty, since dropping it shifts the first body line into the note.
 Record boundaries come from the declared `separator` where the model still
 emitted it, and otherwise from a lead line (trailing `?`) after a blank line;
-output with no question marks falls back to blank-line-delimited blocks. A
+output with no question marks falls back to blank-line-delimited blocks.
+Anything ahead of the first separator or question line is chatter ("Here are the
+cards.") and is dropped — but only in that question-mark mode, since with no
+questions anywhere there is nothing to separate an opening pleasantry from a
+legitimate first lead. A
 separator that is itself a markdown rule (`----`) also matches neighbouring
 rules, since a model asked for four dashes often writes three or five; any other
 separator splits on itself alone, so a rule sitting in the body stays content.
 
 A declared `records` block also changes what else reaches stdout: the `Sources:`
-footer goes to the diagnostics stream instead, and the trailing newline `ask`
-adds to prose is dropped — including when normalization yields no records at
-all, where the output is an empty stream rather than a blank line. Templates
+footer goes to the diagnostics stream instead. `RunAsk` also owns the final
+newline on every path now: it adds one only when the output does not already end
+with one, so prose no longer gains a blank line and record output stays
+byte-exact — an empty stream when there are no records, not a blank line. Templates
 with only `filters` still produce prose and keep their citations inline.
 
 `Manifest.Normalize` carries the config and `loadManifest` validates it, so a

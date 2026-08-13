@@ -218,6 +218,9 @@ func RunAsk(
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
+	// The answer ends with exactly one newline, whichever path produced it: the
+	// model's own trailing newline counts, so prose does not gain a blank line
+	// and a record stream stays byte-exact.
 	endsWithNewline := false
 
 	// A declared normalize pipeline rewrites whole cards, so the completion has
@@ -239,17 +242,18 @@ func RunAsk(
 			return fmt.Errorf("normalize output: %w", err)
 		}
 		_, _ = fmt.Fprint(out, text)
-		// Record output manages its own trailing newline — including when there
-		// are no records and it is empty — so anything added here is a stray blank
-		// line in a file another program parses. Prose keeps the trailing newline
-		// it has always had, streamed or buffered.
-		endsWithNewline = manifest.Normalize.Records != nil
+		// Record output manages its own trailing newline, including when there are
+		// no records and it is empty.
+		endsWithNewline = manifest.Normalize.Records != nil || strings.HasSuffix(text, "\n")
 	} else {
 		for tok := range tokenCh {
 			if tok.Error != nil {
 				return fmt.Errorf("LLM stream: %w", tok.Error)
 			}
 			_, _ = fmt.Fprint(out, tok.Text)
+			if tok.Text != "" {
+				endsWithNewline = strings.HasSuffix(tok.Text, "\n")
+			}
 			if tok.Done {
 				break
 			}

@@ -250,6 +250,14 @@ type record struct {
 func buildRecords(lines []string, cfg RecordsConfig) string {
 	questionMode := containsQuestion(lines)
 	noteField := cfg.hasNote()
+	// Chatter before the first record — "Here are the cards.", "Sure thing" — is
+	// not a lead line. When leads are recognisable (they end in a question mark)
+	// anything ahead of the first one, or ahead of the first separator, is
+	// dropped. With no question marks anywhere there is nothing to tell chatter
+	// from a legitimate first lead, so the input is left as it is.
+	if questionMode {
+		lines = dropPreamble(lines, cfg)
+	}
 	sep := strings.TrimSpace(cfg.Separator)
 	// A template whose separator is a markdown rule also accepts the neighbouring
 	// rules: a model asked for "----" writes "---" or "-----" often enough. One
@@ -300,6 +308,22 @@ func buildRecords(lines []string, cfg RecordsConfig) string {
 		sb.WriteString("\n\n")
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+// dropPreamble discards the lines before the first separator or question line.
+func dropPreamble(lines []string, cfg RecordsConfig) []string {
+	sep := strings.TrimSpace(cfg.Separator)
+	rulesToo := separatorRe.MatchString(sep)
+	for i, ln := range lines {
+		text := strings.TrimSpace(ln)
+		if text == "" {
+			continue
+		}
+		if text == sep || (rulesToo && separatorRe.MatchString(ln)) || strings.HasSuffix(text, "?") {
+			return lines[i:]
+		}
+	}
+	return lines
 }
 
 // startsRecord reports whether text opens a new record rather than continuing

@@ -332,3 +332,44 @@ func TestApply_customSeparatorIsIdempotent(t *testing.T) {
 		t.Errorf("custom separator round-trip differs\n--- once ---\n%s\n--- twice ---\n%s", once, twice)
 	}
 }
+
+// Models introduce their output in whatever punctuation they like. Anything
+// before the first record is chatter, not a record's lead line.
+func TestApply_dropsPreambleWithoutAColon(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "full stop", in: "Here are the cards.\n\nWhat is tokenization?\nConverting text into tokens\n"},
+		{name: "no punctuation", in: "Sure thing\n\nWhat is tokenization?\nConverting text into tokens\n"},
+		{name: "colon", in: "Here are the cards:\n\nWhat is tokenization?\nConverting text into tokens\n"},
+		{name: "multi-line chatter", in: "I made these from the context.\nHope they help.\n\nWhat is tokenization?\nConverting text into tokens\n"},
+	}
+	want := "----\n\nWhat is tokenization?\n\nConverting text into tokens\n"
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalize.Apply(tt.in, ankiConfig())
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			if got != want {
+				t.Errorf("Apply() mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// Chatter before an explicit separator is dropped by the separator itself, and
+// records whose lead is not a question are untouched when nothing looks like a
+// question anywhere.
+func TestApply_keepsFirstRecordWhenNoQuestionsExist(t *testing.T) {
+	cfg := normalize.Config{Records: &normalize.RecordsConfig{Separator: "----"}}
+	got, err := normalize.Apply("Tokenization\nSplitting text into tokens\n", cfg)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if want := "----\n\nTokenization\n\nSplitting text into tokens\n"; got != want {
+		t.Errorf("Apply() = %q, want %q", got, want)
+	}
+}
