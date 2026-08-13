@@ -7,6 +7,9 @@ package importer
 
 import (
 	"archive/tar"
+	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,9 +44,13 @@ type Options struct {
 	// archive config is discarded and the target's existing config is kept
 	// (merge mode).
 	ConfigDest string
-	// Force overwrites existing destination files. When false, an existing file
-	// is left in place and recorded in Result.Skipped.
-	Force bool
+	// ForceConfig overwrites an existing file at ConfigDest. A config is a
+	// machine's own settings, so it is protected separately from the data.
+	ForceConfig bool
+	// ForceData overwrites existing database, extracted-text, raw and prompt
+	// files. When false, an existing file is left in place and recorded in
+	// Result.Skipped.
+	ForceData bool
 }
 
 // Result reports the destinations written and skipped.
@@ -55,20 +62,59 @@ type Result struct {
 // Import extracts the tar archive in r according to opts. Each entry is mapped
 // to a destination under opts.Config's component paths (database, extracted
 // store, raw archive, prompts) or, failing that, verbatim under opts.Root.
-// Existing files are overwritten only with opts.Force, otherwise skipped.
+// Existing files are overwritten only with the matching force option
+// (ForceConfig for the archive's config, ForceData for everything else),
+// otherwise skipped.
 // Entries that would escape the destination via an absolute path or `..` are
 // rejected.
 func Import(r io.Reader, opts Options) (Result, error) {
 	var res Result
-	tr := tar.NewReader(r)
+	// A seekable source can be checked for completeness before a single file is
+	// written: an archive cut at a block boundary reads back as a clean EOF, and
+	// restoring the entries that survived would leave a knowledge base silently
+	// missing the rest. A stream that cannot seek is read as it arrives.
+	if rs, ok := r.(io.ReadSeeker); ok {
+		head, err := peekHead(rs)
+		if err != nil {
+			return res, fmt.Errorf("read archive: %w", err)
+		}
+		if n, err := export.CheckComplete(rs); err != nil {
+			// Same classification the streaming path uses: a stray .tar.gz is not
+			// a truncated archive, whatever the tar reader says.
+			return res, archiveError(err, n, head)
+		}
+		if _, err := rs.Seek(0, io.SeekStart); err != nil {
+			return res, fmt.Errorf("rewind archive: %w", err)
+		}
+	}
+
+	// Keep the opening bytes: if the stream turns out not to be a tar archive,
+	// they identify what the user actually pointed us at.
+	br := bufio.NewReader(r)
+	peeked, _ := br.Peek(headSize) // a short read is itself diagnostic
+	// Peek returns a window into the reader's own buffer, which later reads
+	// refill; these bytes outlive those reads, so they have to be a copy.
+	head := append([]byte(nil), peeked...)
+
+	tr := tar.NewReader(br)
+	entries := 0
+	// Set while an entry's body has been left unread: tar.Next consumes it on the
+	// way to the next header, so a failure there belongs to that entry, which is
+	// then not one of the complete ones.
+	bodyPending := false
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return res, fmt.Errorf("read archive: %w", err)
+			if bodyPending && errors.Is(err, io.ErrUnexpectedEOF) {
+				entries--
+			}
+			return res, archiveError(err, entries, head)
 		}
+		entries++
+		bodyPending = true
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
@@ -81,9 +127,11 @@ func Import(r io.Reader, opts Options) (Result, error) {
 			if opts.ConfigDest == "" {
 				continue // merge: keep the target's existing config
 			}
-			if err := writeFile(opts.ConfigDest, tr, opts.Force, &res); err != nil {
-				return res, err
+			consumed, err := writeFile(opts.ConfigDest, tr, opts.ForceConfig, &res)
+			if err != nil {
+				return res, entryError(err, entries, head)
 			}
+			bodyPending = !consumed
 			continue
 		}
 
@@ -91,11 +139,115 @@ func Import(r io.Reader, opts Options) (Result, error) {
 		if !ok {
 			dest = filepath.Join(opts.Root, filepath.FromSlash(name))
 		}
-		if err := writeFile(dest, tr, opts.Force, &res); err != nil {
-			return res, err
+		consumed, err := writeFile(dest, tr, opts.ForceData, &res)
+		if err != nil {
+			return res, entryError(err, entries, head)
 		}
+		bodyPending = !consumed
+	}
+	if entries == 0 {
+		return res, archiveError(errNoEntries, entries, head)
 	}
 	return res, nil
+}
+
+// peekHead reads the opening bytes used for format sniffing and rewinds.
+func peekHead(rs io.ReadSeeker) ([]byte, error) {
+	head := make([]byte, headSize)
+	n, err := io.ReadFull(rs, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return head[:n], nil
+}
+
+// headSize is how many opening bytes are kept for format sniffing — one tar
+// block, enough to cover every magic number in formatOf.
+const headSize = 512
+
+var errNoEntries = errors.New("no entries")
+
+// archiveError turns a tar-level failure into a message that says what is wrong
+// with the file the user named. entries is how many entries were read before
+// the failure, and head the archive's opening bytes.
+//
+// Nothing about the file is established yet while entries is 0, so those cases
+// are classified first: a file shorter than one tar block fails with
+// io.ErrUnexpectedEOF exactly as a truncated archive does, and calling a stray
+// .tar.gz "truncated" sends the user looking for a broken copy that does not
+// exist.
+func archiveError(err error, entries int, head []byte) error {
+	if entries == 0 {
+		if e := openingError(err, head); e != nil {
+			return e
+		}
+	}
+	switch {
+	case errors.Is(err, export.ErrIncomplete):
+		return fmt.Errorf("read archive: %w; the copy or download is incomplete", err)
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return fmt.Errorf("read archive: archive ends mid-entry after %d complete entries; the copy or download is incomplete", entries)
+	case errors.Is(err, tar.ErrHeader):
+		return fmt.Errorf("read archive: archive is corrupt at entry %d; re-run `tbuk export` to produce a new archive: %w", entries+1, err)
+	default:
+		return fmt.Errorf("read archive: %w", err)
+	}
+}
+
+// openingError classifies a failure on the archive's very first entry, where
+// the file may well not be a tar archive at all. It returns nil when the
+// failure is better described by the generic cases.
+func openingError(err error, head []byte) error {
+	switch {
+	case len(head) == 0:
+		return fmt.Errorf("read archive: file is empty; re-run `tbuk export` to produce a new archive")
+	case errors.Is(err, errNoEntries):
+		return fmt.Errorf("read archive: archive contains no entries; re-run `tbuk export` to produce a new archive")
+	}
+	if format := formatOf(head); format != "" {
+		return fmt.Errorf("read archive: not a tar archive — the file looks like %s data; `tbuk export` writes an uncompressed .tar, so decompress it first", format)
+	}
+	if len(head) < headSize {
+		return fmt.Errorf("read archive: not a tar archive — the file is %d bytes, too short to hold a tar header; expected a file written by `tbuk export`", len(head))
+	}
+	if errors.Is(err, tar.ErrHeader) {
+		return fmt.Errorf("read archive: not a tar archive; expected a file written by `tbuk export`: %w", err)
+	}
+	return nil
+}
+
+// entryError reports a failure while copying an entry out. A short read means
+// the archive itself is cut off; anything else is a problem with the
+// destination and is passed through unchanged.
+func entryError(err error, entries int, head []byte) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return archiveError(io.ErrUnexpectedEOF, entries-1, head)
+	}
+	return err
+}
+
+// formatOf names the archive format the opening bytes belong to, or "" when
+// they match no format tbuk recognises.
+func formatOf(head []byte) string {
+	for _, f := range []struct {
+		magic []byte
+		name  string
+	}{
+		{[]byte{0x1f, 0x8b}, "gzip"},
+		{[]byte("PK\x03\x04"), "zip"},
+		{[]byte{0x28, 0xb5, 0x2f, 0xfd}, "zstd"},
+		{[]byte("BZh"), "bzip2"},
+		{[]byte{0xfd, '7', 'z', 'X', 'Z', 0x00}, "xz"},
+		{[]byte("SQLite format 3\x00"), "SQLite database"},
+	} {
+		if bytes.HasPrefix(head, f.magic) {
+			return f.name
+		}
+	}
+	return ""
 }
 
 // destFor maps a slash-separated archive entry name to its destination under
@@ -145,31 +297,33 @@ func safeEntryName(name string) bool {
 
 // writeFile copies the current archive entry to dest, creating parent dirs. An
 // existing dest is overwritten only when force is set; otherwise it is left
-// intact and recorded as skipped. Written files are owner-only (0o600).
-func writeFile(dest string, r io.Reader, force bool, res *Result) error {
+// intact and recorded as skipped. Written files are owner-only (0o600). The
+// bool reports whether the entry's body was read, which the caller needs to
+// attribute a later short read to the right entry.
+func writeFile(dest string, r io.Reader, force bool, res *Result) (bool, error) {
 	if !force {
 		switch _, err := os.Stat(dest); {
 		case err == nil:
 			res.Skipped = append(res.Skipped, dest)
-			return nil
+			return false, nil
 		case !os.IsNotExist(err):
-			return fmt.Errorf("stat %s: %w", dest, err)
+			return false, fmt.Errorf("stat %s: %w", dest, err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-		return fmt.Errorf("create dir for %s: %w", dest, err)
+		return false, fmt.Errorf("create dir for %s: %w", dest, err)
 	}
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", dest, err)
+		return false, fmt.Errorf("create %s: %w", dest, err)
 	}
 	if _, err := io.Copy(f, r); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("write %s: %w", dest, err)
+		return true, fmt.Errorf("write %s: %w", dest, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", dest, err)
+		return true, fmt.Errorf("close %s: %w", dest, err)
 	}
 	res.Written = append(res.Written, dest)
-	return nil
+	return true, nil
 }

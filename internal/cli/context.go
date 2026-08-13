@@ -39,7 +39,7 @@ tbuk stats                       document and chunk counts, DB size
 tbuk list                        list all indexed documents
 tbuk find <key=value>...         find documents by metadata
 tbuk export <path>               tar snapshot of the KB (config + data folders) for backup/transfer
-tbuk import <archive>            restore a KB from a tar snapshot (--merge, --force)
+tbuk import <archive>            restore a KB from a tar snapshot (--merge, --force-config, --force-data)
 
 ## Templates
 

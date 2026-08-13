@@ -374,6 +374,69 @@ Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperat
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
+#### Output normalization
+
+Long generations drift away from whatever shape `system.tmpl` asked for —
+markdown lists come back, separators stop being emitted — and no prompt wording
+fixes it. A template therefore *declares* the shape it needs and
+`internal/normalize` enforces it on the completion:
+
+```yaml
+normalize:
+  filters: [strip_preamble, strip_fences, strip_list_markers, collapse_blank_lines]
+  records:
+    separator: "----"
+    fields: [lead, note, body]
+```
+
+```go
+type Config struct {
+    Filters []string       `yaml:"filters"`
+    Records *RecordsConfig `yaml:"records"`
+}
+
+func (c Config) Declared() bool   // template asked for normalization
+func (c Config) Validate() error  // unknown filter / empty separator
+func Apply(raw string, cfg Config) (string, error)
+func FilterNames() []string
+```
+
+`filters` are line-level cleanups run in the order listed (`strip_fences`,
+`strip_headings`, `strip_list_markers`, `strip_preamble`, `collapse_blank_lines`,
+`trim_trailing_space`). The optional `records` block is the one structured
+primitive, and it carries no template-specific vocabulary: `fields` lists
+positional line roles — `lead` (first line), optional `note` (a parenthesised
+second line), `body` (the rest, one item per line). It starts with `lead`, ends
+with `body`, and defaults to `[lead, body]`. The `note` field is emitted even
+when empty, since dropping it shifts the first body line into the note.
+Record boundaries come from the declared `separator` where the model still
+emitted it — whatever follows one opens a record, lead-shaped or not — and
+otherwise from a lead line (trailing `?`) after a blank line;
+output with no question marks falls back to blank-line-delimited blocks.
+Anything ahead of the first separator or question line is chatter ("Here are the
+cards.") and is dropped — but only in that question-mark mode, since with no
+questions anywhere there is nothing to separate an opening pleasantry from a
+legitimate first lead. A
+separator that is itself a markdown rule (`----`) also matches neighbouring
+rules, since a model asked for four dashes often writes three or five; any other
+separator splits on itself alone, so a rule sitting in the body stays content.
+
+A declared `records` block also changes what else reaches stdout: the `Sources:`
+footer goes to the diagnostics stream instead. `RunAsk` also owns the final
+newline on every path now: it adds one only when the output does not already end
+with one, so prose no longer gains a blank line and record output stays
+byte-exact — an empty stream when there are no records, not a blank line. Templates
+with only `filters` still produce prose and keep their citations inline.
+
+`Manifest.Normalize` carries the config and `loadManifest` validates it, so a
+misspelt filter or field name fails at template load rather than after a model
+call. `RunAsk`
+buffers the completion whenever a pipeline is declared — normalization rewrites
+whole records, so those templates cannot stream. Templates that declare nothing
+(`qa`, `brief`) are untouched, streaming included. The builtin `anki` template
+declares the pipeline above; `anki` is the only template that calls its records
+"cards", and that name lives in its prompt, not in the mechanism.
+
 ---
 
 ## Export
@@ -403,8 +466,39 @@ CLI seams (`internal/cli/export.go`), exported for unit testing like
   it; existing file or non-existent path → used as-is; non-existent path with a
   trailing separator → error.
 - `RunExport(in, out, cfg, root, target, force)` — prompts before overwriting an
-  existing target unless `force`; writes to a temp file in the destination dir
-  then renames into place (crash-safe, `0o600`).
+  existing target unless `force`; writes to a temp file in the destination dir,
+  re-reads it through `export.Verify` and only then renames into place
+  (crash-safe, `0o600`).
+
+Only regular files are archived: directories, sockets, devices and named pipes
+are skipped, so a FIFO left in a data folder cannot block the export.
+
+```go
+// CheckComplete walks every header, checking each entry's declared extent — and
+// the two zero blocks that terminate a tar — against the file's length. Returns
+// how many entries are intact.
+func CheckComplete(rs io.ReadSeeker) (int, error)
+
+// Verify is CheckComplete plus a config.yaml entry; one walk, not two.
+func Verify(rs io.ReadSeeker) error
+
+var ErrIncomplete = errors.New("archive is truncated")
+```
+
+Both sit on one internal walk that seeks from header to header: it reads a
+header block per entry and never touches a body, so cost is O(entries) rather
+than O(archive size) — 256 MiB verifies in ~300µs. The seek is explicit rather
+than left to `archive/tar` skipping unread bodies, and a byte-counting test pins
+the bound.
+
+The length comparison is the part a header walk cannot do on its own: a tar cut
+at a block boundary — its terminating zero blocks gone — reads back as a clean
+`io.EOF`, indistinguishable from a complete archive. Checking extents rather
+than waiting for a read to fail also keeps the entry count honest: an entry
+whose body is cut short is not counted among the intact ones, so the error can
+name it. The streaming import path tracks the same thing by remembering whether
+an entry's body was consumed, since `tar.Next` swallows an unread body on its
+way to the next header.
 
 ## Import
 
@@ -434,14 +528,40 @@ config. `Import` maps those four canonical components onto the target config's
 paths; any other entry is re-homed verbatim under the root. Files are written
 `0o600`.
 
+Overwriting is split in two: `Options.ForceConfig` covers the archive's
+`config.yaml`, `Options.ForceData` everything else. A config describes the
+machine it lives on — paths, providers, model choices — so replacing it is a
+different decision from replacing the knowledge base it points at, and neither
+flag implies the other. A destination that does not exist yet is always
+written.
+
 CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
-- `RunImport(out, archivePath, cfg, root, configPath, merge, force)` — opens the
-  archive and dispatches by mode. **Non-merge** (default): placement uses
-  `DefaultsForRoot(root)` and the archive's `config.yaml` is written to
-  `configPath`, so the adopted config and the re-homed folders agree (the
-  archive's commented paths resolve to those same defaults). **Merge**
-  (`--merge`): placement uses the loaded target `cfg` and the archive config is
-  discarded, folding the snapshot into the existing KB's folders.
+- `RunImport(out, archivePath, cfg, root, configPath, merge, forceConfig, forceData)` — opens the
+  archive and dispatches on **which config will be in effect afterwards**, since
+  that is what the restored folders have to agree with. The archive's config is
+  *adopted* only in non-merge mode when the target has no config yet or
+  `--force-config` replaces it; placement then uses `DefaultsForRoot(root)`, which
+  is what the archive's commented paths resolve to. Otherwise the target's config
+  survives — under `--merge`, or because it exists and `--force-config` was not
+  given — and placement uses the loaded `cfg`, so data lands in the folders the
+  live config names. Restoring into the root's defaults while a config pointing
+  elsewhere survives would leave the knowledge base unable to see its own data;
+  the command says which config it kept.
+
+`Import` runs `export.CheckComplete` first when its reader is an `io.ReadSeeker`
+(as the CLI's `*os.File` is), so an incomplete archive is refused before a single
+file is written rather than restoring a silently partial knowledge base. A
+non-seekable stream keeps the old behaviour — completeness cannot be established
+up front — and is read as it arrives.
+
+Archive faults are named rather than surfaced raw: `Import` keeps the first 512
+bytes for format sniffing and reports an empty file, an entry-less archive, a
+mid-entry truncation, a corrupt entry (with its index), or a non-tar file —
+including the format it looks like (`gzip`, `zip`, `zstd`, `bzip2`, `xz`, a
+SQLite database), or an archive shorter than the entries it declares. Failures
+on the first entry are classified before the generic cases, since a file too
+short to hold a tar header fails identically to a truncated archive.
+`RunImport` prefixes the archive path.
 
 Because the target may be a fresh machine, import works with no pre-existing
 config — the root `PersistentPreRunE` loads `DefaultsForRoot(root)`, which passes
@@ -470,7 +590,7 @@ tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--fo
 tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
 tbuk list                      list indexed documents: path, title, chunk count, updated_at (--limit, --format text|json)
 tbuk export <path>             tar snapshot of config + data folders (dir→timestamped file, file→as-is; --force, --root)
-tbuk import <archive>          restore a tar snapshot under the target root (--merge keeps target config, --force overwrites)
+tbuk import <archive>          restore a tar snapshot under the target root (--merge keeps target config, --force-config / --force-data overwrite)
 ```
 
 ---

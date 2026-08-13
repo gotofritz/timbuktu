@@ -555,3 +555,256 @@ func TestAskCommand_templateEditCommand(t *testing.T) {
 		t.Errorf("template edit did not run editor on manifest; content = %q", got)
 	}
 }
+
+// buildNormalizingTemplate returns a template that declares a normalize
+// pipeline, as the builtin anki template does.
+func buildNormalizingTemplate(t *testing.T) *prompts.Template {
+	t.Helper()
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `name: cards
+output: text
+normalize:
+  filters: [strip_preamble, strip_fences, strip_list_markers, collapse_blank_lines]
+  records:
+    separator: "----"
+    fields: [lead, note, body]
+`
+	for name, content := range map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   "Make cards.",
+		"user.tmpl":     "Topic: {{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tmpl, err := prompts.NewTemplateDir(dir).Load("cards")
+	if err != nil {
+		t.Fatalf("load template: %v", err)
+	}
+	return tmpl
+}
+
+// A template that declares a pipeline gets its completion repaired, whatever
+// the model streamed.
+func TestRunAsk_appliesTemplateNormalization(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out bytes.Buffer
+
+	drifted := []string{
+		"Here are the cards:\n\n",
+		"What is tokenization?\n- Converting text into tokens\n\n",
+		"What is decode?\n1. Generating tokens one at a time\n",
+	}
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		mockChat(drifted, nil),
+		tmpl,
+		"topic",
+		nil,
+		0,
+		false, // streaming requested: normalization must still buffer and repair
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+
+	want := "----\n\nWhat is tokenization?\n\nConverting text into tokens\n\n" +
+		"----\n\nWhat is decode?\n\nGenerating tokens one at a time\n"
+	if got := out.String(); !strings.Contains(got, want) {
+		t.Errorf("normalized output missing\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// Templates without a pipeline keep the model's output verbatim.
+func TestRunAsk_leavesOutputAloneWithoutPipeline(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out bytes.Buffer
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		mockChat([]string{"- a bullet\n- another\n"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(out.String(), "- a bullet") {
+		t.Errorf("output should be untouched, got %q", out.String())
+	}
+}
+
+// Output that another program consumes must stay pure: the citations footer is
+// provenance for the person running the command, not part of the record stream.
+func TestRunAsk_recordsOutputKeepsCitationsOffStdout(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out, errOut bytes.Buffer
+	chunks := []retrieval.RetrievedChunk{
+		{Citation: "/docs/a.md §1", Text: "ctx", Path: "/docs/a.md", ChunkIndex: 1},
+	}
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(chunks, nil),
+		mockChat([]string{"What is tokenization?\n- Converting text into tokens\n"}, nil),
+		tmpl,
+		"topic",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errOut),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+
+	want := "----\n\nWhat is tokenization?\n\nConverting text into tokens\n"
+	if got := out.String(); got != want {
+		t.Errorf("stdout should hold records only\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+	if got := errOut.String(); !strings.Contains(got, "/docs/a.md §1") || !strings.Contains(got, "Sources:") {
+		t.Errorf("citations should still be reported on stderr, got %q", got)
+	}
+}
+
+// A template with only line filters still produces prose, so its citations stay
+// where they were.
+func TestRunAsk_filterOnlyTemplateKeepsCitationsOnStdout(t *testing.T) {
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "tidy")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"manifest.yaml": "name: tidy\nnormalize:\n  filters: [strip_fences]\n",
+		"system.tmpl":   "Answer.",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("tidy")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	chunks := []retrieval.RetrievedChunk{{Citation: "/docs/a.md §1", Text: "ctx", Path: "/docs/a.md"}}
+	if err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(chunks, nil),
+		mockChat([]string{"```\nprose answer\n```\n"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+	); err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "Sources:") {
+		t.Errorf("prose output should keep its citations, got %q", got)
+	}
+}
+
+// A model that returns nothing usable normalizes to an empty string. The
+// records contract still holds: an empty file, not a file with a blank line.
+func TestRunAsk_emptyRecordsOutputWritesNothing(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out bytes.Buffer
+
+	if err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve(nil, nil),
+		mockChat([]string{"Here are the cards:\n\n"}, nil), // preamble only, no records
+		tmpl,
+		"topic",
+		nil,
+		0,
+		false,
+	); err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("empty record output should write nothing, got %q", got)
+	}
+}
+
+// Whatever the pipeline, the answer ends with exactly one newline: a model that
+// already ends its text with one must not gain a blank line from it.
+func TestRunAsk_endsWithExactlyOneNewline(t *testing.T) {
+	filterOnly := buildFilterTemplate(t)
+
+	cases := []struct {
+		name   string
+		tmpl   *prompts.Template
+		tokens []string
+		want   string
+	}{
+		{name: "prose streamed", tmpl: buildQATemplate(t), tokens: []string{"an answer\n"}, want: "an answer\n"},
+		{name: "prose without its own newline", tmpl: buildQATemplate(t), tokens: []string{"an answer"}, want: "an answer\n"},
+		{name: "filters only", tmpl: filterOnly, tokens: []string{"```\nan answer\n```\n"}, want: "an answer\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := cli.RunAsk(
+				context.Background(),
+				&out,
+				mockRetrieve(nil, nil),
+				mockChat(tc.tokens, nil),
+				tc.tmpl,
+				"question",
+				nil,
+				0,
+				false,
+			); err != nil {
+				t.Fatalf("RunAsk: %v", err)
+			}
+			if got := out.String(); got != tc.want {
+				t.Errorf("output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// buildFilterTemplate returns a template declaring line filters but no records.
+func buildFilterTemplate(t *testing.T) *prompts.Template {
+	t.Helper()
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "tidy")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"manifest.yaml": "name: tidy\nnormalize:\n  filters: [strip_fences]\n",
+		"system.tmpl":   "Answer.",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("tidy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tmpl
+}

@@ -141,52 +141,83 @@ max_tokens: 4096
 retrieval:
   top_k: 10
 output: text
+# Long generations drift back into markdown lists and stop emitting separators,
+# so the card shape is repaired after the call instead of only being asked for.
+normalize:
+  filters: [strip_preamble, strip_fences, strip_headings, strip_list_markers, collapse_blank_lines]
+  records:
+    separator: "----"
+    fields: [lead, note, body]
 `
-	system := `Generate Anki flashcards from the provided context. Output a single markdown document containing all cards.
+	system := `Generate Anki flashcards from the provided context.
 
-Fields are positional (the consuming script assigns meaning by line position):
-  line 1       question
-  line 2       clarification note in parentheses (optional; same field as question)
-  blank line   ONE blank line separating question block from answer block — nowhere else
-  line 3+      answer lines, one per item; NO blank lines between answer lines
+Emit cards and nothing else: no preamble, no closing remark, no headings, no
+code fences, no card numbers.
 
-` + "`----`" + ` separates cards.
+Every card is the same block, and the separator is part of it — every card
+starts with one:
 
-Simple card:
+  ----          separator line: four hyphens, nothing else
+  (empty line)
+  line A        question
+  line B        note: extra context for the question. Most cards have none, so
+                line B is usually empty — emit the empty line anyway. It is the
+                note field, not spacing. Never drop it.
+  line C on     answer, one item per line
+  (empty line)  ends the card
 
-` + "```" + `
+Fields are positional: the consuming script reads line A as the question, line B
+as the note, and every line after that as the answer. Drop line B and the first
+answer item silently becomes the note.
+
+The only empty lines in a card are the one after ----, line B when the card has
+no note, and the one that ends the card. The answer itself has no blank lines.
+
+Answer items are bare lines. Do not start any line with -, *, + or a bullet
+character, and do not number them. Inline emphasis or backticks inside a line
+are fine; line-leading list markup is not.
+
+Reproduce this shape exactly — four cards, the third one carrying a note:
+
+===BEGIN EXAMPLE===
+----
+
 What is tokenization?
 
-Converting text into tokens that a model can process
-` + "```" + `
+Converting text into tokens a model can process
 
-Question with clarification:
+----
 
-` + "```" + `
-What is prefill?
-(LLM inference)
-
-Stage where model processes entire prompt and builds KV cache
-` + "```" + `
-
-List answer — answer lines are consecutive, no blank lines between them:
-
-` + "```" + `
 What are the two phases of LLM inference?
 
 Prefill
 Decode
-` + "```" + `
+
+----
+
+What is prefill?
+(LLM inference)
+Stage where the model processes the whole prompt and builds the KV cache
+
+----
+
+Why does decode slow down with long context?
+
+More KV cache data must be read per generated token
+===END EXAMPLE===
+
+Check every card before emitting it: it opens with ----, its question is
+followed by exactly one note line (empty unless the card needs a note), and its
+answer carries no blank lines and no list markup.
 
 Rules:
-- 1 question → 1 fact
-- Exactly one blank line per card: between question block and answer block
-- No blank lines within the answer block
-- ` + "`----`" + ` = card separator
-- No card numbers
-- No bullets unless source material requires them
-- Card may have more than two fields; question and answer are logical, not fixed line counts
-- Split aggressively: answer has >1 independent idea, >4 list items, or tests multiple relationships
+- 1 question -> 1 fact
+- ---- before every card, first card included
+- No bullets, no numbering, no headings
+- A card may have many answer lines; question, note and answer are logical
+  blocks, not fixed line counts
+- Split aggressively: split when an answer holds more than one independent idea,
+  more than 4 list items, or tests multiple relationships
 
 Priority order for card content:
 1. Core mental models
@@ -202,6 +233,7 @@ Good: "Why does decode slow down with long context? More KV cache data must be r
 
 Generate the minimum cards needed to cover all important concepts. Never merge concepts to reduce card count.
 `
+
 	user := `Topic: {{ .Question }}
 
 Context:

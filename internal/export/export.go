@@ -6,6 +6,7 @@ package export
 
 import (
 	"archive/tar"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -61,6 +62,117 @@ func Create(w io.Writer, cfg config.Config, root string) error {
 		return fmt.Errorf("close tar: %w", err)
 	}
 	return nil
+}
+
+// blockSize is the tar block size; entry bodies are padded up to it, and an
+// archive is terminated by two zero blocks.
+const blockSize = 512
+
+// Verify reads rs as a tar archive and reports whether it is a complete,
+// well-formed export: CheckComplete passes and the config entry is present.
+//
+// It takes an io.ReadSeeker rather than an io.Reader because the walk seeks from
+// header to header — verifying a multi-gigabyte archive costs little more than
+// reading its headers — and because completeness cannot be established without
+// knowing the file's length (see CheckComplete).
+//
+// Callers use it to catch a damaged archive at export time, before it is handed
+// to a user who would otherwise only discover the damage on import.
+func Verify(rs io.ReadSeeker) error {
+	sawConfig := false
+	if _, err := walkHeaders(rs, func(hdr *tar.Header) {
+		if hdr.Name == ConfigName {
+			sawConfig = true
+		}
+	}); err != nil {
+		return fmt.Errorf("verify archive: %w", err)
+	}
+	if !sawConfig {
+		return fmt.Errorf("verify archive: missing %s entry", ConfigName)
+	}
+	return nil
+}
+
+// ErrIncomplete reports an archive shorter than the entries it declares.
+var ErrIncomplete = errors.New("archive is truncated")
+
+// CheckComplete reports whether rs holds a whole tar archive: every header
+// parses, and the file is long enough for each entry body it declares plus the
+// two zero blocks that terminate a tar. It returns how many entries are intact,
+// which callers use to say where a damaged archive went wrong.
+//
+// Each entry's extent is checked against the file's length rather than inferred
+// from a read failure, which keeps the count honest: an entry whose body is cut
+// short is not counted. Bodies are never read — the walk seeks from one header
+// to the next — so its cost is O(entries), not O(archive size).
+//
+// The length comparison is also what catches the case a walk cannot: a tar cut
+// at a block boundary, with its terminating blocks gone, reads back as a clean
+// EOF, indistinguishable from a complete archive, and its surviving entries
+// would be restored as if nothing were missing.
+func CheckComplete(rs io.ReadSeeker) (int, error) {
+	return walkHeaders(rs, nil)
+}
+
+// walkHeaders visits every entry header, checking as it goes that the archive
+// is long enough to hold each declared body and the end-of-archive marker. It
+// returns the number of intact entries. visit may be nil.
+func walkHeaders(rs io.ReadSeeker, visit func(*tar.Header)) (int, error) {
+	size, err := rs.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, err
+	}
+
+	entries := 0
+	var offset int64   // start of the next header block
+	var declared int64 // end of the furthest entry body seen
+	for {
+		if _, err := rs.Seek(offset, io.SeekStart); err != nil {
+			return entries, err
+		}
+		// A fresh reader per header. It parses this header — including any PAX or
+		// GNU extension blocks that precede it — and stops at the body, so the
+		// walk reads header blocks and nothing else. Seeking to the next header
+		// ourselves is what makes that true: reusing one reader would leave it to
+		// skip the body on the way to the next entry.
+		hdr, err := tar.NewReader(rs).Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return entries, err
+		}
+		body, err := rs.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return entries, err
+		}
+		// Whether this entry's body fits is a separate question from whether the
+		// archive was terminated: a body that is whole counts as an intact entry
+		// even when the file stops right after it.
+		end := body + padded(hdr.Size)
+		if end > size {
+			return entries, fmt.Errorf("%w: %d bytes present, %d needed for the body of %q",
+				ErrIncomplete, size, end, hdr.Name)
+		}
+		if visit != nil {
+			visit(hdr)
+		}
+		entries++
+		offset = end
+		declared = end
+	}
+	// Two zero blocks terminate a tar. Without them the file was cut at a block
+	// boundary, which reads back as a clean EOF.
+	if want := declared + 2*blockSize; size < want {
+		return entries, fmt.Errorf("%w: %d bytes present, %d needed for its entries and the "+
+			"end-of-archive marker", ErrIncomplete, size, want)
+	}
+	return entries, nil
+}
+
+// padded rounds an entry size up to a whole number of tar blocks.
+func padded(n int64) int64 {
+	return (n + blockSize - 1) / blockSize * blockSize
 }
 
 // archiveName maps a source path to its archive entry name: relative to root
@@ -120,7 +232,10 @@ func addFile(tw *tar.Writer, path, name string) error {
 		}
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	if info.IsDir() {
+	// Only regular files are archivable content. Directories, sockets, devices
+	// and named pipes are skipped — opening a pipe blocks until a writer appears,
+	// which would hang the export.
+	if !info.Mode().IsRegular() {
 		return nil
 	}
 	f, err := os.Open(path)

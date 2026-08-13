@@ -3,9 +3,12 @@ package importer_test
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/config"
@@ -181,10 +184,11 @@ func TestImport_forceOverwrites(t *testing.T) {
 	arc := buildTar(t, standardArchive())
 
 	res, err := importer.Import(bytes.NewReader(arc), importer.Options{
-		Root:       root,
-		Config:     config.DefaultsForRoot(root),
-		ConfigDest: filepath.Join(root, "config.yaml"),
-		Force:      true,
+		Root:        root,
+		Config:      config.DefaultsForRoot(root),
+		ConfigDest:  filepath.Join(root, "config.yaml"),
+		ForceConfig: true,
+		ForceData:   true,
 	})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
@@ -362,9 +366,9 @@ func TestImport_mkdirErrorPropagates(t *testing.T) {
 	}
 	arc := buildTar(t, map[string]string{"notes/todo.txt": "hi"})
 	if _, err := importer.Import(bytes.NewReader(arc), importer.Options{
-		Root:   root,
-		Config: config.DefaultsForRoot(root),
-		Force:  true, // skip the stat check so MkdirAll is the failing step
+		Root:      root,
+		Config:    config.DefaultsForRoot(root),
+		ForceData: true, // skip the stat check so MkdirAll is the failing step
 	}); err == nil {
 		t.Fatal("expected error when the destination directory cannot be created")
 	}
@@ -379,5 +383,297 @@ func TestImport_corruptArchiveErrors(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for a corrupt archive")
+	}
+}
+
+func TestImport_corruptArchiveErrorNamesTarArchive(t *testing.T) {
+	root := t.TempDir()
+	_, err := importer.Import(bytes.NewReader(bytes.Repeat([]byte("x"), 2048)), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for a corrupt archive")
+	}
+	if !strings.Contains(err.Error(), "not a tar archive") {
+		t.Errorf("error should say the file is not a tar archive, got %q", err)
+	}
+}
+
+func TestImport_compressedArchiveErrorNamesFormat(t *testing.T) {
+	cases := []struct {
+		name  string
+		magic []byte
+		want  string
+	}{
+		{"gzip", []byte{0x1f, 0x8b, 0x08, 0x00}, "gzip"},
+		{"zip", []byte("PK\x03\x04"), "zip"},
+		{"zstd", []byte{0x28, 0xb5, 0x2f, 0xfd}, "zstd"},
+		{"bzip2", []byte("BZh9"), "bzip2"},
+		{"xz", []byte{0xfd, '7', 'z', 'X', 'Z', 0x00}, "xz"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			data := append(append([]byte{}, tc.magic...), bytes.Repeat([]byte("x"), 1024)...)
+			_, err := importer.Import(bytes.NewReader(data), importer.Options{
+				Root:   root,
+				Config: config.DefaultsForRoot(root),
+			})
+			if err == nil {
+				t.Fatal("expected error for a compressed archive")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should name the %s format, got %q", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestImport_truncatedArchiveErrorSaysTruncated(t *testing.T) {
+	root := t.TempDir()
+	data := buildTar(t, map[string]string{
+		"config.yaml": "database:\n",
+		"tbuk.sqlite": strings.Repeat("d", 4096),
+	})
+	half := data[:len(data)/2]
+
+	// Seekable: the pre-flight compares extents, so it can name the entry that
+	// does not fit.
+	_, err := importer.Import(bytes.NewReader(half), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for a truncated archive")
+	}
+	if !strings.Contains(err.Error(), "truncated") || !strings.Contains(err.Error(), "tbuk.sqlite") {
+		t.Errorf("error should say which entry is truncated, got %q", err)
+	}
+
+	// Non-seekable: the read loop reports how far it got instead.
+	_, err = importer.Import(nonSeeker{r: bytes.NewReader(half)}, importer.Options{
+		Root:   t.TempDir(),
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for a truncated archive")
+	}
+	if !strings.Contains(err.Error(), "ends mid-entry") {
+		t.Errorf("error should say the archive ends mid-entry, got %q", err)
+	}
+}
+
+func TestImport_emptyArchiveErrors(t *testing.T) {
+	root := t.TempDir()
+	_, err := importer.Import(bytes.NewReader(nil), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for an empty archive")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error should say the archive is empty, got %q", err)
+	}
+}
+
+func TestImport_archiveWithoutEntriesErrors(t *testing.T) {
+	root := t.TempDir()
+	// A well-formed tar holding nothing restores nothing: report it rather than
+	// claiming a successful import of zero files.
+	_, err := importer.Import(bytes.NewReader(buildTar(t, nil)), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected error for an archive with no entries")
+	}
+	if !strings.Contains(err.Error(), "no entries") {
+		t.Errorf("error should say the archive has no entries, got %q", err)
+	}
+}
+
+// A file too small to hold a tar header must not be reported as a truncated
+// archive: the tar reader returns io.ErrUnexpectedEOF for those too, but the
+// user's file is a different kind of thing entirely.
+func TestImport_shortNonTarFilesAreNotReportedAsTruncated(t *testing.T) {
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{name: "short gzip names the format", data: gz.Bytes(), want: "gzip"},
+		{name: "short text says it is too short", data: []byte("hello\n"), want: "too short"},
+		{name: "short sqlite names the format", data: []byte("SQLite format 3\x00short"), want: "SQLite"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			_, err := importer.Import(bytes.NewReader(tc.data), importer.Options{
+				Root:   root,
+				Config: config.DefaultsForRoot(root),
+			})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should mention %q, got %q", tc.want, err)
+			}
+			if strings.Contains(err.Error(), "ends mid-entry") {
+				t.Errorf("a short non-tar file is not a truncated archive, got %q", err)
+			}
+		})
+	}
+}
+
+// An archive cut at a block boundary reads back as a clean EOF, so the entries
+// that survived would import as if nothing were missing. When the reader can
+// seek, refuse it instead of restoring half a knowledge base.
+func TestImport_rejectsArchiveTruncatedAtBlockBoundary(t *testing.T) {
+	root := t.TempDir()
+	arc := buildTar(t, standardArchive())
+	stripped := arc[:len(arc)-1024] // drop the end-of-archive marker
+
+	res, err := importer.Import(bytes.NewReader(stripped), importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected an error for an archive with no end-of-archive marker")
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("error should say the archive is truncated, got %q", err)
+	}
+	if len(res.Written) > 0 {
+		t.Errorf("nothing should be written from an incomplete archive, wrote %v", res.Written)
+	}
+}
+
+// nonSeeker hides the seek capability of the underlying reader.
+type nonSeeker struct{ r io.Reader }
+
+func (n nonSeeker) Read(p []byte) (int, error) { return n.r.Read(p) }
+
+// A stream that cannot seek keeps the old behaviour: entries are restored as
+// they arrive, since completeness cannot be established up front.
+func TestImport_nonSeekableStreamStillImports(t *testing.T) {
+	root := t.TempDir()
+	arc := buildTar(t, standardArchive())
+
+	res, err := importer.Import(nonSeeker{r: bytes.NewReader(arc)}, importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(res.Written) == 0 {
+		t.Error("expected entries to be written from a non-seekable stream")
+	}
+}
+
+// On a non-seekable stream the count comes from the read loop. An entry whose
+// body is skipped (no --force) and then turns out to be truncated must not be
+// counted as complete either.
+func TestImport_streamingCountExcludesTheTruncatedEntry(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "tbuk.sqlite")
+	if err := os.WriteFile(dbPath, []byte("OLD"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// tbuk.sqlite sorts after config.yaml, so it is entry 2 and gets skipped
+	// because it already exists; cut inside its body.
+	arc := buildTar(t, map[string]string{
+		"config.yaml": "llm:\n",
+		"tbuk.sqlite": strings.Repeat("d", 4096),
+	})
+	cut := len(arc) - 1024 - 2048 // inside the database body
+
+	_, err := importer.Import(nonSeeker{r: bytes.NewReader(arc[:cut])}, importer.Options{
+		Root:   root,
+		Config: config.DefaultsForRoot(root),
+	})
+	if err == nil {
+		t.Fatal("expected an error for a truncated archive")
+	}
+	if !strings.Contains(err.Error(), "after 1 complete") {
+		t.Errorf("only config.yaml is complete, got %q", err)
+	}
+}
+
+// Config and data are forced independently: a restore may adopt the archive's
+// config while leaving a live database alone, or the reverse.
+func TestImport_forceConfigAndForceDataAreIndependent(t *testing.T) {
+	arc := buildTar(t, map[string]string{
+		"config.yaml": "NEW-CONFIG",
+		"tbuk.sqlite": "NEW-DB",
+	})
+
+	cases := []struct {
+		name                   string
+		forceConfig, forceData bool
+		wantConfig, wantDB     string
+	}{
+		{name: "neither overwrites", wantConfig: "OLD-CONFIG", wantDB: "OLD-DB"},
+		{name: "config only", forceConfig: true, wantConfig: "NEW-CONFIG", wantDB: "OLD-DB"},
+		{name: "data only", forceData: true, wantConfig: "OLD-CONFIG", wantDB: "NEW-DB"},
+		{name: "both", forceConfig: true, forceData: true, wantConfig: "NEW-CONFIG", wantDB: "NEW-DB"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			cfgPath := filepath.Join(root, "config.yaml")
+			dbPath := filepath.Join(root, "tbuk.sqlite")
+			for path, content := range map[string]string{cfgPath: "OLD-CONFIG", dbPath: "OLD-DB"} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if _, err := importer.Import(bytes.NewReader(arc), importer.Options{
+				Root:        root,
+				Config:      config.DefaultsForRoot(root),
+				ConfigDest:  cfgPath,
+				ForceConfig: tc.forceConfig,
+				ForceData:   tc.forceData,
+			}); err != nil {
+				t.Fatalf("Import: %v", err)
+			}
+			if got := readFile(t, cfgPath); got != tc.wantConfig {
+				t.Errorf("config = %q, want %q", got, tc.wantConfig)
+			}
+			if got := readFile(t, dbPath); got != tc.wantDB {
+				t.Errorf("db = %q, want %q", got, tc.wantDB)
+			}
+		})
+	}
+}
+
+// A config that is not there yet is written whatever the flags say — there is
+// nothing to protect.
+func TestImport_missingConfigIsWrittenWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := filepath.Join(root, "config.yaml")
+	arc := buildTar(t, map[string]string{"config.yaml": "NEW-CONFIG"})
+
+	if _, err := importer.Import(bytes.NewReader(arc), importer.Options{
+		Root:       root,
+		Config:     config.DefaultsForRoot(root),
+		ConfigDest: cfgPath,
+	}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if got := readFile(t, cfgPath); got != "NEW-CONFIG" {
+		t.Errorf("config = %q, want NEW-CONFIG", got)
 	}
 }

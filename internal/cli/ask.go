@@ -11,6 +11,7 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/llm"
+	"github.com/gotofritz/timbuktu/internal/normalize"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
 	"github.com/gotofritz/timbuktu/internal/search"
@@ -217,7 +218,15 @@ func RunAsk(
 		return fmt.Errorf("LLM chat: %w", err)
 	}
 
-	if noStream {
+	// The answer ends with exactly one newline, whichever path produced it: the
+	// model's own trailing newline counts, so prose does not gain a blank line
+	// and a record stream stays byte-exact.
+	endsWithNewline := false
+
+	// A declared normalize pipeline rewrites whole cards, so the completion has
+	// to be in hand before anything is printed — streaming is not available for
+	// those templates.
+	if noStream || manifest.Normalize.Declared() {
 		var sb strings.Builder
 		for tok := range tokenCh {
 			if tok.Error != nil {
@@ -228,24 +237,44 @@ func RunAsk(
 				break
 			}
 		}
-		_, _ = fmt.Fprint(out, sb.String())
+		text, err := normalize.Apply(sb.String(), manifest.Normalize)
+		if err != nil {
+			return fmt.Errorf("normalize output: %w", err)
+		}
+		_, _ = fmt.Fprint(out, text)
+		// Record output manages its own trailing newline, including when there are
+		// no records and it is empty.
+		endsWithNewline = manifest.Normalize.Records != nil || strings.HasSuffix(text, "\n")
 	} else {
 		for tok := range tokenCh {
 			if tok.Error != nil {
 				return fmt.Errorf("LLM stream: %w", tok.Error)
 			}
 			_, _ = fmt.Fprint(out, tok.Text)
+			if tok.Text != "" {
+				endsWithNewline = strings.HasSuffix(tok.Text, "\n")
+			}
 			if tok.Done {
 				break
 			}
 		}
 	}
-	_, _ = fmt.Fprintln(out)
+	if !endsWithNewline {
+		_, _ = fmt.Fprintln(out)
+	}
 
 	if len(chunks) > 0 {
-		_, _ = fmt.Fprintln(out, "\nSources:")
+		// Citations are provenance for whoever ran the command. When the template
+		// declares a record layout the output is meant for another program — an
+		// Anki import, a script — so the footer would corrupt it; report it on the
+		// diagnostics stream instead of dropping it.
+		sink := out
+		if manifest.Normalize.Records != nil {
+			sink = newSanitizeWriter(cfg.errOut)
+		}
+		_, _ = fmt.Fprintln(sink, "\nSources:")
 		for i, ch := range chunks {
-			_, _ = fmt.Fprintf(out, "  [%d] %s\n", i+1, ch.Citation)
+			_, _ = fmt.Fprintf(sink, "  [%d] %s\n", i+1, ch.Citation)
 		}
 	}
 	return nil

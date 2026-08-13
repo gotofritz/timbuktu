@@ -285,3 +285,59 @@ func TestTemplateRender_userError(t *testing.T) {
 		t.Fatal("expected error from user template execution, got nil")
 	}
 }
+
+func TestLoad_readsNormalizePipeline(t *testing.T) {
+	dir := t.TempDir()
+	tdir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(tdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(tdir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("manifest.yaml", "name: cards\nnormalize:\n  filters: [strip_fences]\n  records:\n    separator: \"----\"\n    fields: [lead, note, body]\n")
+	write("system.tmpl", "sys")
+	write("user.tmpl", "usr")
+
+	tmpl, err := prompts.NewTemplateDir(dir).Load("cards")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := tmpl.Manifest().Normalize
+	if !got.Declared() {
+		t.Fatal("manifest should carry the declared pipeline")
+	}
+	if len(got.Filters) != 1 || got.Filters[0] != "strip_fences" {
+		t.Errorf("filters = %v", got.Filters)
+	}
+	if got.Records == nil || got.Records.Separator != "----" {
+		t.Errorf("records = %+v", got.Records)
+	}
+}
+
+func TestLoad_rejectsUnknownNormalizeFilter(t *testing.T) {
+	dir := t.TempDir()
+	tdir := filepath.Join(dir, "cards")
+	if err := os.MkdirAll(tdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"manifest.yaml": "name: cards\nnormalize:\n  filters: [make_it_nice]\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	} {
+		if err := os.WriteFile(filepath.Join(tdir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := prompts.NewTemplateDir(dir).Load("cards")
+	if err == nil {
+		t.Fatal("expected a load error for an unknown filter")
+	}
+	if !strings.Contains(err.Error(), "make_it_nice") {
+		t.Errorf("error should name the unknown filter, got %q", err)
+	}
+}
