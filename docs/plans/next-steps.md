@@ -30,6 +30,8 @@ engineering cost against the current architecture.
            │  • Query rewrite / expand      │  • Embedding-model migration   │
            │  • Lineage: source_uri         │  • Structural chunking         │
            │    + inline citations          │                                │
+           │  • Topics (tags): filter,      │                                │
+           │    digest, scoped export       │                                │
            ├────────────────────────────────┼────────────────────────────────┤
            │  FILL-INS                      │  MONEY PITS                    │
    LOW     │  spare-time polish             │  avoid / defer                 │
@@ -77,6 +79,15 @@ scattered across it; the matrix above points at them by group.
 4. **More extractors.** Add `docx`, `epub`, and source-code files to the
    `Extractor` backends. The interface already exists — each backend is small
    and independently testable.
+
+32. **Topics (tags).** *(user-requested)* Tag documents at ingest
+    (`--topic x,y`) or later (`tbuk topic add`); scope `search`/`ask` with
+    `--topic`; manage with `tbuk topic list/show/rename/delete`;
+    `tbuk topic digest <x>` synthesizes everything under a topic via the LLM;
+    `export --topic` writes an import-compatible archive of just that slice.
+    First-class `topics` + `document_topics` tables (migration 002), filters
+    composing with the existing metadata pre-filter. Subplan:
+    **`32-topics.md`**. *(Numbered 32 to continue after 31.)*
 
 ---
 
