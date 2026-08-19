@@ -289,8 +289,10 @@ means the engine is never invoked again, so re-running the structuring pass
 with a different prompt or model is free. `--no-raw` suppresses only the `raw/`
 copy — and with it that cache — exactly as it does for any other ingest.
 
-This widens what `rawDir` means: "the source bytes as ingested" becomes "the
-source *as text*, before interpretation". Note it in
+`rawDir` keeps its meaning — the source as ingested, before interpretation.
+A recording has no text source, so the verbatim transcript *is* that source:
+it is what the engine heard, and everything downstream is derived from it.
+Note the A/V naming (`.txt` in `raw/`, `.md` in `extracted/`) in
 `docs/initial-context.md` in the same PR.
 
 One consequence for the ingester: it looks for extracted text at
