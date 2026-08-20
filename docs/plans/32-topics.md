@@ -12,6 +12,8 @@ Let the user say *which shelf a document sits on* and then work shelf-by-shelf:
 
 ```bash
 tbuk ingest ./notes/go --topic go --topic programming   # tag at ingest time
+tbuk ingest ./docs --infer-topics                       # derive topics from dir structure
+                                                         # docs/food/recipe/soup.md → topics: food, recipe
 tbuk topic add ./old-doc.md history                     # tag after the fact
 tbuk search "generics" --topic go                       # retrieval scoped to topic(s)
 tbuk ask "how do slices grow?" --topic go
@@ -64,6 +66,15 @@ export is a *valid KB archive* that `tbuk import` restores unchanged.
    CASCADE`); a topic row survives at zero documents (visible in
    `topic list`) until `topic delete` removes it. No auto-GC — cheap rows,
    and auto-deleting would forget the vocabulary between re-ingests.
+9. **Inferred topics from directory structure (opt-in).** When `--infer-topics`
+   flag is passed with directory ingest, derive topic names from directory path
+   components (all levels except the top-level root). For
+   `docs/food/recipe/soup.md` → topics `food`, `recipe`; for
+   `docs/food/nutrition/swede.md` → topics `food`, `nutrition`. Explicit
+   `--topic` flags and inferred topics compose (union). Normalization applies
+   (paths lowercased, whitespace trimmed). Matches user expectation: "organize
+   by folder structure". Only active with flag; default (no `--infer-topics`) →
+   no change to existing behavior.
 
 ## Schema (migration 002)
 
@@ -164,7 +175,7 @@ All `--topic` flags are `StringSlice` — repeatable and comma-splitting
 
 | Command | Behaviour |
 |---|---|
-| `ingest <path> --topic x,y` | after each successful (non-skipped, non-error) file: `Ensure` + `Tag`. Dir ingest tags every ingested file. Re-ingest without the flag leaves existing links alone (doc row is upserted, junction untouched). |
+| `ingest <path> [--topic x,y] [--infer-topics]` | after each successful (non-skipped, non-error) file: `Ensure` + `Tag`. Dir ingest tags every ingested file. Explicit `--topic` flags apply to all files. `--infer-topics` derives topics from directory path components (top-level root ignored; `docs/food/recipe/file.md` → `food`, `recipe`); composes with explicit topics (union). Re-ingest without flags leaves existing links alone (doc row is upserted, junction untouched). |
 | `search <q> --topic x,y` | validate names via `IDsForNames` → `Options.Topics`. Works in all three modes. |
 | `ask <q> --topic x,y` | validate → `retrieval.Filters.Topics`. Empty retrieval falls into the existing no-context warning / `--require-context` path. |
 | `topic list [--format]` | names + document counts (text/json). |
@@ -231,13 +242,16 @@ counts in the summary line (`exported 12 of 240 documents (topics: go)`).
   empty; empty `Topics` ≡ today (regression parity).
 - **retrieval:** `Filters` passthrough to `search.Options`.
 - **cli:** `ingest --topic` links docs (dir + single file; skipped/error files
-  untagged); every `topic` subcommand; unknown-topic error text; `ask
-  --topic` forwards filters (fake retriever asserts); `RunDigest` single-call
-  and map-reduce paths with fake chat (batch boundaries, budget edge, reduce
-  overflow error); `export --topic` archive contains exactly the filtered
-  rows/files and round-trips through `Import`; extend
-  `integration_test.go` (`ingest --topic → search --topic → topic list/show →
-  export --topic`).
+  untagged); `ingest --infer-topics` derives topics from dir structure
+  (path components, top-level root ignored; `docs/food/recipe/file.md` →
+  `food`, `recipe`); explicit and inferred topics compose (union); every
+  `topic` subcommand; unknown-topic error text; `ask --topic` forwards
+  filters (fake retriever asserts); `RunDigest` single-call and map-reduce
+  paths with fake chat (batch boundaries, budget edge, reduce overflow error);
+  `export --topic` archive contains exactly the filtered rows/files and
+  round-trips through `Import`; extend `integration_test.go` (`ingest --topic
+  → search --topic → topic list/show → export --topic`; also `ingest
+  --infer-topics` on nested dir tree).
 
 ## Rollout (one PR per milestone)
 
