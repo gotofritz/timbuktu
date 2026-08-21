@@ -16,6 +16,16 @@ func TestEmbedderFactories_resolveDefaultBaseURL(t *testing.T) {
 			t.Errorf("baseURL = %q, want http://localhost:8080", e.baseURL)
 		}
 	})
+	t.Run("mlx defaults to localhost:8080", func(t *testing.T) {
+		t.Setenv("MLX_API_KEY", "")
+		e, err := newMLXEmbedder(config.EmbeddingConfig{BaseURL: ""})
+		if err != nil {
+			t.Fatalf("newMLXEmbedder: %v", err)
+		}
+		if e.baseURL != "http://localhost:8080" {
+			t.Errorf("baseURL = %q, want http://localhost:8080", e.baseURL)
+		}
+	})
 	t.Run("ollama defaults to localhost:11434", func(t *testing.T) {
 		e := newOllamaEmbedder(config.EmbeddingConfig{BaseURL: ""})
 		if e.baseURL != "http://localhost:11434" {
