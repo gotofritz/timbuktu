@@ -160,8 +160,9 @@ This guide assumes:
 2. **An AI backend is available.** Timbuktu needs two things: an *embedding*
    model (to fingerprint your text) and a *chat* model (to write answers). The
    next section shows three ways to provide them — a fully local setup with
-   MLX (the default, for Apple silicon Macs), a fully local setup with
-   llama.cpp (any OS), or a hybrid setup that uses Claude for the answers.
+   MLX (the default, for Apple silicon Macs), llama.cpp as the alternative
+   fully-local setup (any OS), or a hybrid setup that uses Claude for the
+   answers.
 
 3. **You have some documents** to index — notes, PDFs, saved articles, anything
    in the supported formats.
@@ -170,9 +171,10 @@ This guide assumes:
 
 Timbuktu always needs a **local embedding model** (embeddings are what make
 meaning-based search work, and there is no hosted embedding provider for
-Claude). For *generating answers* you can keep everything local — with MLX on
-an Apple silicon Mac, or with llama.cpp anywhere — or hand the writing off to
-Claude. Pick one of the three paths below.
+Claude). For *generating answers* you can keep everything local — MLX is the
+default on an Apple silicon Mac, with llama.cpp as the alternative on any
+OS (or if you'd rather not run MLX) — or hand the writing off to Claude.
+Pick one of the three paths below.
 
 | | Fully local (MLX, Apple silicon) | Fully local (llama.cpp, any OS) | Hybrid (local embeddings + Claude) |
 |---|---|---|---|
@@ -244,7 +246,7 @@ reject requests that omit or misname it. If a server enforces an API key,
 export it as `MLX_API_KEY` and Timbuktu sends it as a Bearer token (loopback
 or HTTPS URLs only).
 
-#### Path B — Fully local with llama.cpp (any OS)
+#### Path B — Alternative: fully local with llama.cpp (any OS)
 
 llama.cpp runs GGUF models on your own machine and exposes an HTTP server.
 Install it from the [llama.cpp
