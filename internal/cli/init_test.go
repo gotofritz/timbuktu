@@ -148,7 +148,7 @@ func TestInitCommand_fillsMissingKeysInExistingConfig(t *testing.T) {
 	if !strings.Contains(got, "size: 999") {
 		t.Errorf("init dropped the user's chunking.size:\n%s", got)
 	}
-	for _, want := range []string{"database:", "./tbuk.sqlite", "raw_dir", "provider: llama"} {
+	for _, want := range []string{"database:", "./tbuk.sqlite", "raw_dir", "provider: mlx"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("init did not fill missing default %q:\n%s", want, got)
 		}

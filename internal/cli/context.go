@@ -50,10 +50,10 @@ Built-in templates: qa (default), brief (≤280 chars), anki (flashcards)
 ## Config: ~/.tbuk/config.yaml
 
 database.path          SQLite file location
-llm.provider           llama | ollama | claude | openai
-llm.base_url           llama/ollama server URL (default http://localhost:8080)
-llm.model              model name (required for claude/openai)
-embedding.provider     llama | ollama | openai  (always local; claude has no embedding API)
+llm.provider           mlx | llama | ollama | claude | openai (default mlx)
+llm.base_url           local server URL (default http://localhost:8080; ollama :11434)
+llm.model              model name (required for claude/openai; HF repo id for mlx)
+embedding.provider     mlx | llama | ollama | openai  (claude has no embedding API)
 embedding.base_url     embedding server URL
 embedding.dimension    must match the loaded model (default 768)
 chunking.size          target chunk size in tokens (default 400; keep ≤ server ubatch)
