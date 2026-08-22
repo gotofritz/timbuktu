@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gotofritz/timbuktu/internal/preprocess"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
@@ -106,11 +107,16 @@ func RunDelete(ctx context.Context, out io.Writer, db *sql.DB, docs *storage.Doc
 		return fmt.Errorf("delete: %w", err)
 	}
 
-	// Best-effort cache cleanup: a missing file is not an error.
+	// Best-effort cache cleanup: a missing file is not an error. Every extractor
+	// version is cleared, not only the current one, so nothing is left behind
+	// for a later run to find.
 	if extractedDir != "" && doc.SHA256 != "" {
-		cachePath := filepath.Join(extractedDir, doc.SHA256+".txt")
-		if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove extracted cache %s: %w", cachePath, err)
+		names := append([]string{preprocess.CacheName(doc.SHA256)}, preprocess.OlderCacheNames(doc.SHA256)...)
+		for _, name := range names {
+			cachePath := filepath.Join(extractedDir, name)
+			if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove extracted cache %s: %w", cachePath, err)
+			}
 		}
 	}
 

@@ -208,7 +208,7 @@ func CheckEmbeddingDimension(dbPath string, cfgDim int) (msg, status string) {
 	if cfgDim > 0 && dim != cfgDim {
 		return fmt.Sprintf(
 			"stored %d, config %d — MISMATCH: vector search will return nothing; "+
-				"re-ingest the corpus or restore embedding.dimension", dim, cfgDim), "✗"
+				"run `tbuk reindex` or restore embedding.dimension", dim, cfgDim), "✗"
 	}
 	return fmt.Sprintf("%d (matches config)", dim), "✓"
 }

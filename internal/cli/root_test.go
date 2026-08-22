@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -85,5 +86,73 @@ func TestRoot_invalidConfigFailsFast(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid config") {
 		t.Errorf("error = %v, want it to mention 'invalid config'", err)
+	}
+}
+
+// Usage is help for someone who typed the command wrong. A command that ran and
+// then failed has nothing to do with usage, and printing it buries the error.
+func TestExecute_usageOnlyForMisuse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+
+	// An unknown command points at --help rather than dumping usage; that is
+	// still guidance for misuse, so it counts.
+	cases := []struct {
+		name      string
+		args      []string
+		wantUsage bool
+	}{
+		{name: "missing argument", args: []string{"search"}, wantUsage: true},
+		{name: "unknown flag", args: []string{"--nope", "stats"}, wantUsage: true},
+		{name: "unknown command", args: []string{"frobnicate"}, wantUsage: true},
+		{
+			name:      "runtime failure",
+			args:      []string{"--config", cfgPath, "ingest", filepath.Join(home, "no-such-file.md")},
+			wantUsage: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			cmd := cli.New()
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+			if err := cmd.Execute(); err == nil {
+				t.Fatal("expected an error")
+			}
+			combined := out.String() + errOut.String()
+			guided := strings.Contains(combined, "Usage:") || strings.Contains(combined, "--help' for usage")
+			if got := guided; got != tc.wantUsage {
+				t.Errorf("usage printed = %v, want %v; output:\n%s", got, tc.wantUsage, combined)
+			}
+		})
+	}
+}
+
+// Cobra prints the error itself; printing it again in Execute doubles every
+// failure.
+func TestExecute_reportsAnErrorOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	cmd := cli.New()
+	cmd.SetArgs([]string{"--config", filepath.Join(home, ".tbuk", "config.yaml"),
+		"ingest", filepath.Join(home, "no-such-file.md")})
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected an error")
+	}
+	if n := strings.Count(out.String()+errOut.String(), "no such file or directory"); n != 1 {
+		t.Errorf("error reported %d times, want once; output:\n%s", n, out.String()+errOut.String())
 	}
 }

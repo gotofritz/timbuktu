@@ -936,3 +936,95 @@ func TestChunkRepo_Count(t *testing.T) {
 		t.Errorf("want 2 chunks, got %d", n)
 	}
 }
+
+// A document records where its archived copy lives, relative to the raw
+// directory, so re-reading it later is a lookup rather than a guess at how the
+// copy was named.
+func TestDocumentRepo_roundTripsRawPath(t *testing.T) {
+	db := openTestDB(t)
+	repo := storage.NewDocumentRepo(db.DB())
+
+	doc := &storage.Document{Path: "/notes/a.md", SHA256: "abc", Title: "A", MimeType: "text/markdown", RawPath: "abc.md"}
+	if err := repo.Create(context.Background(), doc); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.GetByPath(context.Background(), "/notes/a.md")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.RawPath != "abc.md" {
+		t.Errorf("RawPath = %q, want abc.md", got.RawPath)
+	}
+
+	got.RawPath = "moved/abc.md"
+	if err := repo.Update(context.Background(), got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	again, err := repo.GetBySHA256(context.Background(), "abc")
+	if err != nil {
+		t.Fatalf("get by sha: %v", err)
+	}
+	if again.RawPath != "moved/abc.md" {
+		t.Errorf("RawPath after update = %q, want moved/abc.md", again.RawPath)
+	}
+
+	listed, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].RawPath != "moved/abc.md" {
+		t.Errorf("List lost RawPath: %+v", listed)
+	}
+}
+
+// A document with no archived copy — ingested with --no-raw, or before the
+// column existed — carries an empty raw path, which is a legitimate value.
+func TestDocumentRepo_rawPathIsOptional(t *testing.T) {
+	db := openTestDB(t)
+	repo := storage.NewDocumentRepo(db.DB())
+
+	doc := &storage.Document{Path: "/notes/b.md", SHA256: "def", Title: "B"}
+	if err := repo.Create(context.Background(), doc); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.GetByPath(context.Background(), "/notes/b.md")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.RawPath != "" {
+		t.Errorf("RawPath = %q, want empty", got.RawPath)
+	}
+}
+
+// Recording a discovered archive location is not a change to the document, so
+// it must not disturb the row's updated-at.
+func TestDocumentRepo_setRawPathLeavesUpdatedAtAlone(t *testing.T) {
+	db := openTestDB(t)
+	repo := storage.NewDocumentRepo(db.DB())
+
+	doc := &storage.Document{Path: "/notes/a.md", SHA256: "abc", Title: "A"}
+	if err := repo.Create(context.Background(), doc); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	before, err := repo.GetByPath(context.Background(), "/notes/a.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.SetRawPath(context.Background(), doc.ID, "abc.md"); err != nil {
+		t.Fatalf("SetRawPath: %v", err)
+	}
+
+	after, err := repo.GetByPath(context.Background(), "/notes/a.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.RawPath != "abc.md" {
+		t.Errorf("RawPath = %q, want abc.md", after.RawPath)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("UpdatedAt moved from %v to %v; recording where a copy lives is not a change to the document",
+			before.UpdatedAt, after.UpdatedAt)
+	}
+}

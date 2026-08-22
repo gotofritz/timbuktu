@@ -267,8 +267,11 @@ func TestExtractToFile_filenameIsSHA256(t *testing.T) {
 		t.Fatalf("ExtractToFile: %v", err)
 	}
 	base := filepath.Base(savedPath)
-	if base != wantSHA+".txt" {
-		t.Errorf("filename = %q, want %q", base, wantSHA+".txt")
+	if base != preprocess.CacheName(wantSHA) {
+		t.Errorf("filename = %q, want %q", base, preprocess.CacheName(wantSHA))
+	}
+	if !strings.HasPrefix(base, wantSHA+".") {
+		t.Errorf("filename = %q, want it addressed by the content hash %q", base, wantSHA)
 	}
 }
 
@@ -342,4 +345,61 @@ func mustExtract(t *testing.T, mime, content string) string {
 		t.Fatalf("Extract: %v", err)
 	}
 	return out
+}
+
+// The cache name carries the extractor version, so improving an extractor stops
+// the old text from being reused for content that has not changed.
+func TestCacheName_carriesTheExtractorVersion(t *testing.T) {
+	name := preprocess.CacheName("abc123")
+	if !strings.HasPrefix(name, "abc123.") || !strings.HasSuffix(name, ".txt") {
+		t.Fatalf("CacheName = %q, want abc123.<version>.txt", name)
+	}
+	if !strings.Contains(name, fmt.Sprintf("v%d", preprocess.ExtractorVersion)) {
+		t.Errorf("CacheName = %q, want it to name version %d", name, preprocess.ExtractorVersion)
+	}
+	if name == "abc123.txt" {
+		t.Error("CacheName must differ from the unversioned name it replaces")
+	}
+}
+
+// Text cached by an earlier version is still findable: it is worse than
+// re-extracting, but better than a document that cannot be read at all.
+func TestOlderCacheNames_includesTheUnversionedName(t *testing.T) {
+	older := preprocess.OlderCacheNames("abc123")
+	if len(older) == 0 {
+		t.Fatal("OlderCacheNames returned none")
+	}
+	var hasUnversioned bool
+	for _, n := range older {
+		if n == "abc123.txt" {
+			hasUnversioned = true
+		}
+		if n == preprocess.CacheName("abc123") {
+			t.Errorf("OlderCacheNames should not include the current name %q", n)
+		}
+	}
+	if !hasUnversioned {
+		t.Errorf("OlderCacheNames = %v, want the pre-versioning name abc123.txt", older)
+	}
+}
+
+func TestExtractToFile_writesTheVersionedName(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "doc.md")
+	if err := os.WriteFile(src, []byte("# hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "extracted")
+
+	got, err := preprocess.ExtractToFile(context.Background(), src, out)
+	if err != nil {
+		t.Fatalf("ExtractToFile: %v", err)
+	}
+	sha, err := preprocess.HashFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(out, preprocess.CacheName(sha)); got != want {
+		t.Errorf("wrote %q, want %q", got, want)
+	}
 }

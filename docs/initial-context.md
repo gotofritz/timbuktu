@@ -13,7 +13,7 @@ cmd/tbuk/           cobra entry point
 
 internal/
   config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML(), ExportYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, search, find, meta, export, import)
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, reindex, search, find, meta, export, import)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
@@ -24,7 +24,7 @@ internal/
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
   export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
-  importer/         Import() — restore a tar snapshot under a target root (re-home or --merge)
+  importer/         Extract() — a tar snapshot's raw sources + its database as a manifest; ignores config, cache, prompts
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces.
@@ -102,13 +102,22 @@ Defaults: llm.provider=`mlx`, embedding.provider=`mlx`, dimension=768, chunk siz
 SQLite, WAL mode, foreign keys ON. Pragmas are set in the DSN (`dsnFor`) so every pooled connection inherits them. The DB file is `chmod 0o600` after open — knowledge-base content is personal data.
 
 ```sql
-documents   — id, path (UNIQUE), sha256, title, mime_type, created_at, updated_at
+documents   — id, path (UNIQUE), sha256, title, mime_type, raw_path, created_at, updated_at
 chunks      — id, document_id (FK→documents CASCADE), chunk_index, text, token_count, embedding BLOB
 metadata    — document_id (FK→documents CASCADE), key, value  (PK: document_id+key)
 chunks_fts  — FTS5 virtual table over chunks.text, auto-synced via INSERT/DELETE triggers
 ```
 
-Migrations versioned in `schema_migrations` table. Add new migrations by appending to the `migrations` slice in `storage/migrate.go`. Each migration's SQL and its version record are applied in one transaction (crash-safe: never changed-but-unrecorded). A DB whose recorded version exceeds the binary's latest migration is rejected with `ErrSchemaTooNew` rather than read with a misunderstood schema.
+Schema versioned in the `schema_migrations` table. `storage/migrate.go` holds a
+single migration — `schemaSQL` at `schemaVersion` — that creates the whole
+schema: a knowledge base either does not exist yet or already has this shape,
+so there is no upgrade path to carry. (`schemaVersion` is 2 because an earlier
+build created the same schema in two steps and recorded 2; keeping the number
+lets those knowledge bases open untouched.) Future changes append to the
+`migrations` slice. Each migration's SQL and its version record are applied in
+one transaction (crash-safe: never changed-but-unrecorded). A DB whose recorded
+version exceeds the binary's latest migration is rejected with `ErrSchemaTooNew`
+rather than read with a misunderstood schema.
 
 Embeddings: `storage.Float32SliceToBlob` / `BlobToFloat32Slice` — little-endian `[]float32`.
 
@@ -247,7 +256,7 @@ Default store: `~/.tbuk/extracted/` (configurable via `preprocess.output_dir` in
 
 Two-stage pipeline:
 
-1. **`tbuk preprocess`** — extract + normalize → save to `~/.tbuk/extracted/<sha256>.txt`
+1. **`tbuk preprocess`** — extract + normalize → save to `~/.tbuk/extracted/<sha256>.v<N>.txt`, where N is `preprocess.ExtractorVersion` (bumped when extraction output can differ for the same bytes, which invalidates every cached extraction; `tbuk delete` clears all versions)
 2. **`tbuk ingest`** — read extracted text → chunk → embed → store in DB
 
 ```go
@@ -278,6 +287,82 @@ Re-index is atomic: extraction and embedding run *first*, then `ReplaceForDocume
 Automatic metadata written per document: `filename`, `extension` (lowercased, no leading dot), `mime`, `dir`. Refreshed on every ingest via `MetadataRepo.Set` upsert; user-set keys are left intact. Makes `tbuk find filename=README.md` work after plain ingest.
 
 Supported extensions for `IngestDir`: `.md`, `.txt`, `.pdf`, `.html`, `.htm`.
+
+### Reindex (re-embed from the raw archive)
+
+```go
+type ReindexOptions struct {
+    SourceDir string // resolve <sha256><ext> here instead of the configured raw dir
+    DryRun    bool
+    OnResult  func(index, total int, res ReindexResult) // streams progress
+}
+
+type ReindexResult struct {
+    Path    string // the document's stored path — its identity in the KB
+    Source  string // file the content was read from; "" when unresolvable
+    FromRaw bool   // Source is the archived copy, not the stored path
+    Chunks  int    // 0 on a dry run
+    Skipped bool   // no usable source; document left untouched
+    Err     error
+}
+
+var ErrSourceUnavailable = errors.New(...) // typed, and Skipped is set with it
+
+func (ing *Ingester) ReindexDocument(ctx, doc *storage.Document, opts) ReindexResult
+func (ing *Ingester) ReindexDocuments(ctx, docs []*storage.Document, opts) []ReindexResult
+func (ing *Ingester) ReindexAll(ctx, opts) ([]ReindexResult, error)
+```
+
+Text resolution, in order: the extracted-text cache
+(`extracted/<sha256>.v<N>.txt`, keyed on content *and* `ExtractorVersion`, so it
+answers when every file has gone and is credited as the source when it does); then a source file to extract from — `documents.raw_path`
+under `SourceDir` (else `ingest.raw_dir`); the derived `<sha256><ext>` for rows
+indexed before that column existed — recorded via `SetRawPath` when it resolves, so the fallback is
+paid once, and never for a `--source-dir` hit, which lives in another archive;
+then `documents.path`; and last, text cached by an *older* extractor version
+(`preprocess.OlderCacheNames`, flagged `StaleText`), which is read only when
+re-extraction is impossible — a build that produced different output is worse
+than re-extracting, and better than an unreadable document. The archived copy
+is still resolved and recorded on a cache hit — the cache is disposable, the copy is not. Nothing readable anywhere
+⇒ `Skipped` + `ErrSourceUnavailable`, with `ReindexResult.Reason` naming every
+path tried, since a skipped document is something the user has to act on.
+Reading from the content-addressed archive rather than the live path is what
+makes reindex work for a knowledge base whose originals are gone — an imported
+document keeps the *exporting* machine's absolute path, which resolves to
+nothing here. `filepath.Ext(doc.Path)` supplies the extension the extractor
+keys off; the extracted cache is looked up under `doc.SHA256`, so text already
+extracted on this machine is reused rather than re-derived.
+
+Three deliberate differences from `IngestFile`:
+
+- **No SHA256 comparison or skip.** The content is presumed unchanged; the
+  trigger is an embedding config change, which stored chunks carry no record of.
+- **No dimension guard.** `IngestFile` refuses when new vectors disagree with
+  the rest of the index; reindex must not, or the first document would abort the
+  very repair it exists for.
+- **The document row is left alone.** Only chunks (via `ReplaceForDocument`,
+  same atomicity) and the automatic metadata are rewritten — the latter derived
+  from `doc.Path`, never from the sha-named archived copy that supplied the
+  bytes.
+
+Per-document failures are reported, never fatal (`IngestDir`'s
+partial-failure pattern); only listing the documents is fatal. Cancellation
+stops the loop so the caller can print what it has.
+
+CLI seam (`internal/cli/reindex.go`):
+`RunReindex(ctx, outW, errW, ing, opts, verbose)` sets `OnResult` to stream
+`[i/N] <path> → …` lines, then prints a re-embedded/skipped/errors summary and
+returns non-zero only on real errors. Successes are printed only under
+`verbose` (or `--dry-run`); skips and failures always are — the same rule
+`ingest` and `import` follow, so a single bad document is not buried under
+hundreds of good ones.
+
+The root command sets `SilenceUsage` in `PersistentPreRunE`, which cobra runs
+*after* argument validation: misuse still gets its usage text, a command that
+ran and failed does not. `Execute` no longer prints the error itself, since
+cobra already has.
+`--topic` is deliberately absent: topics (`docs/plans/32-topics.md`) are not
+implemented, and reindex is not gated on them.
 
 Doctor shows document/chunk counts from the live DB. The FTS5 health check is
 gated on database health (its own flag), not on any embedding server's
@@ -510,59 +595,117 @@ way to the next header.
 
 ## Import
 
-`tbuk import <archive>` is the inverse of export — it unpacks a snapshot back
-under a target root.
+`tbuk import` rebuilds a knowledge base from an archive on *this* machine's
+terms. It takes from the archive what belongs to the user rather than to the
+exporting machine:
+
+- the source files under `raw/`, copied into the local `ingest.raw_dir`;
+- the database, copied to a temp path and read as a **manifest** — each
+  document's path, title, mime type, SHA256 and user metadata;
+- the prompt templates under `prompts/`.
+
+Three commands select among them: `tbuk import` (both), `tbuk import data`,
+`tbuk import templates`, sharing one persistent flag set. `ImportOptions.Scope`
+carries the choice, its zero value meaning everything.
+
+Everything else is deliberately ignored. The config describes the machine it
+came from (paths, providers, models), so adopting it is never right. The
+archive's **embeddings are never read**: a vector produced by another model
+cannot be searched here, and nothing in an archive proves which model made it —
+matching `embedding.dimension` is not proof, and the failure mode is silent
+nonsense rather than the loud dimension error. The extracted-text cache is
+skipped because extraction is deterministic and re-derivable from the raw
+bytes.
+
+There is deliberately **no verbatim-restore command**. Its correctness would
+depend on a condition tbuk cannot verify (source and target embedding models
+being identical), failing silently when wrong. Rewinding one's own knowledge
+base is `tar -xf backup.tar -C ~/.tbuk` — a plain file operation on a plain
+uncompressed tar, no command needed.
 
 ```go
-// Import extracts the tar in r according to opts. Each entry maps to a
-// destination under opts.Config's component paths (db, extracted, raw, prompts)
-// or, failing that, verbatim under opts.Root. Existing files are overwritten
-// only with opts.Force, else skipped (recorded in Result.Skipped). Entries that
-// would escape via an absolute path or ".." are rejected.
-func Import(r io.Reader, opts Options) (Result, error)
+// Extract reads the tar in r, writing raw/ entries under opts.RawDir and the
+// database (with its WAL/SHM sidecars) to opts.DBDest. Everything else is read
+// past and discarded. Entries escaping via an absolute path or ".." are
+// rejected; a raw copy already present is left alone, its name being
+// content-addressed.
+func Extract(r io.Reader, opts Options) (Result, error)
 
 type Options struct {
-    Root       string        // target data root; fallback for unknown/disabled components
-    Config     config.Config // component destination paths
-    ConfigDest string        // where the archive's config.yaml is written ("" = keep target config)
-    Force      bool
+    RawDir     string // destination for raw/ entries; empty writes none (dry run)
+    DBDest     string // caller-owned temp path for the database; empty skips it
+    PromptsDir string // destination for prompt templates; empty writes none
+}
+
+type Result struct {
+    Written     []string // destinations actually written
+    RawNames    []string // every raw entry the archive holds, written or not
+    PromptNames []string // every template the archive holds, once each
+    DBPath      string   // where the database landed; "" if the archive had none
 }
 ```
 
-The archive is only self-describing for the **default** relative layout
-(`tbuk.sqlite`, `extracted/`, `raw/`, `prompts/`) — `ExportYAML` comments data
-paths out, so a custom source `output_dir` name can't be recovered from the
-config. `Import` maps those four canonical components onto the target config's
-paths; any other entry is re-homed verbatim under the root. Files are written
-`0o600`.
+The WAL/SHM sidecars matter: without them a manifest read can miss the most
+recent commits.
 
-Overwriting is split in two: `Options.ForceConfig` covers the archive's
-`config.yaml`, `Options.ForceData` everything else. A config describes the
-machine it lives on — paths, providers, model choices — so replacing it is a
-different decision from replacing the knowledge base it points at, and neither
-flag implies the other. A destination that does not exist yet is always
-written.
+Templates are unpacked into a scratch directory the CLI owns, never straight
+into `cfg.Prompts.Dir` — which of them replace an installed template is policy,
+and policy is the CLI's. A template is a directory below `prompts/`, so a loose
+file directly under `prompts/` belongs to none and is left out.
 
-CLI seam (`internal/cli/import.go`), exported for testing like `RunExport`:
-- `RunImport(out, archivePath, cfg, root, configPath, merge, forceConfig, forceData)` — opens the
-  archive and dispatches on **which config will be in effect afterwards**, since
-  that is what the restored folders have to agree with. The archive's config is
-  *adopted* only in non-merge mode when the target has no config yet or
-  `--force-config` replaces it; placement then uses `DefaultsForRoot(root)`, which
-  is what the archive's commented paths resolve to. Otherwise the target's config
-  survives — under `--merge`, or because it exists and `--force-config` was not
-  given — and placement uses the loaded `cfg`, so data lands in the folders the
-  live config names. Restoring into the root's defaults while a config pointing
-  elsewhere survives would leave the knowledge base unable to see its own data;
-  the command says which config it kept.
+CLI seam (`internal/cli/import.go`), exported for testing:
+`RunImport(ctx, in, outW, errW, archivePath, cfg, root, configPath, opts, newIngester)`.
 
-`Import` runs `export.CheckComplete` first when its reader is an `io.ReadSeeker`
-(as the CLI's `*os.File` is), so an incomplete archive is refused before a single
-file is written rather than restoring a silently partial knowledge base. A
-non-seekable stream keeps the old behaviour — completeness cannot be established
-up front — and is read as it arrives.
+Templates run first: they are quick, cannot fail for want of a provider, and a
+templates-only import therefore needs no reachable embedder, no usable
+`ingest.raw_dir`, and no fresh-config confirmation (it spends nothing). Each is
+decided per template *name* and installed by replacing the directory whole —
+`replaceDir` removes the old one and copies, rather than renaming, since the
+scratch directory is usually on another filesystem. Merging a manifest from one
+machine with files from another would leave a template that may not load.
 
-Archive faults are named rather than surfaced raw: `Import` keeps the first 512
+The built-ins (`builtinTemplateNames`) exist on every machine, so the archive's
+copies always collide; under the default `skip` only custom templates travel. A
+dry run against a config-less root counts them as present too — the real run
+scaffolds before importing, so promising to install them would be a lie in
+exactly the case a dry run matters most.
+
+Per document, keyed on `documents.path` (its UNIQUE identity in the DB):
+
+1. No raw copy in the archive (the source was ingested `--no-raw`) → reported
+   and skipped; the run continues.
+2. Already indexed at that path → `ImportOptions.OnConflict` decides:
+   `skip` (default, so a repeat import is a no-op), `overwrite`, or `ask`.
+3. Otherwise the row is created (or updated to the archive's identity), the
+   document is embedded via `Ingester.ReindexDocument` — which resolves
+   `raw/<sha256><ext>`, just written — and the manifest's user metadata is
+   written last.
+
+A failed embed **rolls back**: a row this run created is deleted, and a row it
+overwrote gets its identity restored (its chunks were never replaced, since
+`ReplaceForDocument` runs only after a successful embed). Without that, a
+chunk-less row would be treated as "already indexed" by every later import and
+the document would be stranded. Metadata is written after the embed for the
+same reason; it cannot collide with the automatic keys, which `readManifest`
+filters out (`filename`, `extension`, `mime`, `dir` are this machine's to
+derive).
+
+Importing into a root with no `config.yaml` calls `Scaffold` — init's setup,
+factored out — then shows the embedding settings and confirms before spending
+on them (`--yes` skips it, for scripts). An existing config is never touched or
+confirmed against. `ingest.raw_dir` disabled is a hard error: imported sources
+would have nowhere to live.
+
+All prompts share one `bufio.Reader` for the whole run. A reader per prompt
+buffers the answers meant for later documents and drops them, which makes
+`--on-conflict ask` able to ask only once.
+
+`Extract` runs `export.CheckComplete` first when its reader is an
+`io.ReadSeeker` (as the CLI's `*os.File` is), so an incomplete archive is
+refused before a single file is written. A non-seekable stream cannot establish
+completeness up front and is read as it arrives.
+
+Archive faults are named rather than surfaced raw: `Extract` keeps the first 512
 bytes for format sniffing and reports an empty file, an entry-less archive, a
 mid-entry truncation, a corrupt entry (with its index), or a non-tar file —
 including the format it looks like (`gzip`, `zip`, `zstd`, `bzip2`, `xz`, a
@@ -572,8 +715,8 @@ short to hold a tar header fails identically to a truncated archive.
 `RunImport` prefixes the archive path.
 
 Because the target may be a fresh machine, import works with no pre-existing
-config — the root `PersistentPreRunE` loads `DefaultsForRoot(root)`, which passes
-`Validate()`.
+config — the root `PersistentPreRunE` loads `DefaultsForRoot(root)`, which
+passes `Validate()`.
 
 ---
 
@@ -595,10 +738,13 @@ tbuk template show <name>      print manifest + template files to stdout
 tbuk template edit <name>      open manifest in $EDITOR
 tbuk delete <path>             remove document + cascade-delete chunks/metadata + extracted-text cache (--yes skips prompt)
 tbuk update <path>             re-ingest if SHA256 changed, skip otherwise (--force)
+tbuk reindex                   re-embed every document from raw/<sha256><ext> under the local embedding config (--source-dir, --dry-run)
 tbuk stats                     knowledge base summary: documents, chunks, embedded count, sizes (--format text|json)
 tbuk list                      list indexed documents: path, title, chunk count, updated_at (--limit, --format text|json)
 tbuk export <path>             tar snapshot of config + data folders (dir→timestamped file, file→as-is; --force, --root)
-tbuk import <archive>          restore a tar snapshot under the target root (--merge keeps target config, --force-config / --force-data overwrite)
+tbuk import <archive>          import an archive's documents and templates, indexed with the local config (--on-conflict skip|overwrite|ask, --dry-run, --yes)
+tbuk import data <archive>     documents only (same flags)
+tbuk import templates <archive>  prompt templates only; no embedding provider needed (same flags)
 ```
 
 ---

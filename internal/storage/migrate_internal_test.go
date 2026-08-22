@@ -22,7 +22,7 @@ func openRawDB(t *testing.T) *sql.DB {
 func TestRunMigrations_secondMigrationApplies(t *testing.T) {
 	db := openRawDB(t)
 	migs := []migration{
-		{1, migration001},
+		{1, schemaSQL},
 		{2, `CREATE TABLE IF NOT EXISTS extra (id INTEGER PRIMARY KEY);`},
 	}
 	if err := runMigrations(db, migs); err != nil {
@@ -64,7 +64,7 @@ func TestRunMigrations_recordInsertFailureRollsBack(t *testing.T) {
 		t.Fatalf("seed table: %v", err)
 	}
 	migs := []migration{
-		{1, migration001},
+		{1, schemaSQL},
 		{2, `CREATE TABLE IF NOT EXISTS extra (id INTEGER PRIMARY KEY);`},
 	}
 	err := runMigrations(db, migs)
@@ -88,7 +88,7 @@ func TestRunMigrations_recordInsertFailureRollsBack(t *testing.T) {
 func TestRunMigrations_failedMigrationRollsBack(t *testing.T) {
 	db := openRawDB(t)
 	migs := []migration{
-		{1, migration001},
+		{1, schemaSQL},
 		{2, `THIS IS NOT VALID SQL;`},
 	}
 	err := runMigrations(db, migs)
@@ -106,5 +106,48 @@ func TestRunMigrations_failedMigrationRollsBack(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("failed migration left version 2 recorded (%d)", count)
+	}
+}
+
+// The schema is created in one step, so a fresh knowledge base has every
+// column from the start — there is no older shape to upgrade from.
+func TestRunMigrations_createsTheWholeSchemaAtOnce(t *testing.T) {
+	db := openRawDB(t)
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+
+	if _, err := db.Exec(
+		`INSERT INTO documents(path,sha256,title,mime_type,raw_path,created_at,updated_at)
+         VALUES('/notes/a.md','abc','A','text/markdown','abc.md','t','t')`); err != nil {
+		t.Fatalf("insert with every column: %v", err)
+	}
+
+	var version int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Errorf("recorded version = %d, want %d", version, schemaVersion)
+	}
+}
+
+// A knowledge base created by the build that applied this schema in two steps
+// already records this version, so it opens untouched rather than being
+// rejected as newer than the binary understands.
+func TestRunMigrations_acceptsADatabaseFromTheTwoStepBuild(t *testing.T) {
+	db := openRawDB(t)
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	// That build recorded version 1 as well; the extra row must not read as
+	// "newer than supported".
+	if _, err := db.Exec(
+		`INSERT INTO schema_migrations(version,applied_at) VALUES(1,'t')`); err != nil {
+		t.Fatalf("seed the older version row: %v", err)
+	}
+
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("reopening a two-step knowledge base: %v", err)
 	}
 }

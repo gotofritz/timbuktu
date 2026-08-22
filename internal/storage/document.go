@@ -15,11 +15,17 @@ var ErrNotFound = fmt.Errorf("storage: document not found: %w", sql.ErrNoRows)
 
 // Document represents a source file tracked in the database.
 type Document struct {
-	ID        int64
-	Path      string
-	SHA256    string
-	Title     string
-	MimeType  string
+	ID       int64
+	Path     string
+	SHA256   string
+	Title    string
+	MimeType string
+	// RawPath locates the archived copy of this document's source bytes,
+	// relative to the configured raw directory (e.g. "<sha256>.md"). Relative
+	// so a knowledge base stays portable when its folders move or are imported
+	// under another root. Empty means no copy is known — the document was
+	// ingested without one, or predates this column.
+	RawPath   string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -36,9 +42,9 @@ func (r *DocumentRepo) Create(ctx context.Context, doc *Document) error {
 	doc.CreatedAt = now
 	doc.UpdatedAt = now
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO documents(path,sha256,title,mime_type,created_at,updated_at)
-         VALUES(?,?,?,?,?,?)`,
-		doc.Path, doc.SHA256, doc.Title, doc.MimeType,
+		`INSERT INTO documents(path,sha256,title,mime_type,raw_path,created_at,updated_at)
+         VALUES(?,?,?,?,?,?,?)`,
+		doc.Path, doc.SHA256, doc.Title, doc.MimeType, doc.RawPath,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -60,7 +66,7 @@ func (r *DocumentRepo) Count(ctx context.Context) (int, error) {
 // GetByPath returns the document with the given path, or an error if not found.
 func (r *DocumentRepo) GetByPath(ctx context.Context, path string) (*Document, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id,path,sha256,title,mime_type,created_at,updated_at
+		`SELECT id,path,sha256,title,mime_type,raw_path,created_at,updated_at
          FROM documents WHERE path=?`, path)
 	return scanDocument(row)
 }
@@ -68,7 +74,7 @@ func (r *DocumentRepo) GetByPath(ctx context.Context, path string) (*Document, e
 // GetBySHA256 returns the first document matching the hash.
 func (r *DocumentRepo) GetBySHA256(ctx context.Context, sha string) (*Document, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id,path,sha256,title,mime_type,created_at,updated_at
+		`SELECT id,path,sha256,title,mime_type,raw_path,created_at,updated_at
          FROM documents WHERE sha256=?`, sha)
 	return scanDocument(row)
 }
@@ -77,12 +83,22 @@ func (r *DocumentRepo) GetBySHA256(ctx context.Context, sha string) (*Document, 
 func (r *DocumentRepo) Update(ctx context.Context, doc *Document) error {
 	doc.UpdatedAt = time.Now().UTC()
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE documents SET path=?,sha256=?,title=?,mime_type=?,updated_at=? WHERE id=?`,
-		doc.Path, doc.SHA256, doc.Title, doc.MimeType,
+		`UPDATE documents SET path=?,sha256=?,title=?,mime_type=?,raw_path=?,updated_at=? WHERE id=?`,
+		doc.Path, doc.SHA256, doc.Title, doc.MimeType, doc.RawPath,
 		doc.UpdatedAt.Format(time.RFC3339), doc.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("DocumentRepo.Update: %w", err)
+	}
+	return nil
+}
+
+// SetRawPath records where a document's archived copy was found, without
+// touching anything else — notably not UpdatedAt, since learning where the copy
+// lives is not a change to the document itself.
+func (r *DocumentRepo) SetRawPath(ctx context.Context, id int64, rawPath string) error {
+	if _, err := r.db.ExecContext(ctx, `UPDATE documents SET raw_path=? WHERE id=?`, rawPath, id); err != nil {
+		return fmt.Errorf("DocumentRepo.SetRawPath: %w", err)
 	}
 	return nil
 }
@@ -99,7 +115,7 @@ func (r *DocumentRepo) Delete(ctx context.Context, id int64) error {
 // List returns all documents ordered by id.
 func (r *DocumentRepo) List(ctx context.Context) ([]*Document, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id,path,sha256,title,mime_type,created_at,updated_at
+		`SELECT id,path,sha256,title,mime_type,raw_path,created_at,updated_at
          FROM documents ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("DocumentRepo.List: %w", err)
@@ -119,7 +135,7 @@ func (r *DocumentRepo) List(ctx context.Context) ([]*Document, error) {
 func scanDocument(row *sql.Row) (*Document, error) {
 	var d Document
 	var createdAt, updatedAt string
-	err := row.Scan(&d.ID, &d.Path, &d.SHA256, &d.Title, &d.MimeType, &createdAt, &updatedAt)
+	err := row.Scan(&d.ID, &d.Path, &d.SHA256, &d.Title, &d.MimeType, &d.RawPath, &createdAt, &updatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -134,7 +150,7 @@ func scanDocument(row *sql.Row) (*Document, error) {
 func scanDocumentRow(rows *sql.Rows) (*Document, error) {
 	var d Document
 	var createdAt, updatedAt string
-	err := rows.Scan(&d.ID, &d.Path, &d.SHA256, &d.Title, &d.MimeType, &createdAt, &updatedAt)
+	err := rows.Scan(&d.ID, &d.Path, &d.SHA256, &d.Title, &d.MimeType, &d.RawPath, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("DocumentRepo scan: %w", err)
 	}

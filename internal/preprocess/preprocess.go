@@ -44,6 +44,33 @@ func Extract(ctx context.Context, path string) (text, mime, sha string, err erro
 	return text, mime, sha, nil
 }
 
+// ExtractorVersion identifies the extraction behaviour this build produces.
+// It is part of every cached filename, so text extracted by an older build is
+// not silently reused for content that has not changed. Bump it whenever
+// extraction output can differ for the same bytes: a backend swapped, a parser
+// upgraded, cleaning rules changed.
+const ExtractorVersion = 2
+
+// CacheName is the extracted-text filename for content with the given SHA256,
+// under the current extractor version.
+func CacheName(sha string) string {
+	return fmt.Sprintf("%s.v%d.txt", sha, ExtractorVersion)
+}
+
+// OlderCacheNames returns the filenames the same content may be cached under
+// from earlier extractor versions, newest first. Text found there is worse than
+// re-extracting — it came from a build that produced different output — but it
+// is better than a document whose source files have all gone and which can
+// therefore not be read at all.
+func OlderCacheNames(sha string) []string {
+	names := make([]string, 0, ExtractorVersion-1)
+	for v := ExtractorVersion - 1; v >= 2; v-- {
+		names = append(names, fmt.Sprintf("%s.v%d.txt", sha, v))
+	}
+	// Version 1 predates versioning and has no marker of its own.
+	return append(names, sha+".txt")
+}
+
 // safeExtract runs ext.Extract, converting any panic into an error so one
 // malformed document cannot crash the whole ingest run. The PDF backend
 // (github.com/ledongthuc/pdf) is known to panic on some malformed inputs.
@@ -68,7 +95,7 @@ func ExtractToFile(ctx context.Context, srcPath, outputDir string) (string, erro
 	if err := os.MkdirAll(outputDir, 0o700); err != nil {
 		return "", fmt.Errorf("preprocess.ExtractToFile mkdir: %w", err)
 	}
-	outPath := filepath.Join(outputDir, sha+".txt")
+	outPath := filepath.Join(outputDir, CacheName(sha))
 	if err := os.WriteFile(outPath, []byte(text), 0o600); err != nil {
 		return "", fmt.Errorf("preprocess.ExtractToFile write: %w", err)
 	}

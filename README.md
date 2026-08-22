@@ -83,12 +83,12 @@ tbuk init                # create ~/.tbuk/ with default config and prompt dirs
 tbuk version
 tbuk doctor              # check config, database, LLM connectivity, and extractors
 tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extracted/ (--dry-run, --output-dir)
-tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, --verbose, --no-raw)
+tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, -v/--verbose, --no-raw)
                          #   copies each source into ~/.tbuk/raw unless --no-raw is passed
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
                          #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
-tbuk meta set <path> k=v # attach metadata to a document (repeatable key=value pairs)
+tbuk meta set <path> k=v # attach metadata to a document (one value per key; distinct keys per call)
 tbuk meta list <path>    # list all metadata for a document
 tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
                          #   (--top, --template, --no-stream, --require-context to abort when no context matches)
@@ -97,12 +97,15 @@ tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR
 tbuk delete <path>       # remove a document, its chunks, and its extracted-text cache (--yes skips prompt)
 tbuk update <file>       # re-ingest a single file if SHA256 changed (--force); use `tbuk ingest <dir>` for folders
+tbuk reindex             # re-embed every indexed document, reading from ~/.tbuk/raw (--source-dir, --dry-run, -v)
+                         #   the fix after changing embedding.provider/model; originals need not still exist
 tbuk stats               # knowledge base summary: doc/chunk counts, size (--format text|json)
 tbuk list                # list indexed documents: path, title, chunk count, updated (--limit, --format)
 tbuk export <path>       # bundle config + all data folders into a portable .tar (--root, --force)
                          #   <path> dir → timestamped file inside it; <path> file → that file (prompts before overwrite)
-tbuk import <archive>    # restore a knowledge base from a .tar snapshot (--root, --config, --merge, --force-config, --force-data)
-                         #   default: adopt archive config, re-home folders under root; --merge: keep target config
+tbuk import <archive>    # import an archive's documents and prompt templates, indexed with this machine's config (-v)
+                         #   `import data` / `import templates` do one half each; --on-conflict skip|overwrite|ask, --dry-run, --yes
+                         #   never reads the archive's config or its embeddings
 ```
 
 If `tbuk` is not found after install, add Go's bin dir to your shell profile:
@@ -301,45 +304,77 @@ tbuk export --root /data/work-kb ~/backups/work.tar
 ```
 
 An existing **directory** target gets a timestamped filename inside it; a
-**file** target is used as-is. The archived `config.yaml` has its data-folder
-paths commented out, so `tbuk import` re-homes each folder under the target
-root instead of pinning it to the exporting machine's absolute paths (provider,
-model, and chunking settings are preserved). Components stored outside the root
-are archived by basename so the archive is always self-contained.
+**file** target is used as-is. Components stored outside the root are archived
+by basename so the archive is always self-contained.
 
-`tbuk import <archive>` restores a snapshot. `--root` / `--config` choose where
-it lands, exactly as for every other command:
+`tbuk import <archive>` reads a snapshot back into a knowledge base. It takes
+from the archive the things that are *yours* rather than the exporting
+machine's: the **source files** under `raw/`, the **index** naming what those
+files were (paths, titles, and the metadata you attached with `tbuk meta set`),
+and your **prompt templates**. The sources are copied into this machine's raw
+archive and embedded with this machine's config:
 
 ```bash
-tbuk import ~/backups/kb.tar                    # restore into ~/.tbuk
-tbuk import --root /data/work-kb ~/backups/kb.tar   # restore into a specific root
-tbuk import --merge ~/backups/kb.tar            # merge into an existing KB's folders
-tbuk import --force-data ~/backups/kb.tar      # replace the database, extracted text, raw archive, prompts
-tbuk import --force-config ~/backups/kb.tar    # adopt the archive's config, leave the data alone
+tbuk import ~/backups/kb.tar                        # documents and templates
+tbuk import data ~/backups/kb.tar                   # documents only
+tbuk import templates ~/backups/kb.tar              # templates only
+tbuk import --root /data/work-kb ~/backups/kb.tar   # into a specific root
+tbuk import --dry-run ~/backups/kb.tar              # list what would be imported
+tbuk import --on-conflict overwrite ~/backups/kb.tar
 ```
 
-Import **adopts the archive's config** when the target root has none yet — the
-"move my knowledge base to a new machine" case, where each data folder is
-re-homed at that root's default locations. When a `config.yaml` is already
-there it is kept, and the imported folders go into the paths *it* names, unless
-`--force-config` replaces it. `--merge` asks for that same placement explicitly
-and never adopts the archive's config, even into an empty root. Existing files are left untouched unless the
-matching flag is passed, so an import never clobbers a live database by
-accident. Config and data are forced separately — `--force-config` replaces the
-target's `config.yaml` with the archive's, `--force-data` replaces the database,
-extracted text, raw archive and prompts — because a machine's own settings and
-the knowledge base they point at are rarely worth replacing at the same moment.
-A config that is not there yet is written whatever the flags say.
+All three take the same flags. Templates are imported first: they are quick and
+need no embedding provider, so a slow or failing embed step never costs you
+your templates. `tbuk import templates` needs no reachable provider at all.
 
-Where the data lands follows whichever config ends up in effect. Adopt the
-archive's config and the folders are re-homed under the target root; keep your
-own config — the default when one already exists — and the data is placed in the
-folders *it* names, so a knowledge base whose database lives on another disk
-stays consistent after a restore.
+Nothing else in the archive is used, deliberately:
+
+- **The config is never read.** It describes the machine it came from — its
+  paths, its providers, its models — and adopting another machine's setup is
+  never what you want. Your `config.yaml` is left exactly as it is.
+- **The embeddings are never trusted.** Vectors made by another machine's model
+  cannot be searched here, and nothing in an archive proves which model made
+  them. Matching `embedding.dimension` is not proof: two different 768-dim
+  models produce vectors that fail silently rather than loudly. Every document
+  is embedded afresh from the archived bytes.
+- **The extracted-text cache is skipped.** Extraction is deterministic and
+  re-derivable from the raw bytes.
+
+A document already indexed at the **same path**, or a template already
+installed under the **same name**, is left alone — so re-importing the same
+archive is a no-op. `--on-conflict overwrite` replaces it with the archive's
+copy; `--on-conflict ask` decides one at a time. A template is replaced whole
+rather than merged, so what lands is always a template that loads.
+
+The built-in templates (`qa`, `brief`, `anki`) exist on every machine and so
+always collide: under the default `skip`, only genuinely custom templates
+travel. If you edited a built-in on the other machine, `--on-conflict
+overwrite` brings your version across.
+
+A document the archive indexes but has no `raw/` copy of (ingested with
+`--no-raw`) cannot be imported at all — it is reported and skipped, and the
+rest of the run continues. If a document fails to embed, it is rolled back
+rather than left as an empty row, so re-running the import picks it up.
+
+Importing into a directory with **no `config.yaml`** sets one up first, exactly
+as `tbuk init` would, then shows the embedding settings it will use and asks
+before spending anything on them. `--yes` skips that prompt for scripts, and a
+templates-only import never asks, having nothing to spend.
+
+### Rewinding your own knowledge base
+
+There is no "restore" command, and deliberately so: trusting an archive's
+embeddings is only safe when the two machines share an embedding model, which
+tbuk cannot verify. To roll your *own* machine back to a snapshot — where the
+config has not changed and the vectors are yours — untar it over the root:
+
+```bash
+tar -xf ~/backups/kb.tar -C ~/.tbuk    # config.yaml included; check it first
+```
 
 Export re-reads the archive before putting it in place, so a damaged snapshot
-fails at export time rather than on restore, and import checks the same thing
-before writing anything — an incomplete archive is refused rather than restoring
+fails at export time rather than on import, and import checks the same thing
+before writing anything — an incomplete archive is refused rather than importing
 part of a knowledge base. If import rejects a file, the error says why — the file is empty, truncated part-way (an incomplete copy or a
 cloud folder that has not finished syncing), corrupt at a given entry, or not a
 tar at all. A `.tar.gz`/`.tgz` must be decompressed first: `tbuk export` writes
@@ -359,13 +394,13 @@ internal/
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search, rune-safe, configurable size/overlap
   embeddings/       Embedder interface; MLX, llama.cpp, Ollama, OpenAI adapters
-  ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline
+  ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline; Reindex* — re-embed from raw/
   llm/              LLM interface; MLX, Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
-  importer/         Import — restore a tar snapshot under a target root (re-home or --merge)
+  importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
 ```
 
 Dependencies point inward. Providers depend only on shared interfaces defined in `internal/llm` and `internal/embeddings`.
@@ -373,7 +408,7 @@ Dependencies point inward. Providers depend only on shared interfaces defined in
 ## Storage schema
 
 ```sql
-documents   — path, sha256, title, mime_type, timestamps
+documents   — path, sha256, title, mime_type, raw_path, timestamps
 chunks      — document_id, chunk_index, text, token_count, embedding BLOB
 metadata    — document_id, key, value  (key/value per document)
 chunks_fts  — FTS5 virtual table over chunks.text (auto-synced via triggers)
@@ -381,12 +416,28 @@ chunks_fts  — FTS5 virtual table over chunks.text (auto-synced via triggers)
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
 
+`raw_path` records where a document's archived copy lives, relative to
+`ingest.raw_dir` (e.g. `<sha256>.md`). Relative, so a knowledge base stays
+portable when its folders move or are imported under another root. Empty means
+no copy is known — ingested with `--no-raw`, with archiving disabled, or before
+the column existed.
+
 ### Metadata
+
+The cache filename carries `preprocess.ExtractorVersion`, so improving an
+extractor stops its old output from being reused for content that has not
+changed — bump the constant and the next ingest or reindex re-extracts. Text
+cached by an older version is read only when the document cannot be
+re-extracted from anything at all, where older text beats no document; reindex
+says so on the line when that happens.
 
 Ingestion writes automatic metadata for every document: `filename`,
 `extension` (lowercased, no leading dot), `mime`, and `dir`. These refresh on
 re-ingest, so `tbuk find filename=README.md` or `tbuk find extension=md` work
-after a plain `tbuk ingest`. Attach your own tags with
+after a plain `tbuk ingest`. A document holds **one value per key** — the
+table's primary key is `(document_id, key)` — so `meta set` refuses a command
+that gives the same key twice rather than silently keeping the last. Attach
+your own labels with
 `tbuk meta set <path> tag=design` (user-set keys survive re-ingest) and inspect
 them with `tbuk meta list <path>`.
 
@@ -433,6 +484,42 @@ text extraction and embedding run first, then the old and new chunks are
 swapped in a single transaction. If embedding fails midway (e.g. the provider
 is down), the previous index is left intact and searchable rather than wiped.
 
+### Re-embedding the whole knowledge base
+
+Changing `embedding.provider` or `embedding.model` changes the vector
+dimension, and the chunks already indexed stay at the old one — a knowledge
+base that `tbuk doctor` flags and that searches refuse to run against.
+`tbuk reindex` repairs it in one command:
+
+```bash
+tbuk reindex                            # re-embed every document
+tbuk reindex -v                         # ...and print a line per document
+tbuk reindex --dry-run                  # list what would be re-embedded, and from where
+tbuk reindex --source-dir /mnt/backup/raw   # resolve archived copies from elsewhere
+```
+
+`ingest`, `reindex` and `import` print only what needs acting on — documents
+they could not process, and the closing counts — so one failure among hundreds
+is visible rather than buried. `-v`/`--verbose` prints a line per item; a
+`--dry-run` lists regardless, that being its purpose.
+
+The text comes from whichever of three places still has it: the extracted-text
+cache (`extracted/<sha256>.v<N>.txt`), the archived copy the document records
+(`raw_path`), or `documents.path`. So a document whose original is gone —
+imported from a snapshot, or since moved — is re-embedded like any other, and
+one whose files have all gone is still re-embedded from text already extracted.
+A document with none of the three is reported and skipped, naming each place it
+looked. A knowledge base indexed before
+that was recorded falls back to the name a copy would have been written under,
+`<sha256><ext>`, and the location is recorded when it resolves, so the next run
+is a plain lookup. A document with no archived
+copy (`ingest.raw_dir` empty, or ingested with `--no-raw`) falls back to its
+stored path; one with neither is reported and skipped, and the rest of the run
+carries on. Every targeted document is re-embedded: there is no
+unchanged-file check, because the content is presumed unchanged and it is the
+embedding configuration that moved. Chunks are replaced per document, with the
+same atomicity as `tbuk update`.
+
 ### Paths & Unicode
 
 `tbuk ingest`, `update`, and `delete` resolve their path argument to an
@@ -456,7 +543,9 @@ text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 | `tbuk ask` returns irrelevant or vague answers | Low retrieval quality or document not ingested | Run `tbuk search <query>` to inspect retrieved chunks; run `tbuk update <path>` if the file changed |
 | `tbuk ask` is very slow | Large `--top` value, slow model, or large chunks | Reduce `--top`; use a faster LLM model; reduce `chunking.size` in config. Press `Ctrl-C` to cancel — retrieval and streaming are interrupted cleanly |
 | Database error on start | DB file missing or corrupted | Check `database.path` in config; run `tbuk init` to recreate missing dirs (does not overwrite existing DB) |
-| Embedding dimension mismatch error | Model changed since last ingest | Set `embedding.dimension` in config to match the new model; re-ingest all documents with `--force` |
+| Embedding dimension mismatch error | `embedding.provider`/`embedding.model` changed since last ingest | Set `embedding.dimension` in config to match the new model, then run `tbuk reindex` — it re-embeds every document from `~/.tbuk/raw`, so the originals need not still exist |
+| Search fails right after untarring a snapshot over the root | The snapshot's vectors came from a different embedding model | Run `tbuk reindex`, or import the archive with `tbuk import` instead, which embeds locally from the start |
+| `tbuk reindex` skips documents with `no extracted text …, no archived copy …` | None of the three places holds the document's text any more | The line names each path it tried. If copies are in `ingest.raw_dir` under their *original* names (a raw folder assembled by hand, or by an older version), re-ingest that folder as an ordinary source folder: `tbuk ingest <that-folder>` |
 
 ## License
 
