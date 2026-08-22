@@ -186,6 +186,7 @@ All `--topic` flags are `StringSlice` — repeatable and comma-splitting
 | `topic delete <name> [--yes]` | remove topic + all its links; confirm prompt like `delete`. Documents untouched. |
 | `topic digest <name> [...]` | milestone 2, below. |
 | `export <path> --topic x,y` | milestone 3, below. |
+| `reindex --topic x,y` | cross-plan — see "Cross-plan note" below; wire in whichever plan (this one or #130) lands second. |
 
 ## Milestone 2 — `topic digest`
 
@@ -264,6 +265,28 @@ Each PR updates `README.md` (quick start, schema, architecture),
 `docs/initial-context.md` (schema, CLI list, search/retrieval sections — per
 AGENTS.md, before merge), and `docs/user-guide.md`. This plan is archived to
 `docs/archive/` in the milestone-3 PR.
+
+## Cross-plan note: `tbuk reindex --topic`
+
+Issue [#130](https://github.com/gotofritz/timbuktu/issues/130) /
+`docs/plans/130-reindex-command.md` proposes `tbuk reindex`, a bulk
+re-embed command, with an optional `--topic` filter that depends on this
+plan. Sequencing between the two plans isn't decided, so handle whichever
+order actually happens:
+
+- **If milestone 1 here lands first** (this plan gives `search`/`ask` their
+  `--topic` filter first): when `reindex` is implemented, wire `--topic`
+  into it too, reusing the same filter semantics (OR/union) and whatever
+  `TopicRepo`/filter-layer API milestone 1 actually produces — don't trust
+  plan 130's guess at that API, it predates this landing.
+- **If `tbuk reindex` lands first** (without `--topic`, per plan 130's
+  Design decision 6): milestone 1's rollout here should add a line item
+  wiring `--topic` into `reindex` alongside `ingest`/`search`/`ask`, so it
+  isn't forgotten as a fourth consumer of the filter.
+
+Either way, `reindex --topic x,y` behaves like `search --topic x,y` — one
+topic vocabulary, one filter semantics, wired into every command that
+targets a document subset.
 
 ## Out of scope (deliberate)
 
