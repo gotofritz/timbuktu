@@ -13,8 +13,8 @@ import (
 )
 
 // openAIProvider speaks the OpenAI-compatible /v1/chat/completions protocol.
-// It backs both the hosted OpenAI provider (bearer token required) and the
-// local llama.cpp provider (name "llama", no token).
+// It backs the hosted OpenAI provider (bearer token required) and the local
+// llama.cpp ("llama", no token) and MLX ("mlx", optional token) providers.
 type openAIProvider struct {
 	name      string
 	baseURL   string
@@ -38,6 +38,31 @@ func newOpenAIProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
 	}
 	return &openAIProvider{
 		name:      "openai",
+		baseURL:   baseURL,
+		model:     cfg.Model,
+		maxTokens: cfg.MaxTokens,
+		apiKey:    key,
+		client:    &http.Client{},
+	}, nil
+}
+
+// newMLXProvider targets a local OpenAI-compatible MLX server
+// (mlx_lm.server, mlx-openai-server, LM Studio, nativ, …), defaulting to
+// http://localhost:8080. No API key is required; when MLX_API_KEY is set it
+// is sent as a Bearer token and the base URL must be HTTPS or loopback.
+func newMLXProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+	key := os.Getenv("MLX_API_KEY")
+	if key != "" {
+		if err := config.ValidateKeyedBaseURL(baseURL); err != nil {
+			return nil, fmt.Errorf("llm mlx: %w", err)
+		}
+	}
+	return &openAIProvider{
+		name:      "mlx",
 		baseURL:   baseURL,
 		model:     cfg.Model,
 		maxTokens: cfg.MaxTokens,

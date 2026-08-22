@@ -17,8 +17,8 @@ internal/
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
-  embeddings/       Embedder interface + factory; llama, ollama, openai adapters
-  llm/              LLM interface + factory; claude, openai, llama, ollama adapters (SSE + JSON-lines streaming)
+  embeddings/       Embedder interface + factory; mlx, llama, ollama, openai adapters
+  llm/              LLM interface + factory; mlx, claude, openai, llama, ollama adapters (SSE + JSON-lines streaming)
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
@@ -91,7 +91,7 @@ type Config struct {
 }
 ```
 
-Defaults: llm.provider=`llama`, embedding.provider=`llama`, dimension=768, chunk size=400, overlap=50. Chunk size kept below llama.cpp default ubatch size (512 tokens) to avoid HTTP 500 errors from the embedding server. To use larger chunks, raise both `-b` and `-ub` at server startup (they must match; e.g. `llama-server -b 1024 -ub 1024 …`).
+Defaults: llm.provider=`mlx`, embedding.provider=`mlx`, dimension=768, chunk size=400, overlap=50. The `mlx` provider targets any OpenAI-compatible server fronting MLX models on Apple silicon (mlx_lm.server, mlx-openai-server, LM Studio, nativ); `llama` (llama.cpp) remains the cross-platform local alternative. Chunk size kept below llama.cpp default ubatch size (512 tokens) to avoid HTTP 500 errors from the embedding server. To use larger chunks, raise both `-b` and `-ub` at server startup (they must match; e.g. `llama-server -b 1024 -ub 1024 …`).
 
 `Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, empty db path, an unknown llm/embedding provider, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
 
@@ -169,11 +169,12 @@ func NewEmbedder(cfg config.EmbeddingConfig) (Embedder, error)
 
 | Provider | Key | Endpoint | Notes |
 |----------|-----|----------|-------|
-| `llama`  | default | `POST {base_url}/embedding` | `{"content":"..."}` → `{"embedding":[...]}`, one request per text |
+| `mlx`    | default | `POST {base_url}/v1/embeddings` | OpenAI shape, no auth; optional `MLX_API_KEY` env sent as Bearer (keyed base URL must be HTTPS/loopback) |
+| `llama`  | — | `POST {base_url}/embedding` | `{"content":"..."}` → `{"embedding":[...]}`, one request per text |
 | `ollama` | — | `POST {base_url}/api/embed` | `{"model":"...","input":[...]}`, batch size 8 |
 | `openai` | `OPENAI_API_KEY` env | `POST {base_url}/v1/embeddings` | Bearer auth, OpenAI response format |
 
-`base_url` defaults to `http://localhost:8080` (llama/ollama) or `https://api.openai.com` (openai).
+`base_url` defaults to `http://localhost:8080` (mlx/llama), `http://localhost:11434` (ollama), or `https://api.openai.com` (openai).
 `dimension` is read from config — no auto-detection round-trip.
 
 The `openai` and `ollama` adapters wrap each POST in `doWithRetry` (`retry.go`):
@@ -213,12 +214,13 @@ func NewLLM(cfg *config.LLMConfig) (LLM, error)
 
 | Provider | Key | Endpoint | Notes |
 |----------|-----|----------|-------|
+| `mlx`    | default | `POST {base_url}/v1/chat/completions` | OpenAI-compatible SSE, shares the `openai` adapter; optional `MLX_API_KEY` env sent as Bearer (keyed base URL must be HTTPS/loopback) |
 | `claude` | `ANTHROPIC_API_KEY` env | `POST {base_url}/v1/messages` | SSE, `content_block_delta` events, `x-api-key` header |
 | `openai` | `OPENAI_API_KEY` env | `POST {base_url}/v1/chat/completions` | SSE, `[DONE]` sentinel, Bearer auth |
 | `llama`  | — | `POST {base_url}/v1/chat/completions` | OpenAI-compatible SSE, no auth header; shares the `openai` adapter |
 | `ollama` | — | `POST {base_url}/api/chat` | JSON-lines streaming, `"done":true` sentinel |
 
-`base_url` defaults to `https://api.anthropic.com` (claude), `https://api.openai.com` (openai), `http://localhost:8080` (llama), `http://localhost:11434` (ollama).
+`base_url` defaults to `https://api.anthropic.com` (claude), `https://api.openai.com` (openai), `http://localhost:8080` (mlx/llama), `http://localhost:11434` (ollama).
 
 Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. Every send goes through `sendToken`, which selects on `ctx.Done()`, so a consumer that abandons the channel (e.g. `RunAsk` returning on a mid-stream error) releases the goroutine instead of leaking it. `RunAsk` runs retrieval and the chat call under a cancellable context derived from `cmd.Context()`, cancelled on return (Ctrl-C interrupts). System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
 
@@ -280,10 +282,12 @@ Supported extensions for `IngestDir`: `.md`, `.txt`, `.pdf`, `.html`, `.htm`.
 Doctor shows document/chunk counts from the live DB. The FTS5 health check is
 gated on database health (its own flag), not on any embedding server's
 reachability, so a down embedder can't mask FTS corruption. Hosted providers
-(`claude`/`openai`) are not HTTP-probed — they lack the llama.cpp/ollama
+(`claude`/`openai`) are not HTTP-probed — they lack the local-server
 `/health` & `/v1/models` endpoints — so doctor prints `hosted API — not probed`
-instead of a misleading status. `runDoctor` writes to an `io.Writer`
-(`RunDoctorTo`) for testability.
+instead of a misleading status. Local status probes pick their path per
+provider (`statusProbeURL`): `llama`/`ollama` hit `/health`, `mlx` hits
+`/v1/models` (MLX servers expose no `/health`). `runDoctor` writes to an
+`io.Writer` (`RunDoctorTo`) for testability.
 
 ---
 

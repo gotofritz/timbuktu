@@ -507,3 +507,189 @@ func TestFactory_unknownProvider(t *testing.T) {
 		t.Fatal("expected error for unknown provider")
 	}
 }
+
+// --- MLX tests ---
+
+// mlxHandler speaks the OpenAI /v1/embeddings response shape with indexes
+// deliberately reversed, pinning the by-index reorder. No auth required.
+func mlxHandler(t *testing.T, vecs [][]float32, gotAuth *string) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		if gotAuth != nil {
+			*gotAuth = r.Header.Get("Authorization")
+		}
+		if r.URL.Path != "/v1/embeddings" {
+			t.Errorf("path: want /v1/embeddings, got %s", r.URL.Path)
+		}
+		data := make([]map[string]any, 0, len(vecs))
+		for i := len(vecs) - 1; i >= 0; i-- {
+			data = append(data, map[string]any{"embedding": vecs[i], "index": i})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"data": data}) //nolint:errcheck
+	}
+}
+
+func TestMLXEmbedder_success(t *testing.T) {
+	want := [][]float32{{0.1, 0.2}, {0.3, 0.4}}
+	var gotAuth string
+	srv := httptest.NewServer(mlxHandler(t, want, &gotAuth))
+	defer srv.Close()
+
+	// Keyless by default — no env vars needed, no Authorization header sent.
+	t.Setenv("MLX_API_KEY", "")
+	cfg := config.EmbeddingConfig{
+		Provider:  "mlx",
+		Model:     "mlx-community/some-embedding-model",
+		BaseURL:   srv.URL,
+		Dimension: 2,
+	}
+	emb, err := embeddings.NewEmbedder(cfg)
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+
+	got, err := emb.Embed(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("mlx must not send Authorization header by default, got %q", gotAuth)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 results, got %d", len(got))
+	}
+	if got[0][0] != 0.1 || got[1][0] != 0.3 {
+		t.Errorf("results out of order: got %v", got)
+	}
+	if emb.Dimension() != 2 {
+		t.Errorf("Dimension: want 2, got %d", emb.Dimension())
+	}
+}
+
+func TestMLXEmbedder_optionalKeySendsBearer(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(mlxHandler(t, [][]float32{{0.1}}, &gotAuth))
+	defer srv.Close()
+
+	t.Setenv("MLX_API_KEY", "sekrit")
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "mlx", Model: "m", BaseURL: srv.URL, Dimension: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	if _, err := emb.Embed(context.Background(), []string{"hi"}); err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if gotAuth != "Bearer sekrit" {
+		t.Errorf("Authorization: want %q, got %q", "Bearer sekrit", gotAuth)
+	}
+}
+
+func TestMLXEmbedder_rejectsInsecureRemoteBaseURL(t *testing.T) {
+	t.Setenv("MLX_API_KEY", "sekrit")
+	cfg := config.EmbeddingConfig{
+		Provider:  "mlx",
+		Model:     "m",
+		BaseURL:   "http://api.remote.example.com",
+		Dimension: 2,
+	}
+	if _, err := embeddings.NewEmbedder(cfg); err == nil {
+		t.Fatal("expected error for API key on non-HTTPS remote base_url")
+	}
+}
+
+func TestMLXEmbedder_errorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "no embedding model loaded") //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	t.Setenv("MLX_API_KEY", "")
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "mlx", Model: "m", BaseURL: srv.URL, Dimension: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	_, err = emb.Embed(context.Background(), []string{"hi"})
+	if err == nil {
+		t.Fatal("expected error from 404")
+	}
+	var embErr *embeddings.EmbedError
+	if !embeddings.AsEmbedError(err, &embErr) {
+		t.Fatalf("want *EmbedError, got %T: %v", err, err)
+	}
+	if embErr.Provider != "mlx" {
+		t.Errorf("provider: want mlx, got %q", embErr.Provider)
+	}
+	if !strings.Contains(err.Error(), "no embedding model loaded") {
+		t.Errorf("error must include response body, got %v", err)
+	}
+}
+
+func TestMLXEmbedder_retriesTransient(t *testing.T) {
+	// The shared retry policy applies: a 429 then success must succeed.
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		if call == 1 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"data": []map[string]any{{"embedding": []float32{0.5}, "index": 0}},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MLX_API_KEY", "")
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "mlx", Model: "m", BaseURL: srv.URL, Dimension: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	got, err := emb.Embed(context.Background(), []string{"hi"})
+	if err != nil {
+		t.Fatalf("Embed after retry: %v", err)
+	}
+	if call != 2 {
+		t.Errorf("want 2 calls (retry), got %d", call)
+	}
+	if len(got) != 1 || got[0][0] != 0.5 {
+		t.Errorf("unexpected result: %v", got)
+	}
+}
+
+// Regression: the shared adapter refactor must not loosen openai's contract —
+// key still required at construction, header still sent.
+func TestOpenAIEmbedder_stillSendsAuthHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"data": []map[string]any{{"embedding": []float32{0.1}, "index": 0}},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENAI_API_KEY", "opie")
+	emb, err := embeddings.NewEmbedder(config.EmbeddingConfig{
+		Provider: "openai", Model: "m", BaseURL: srv.URL, Dimension: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder: %v", err)
+	}
+	if _, err := emb.Embed(context.Background(), []string{"hi"}); err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if gotAuth != "Bearer opie" {
+		t.Errorf("Authorization: want %q, got %q", "Bearer opie", gotAuth)
+	}
+}

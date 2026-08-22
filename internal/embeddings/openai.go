@@ -12,10 +12,14 @@ import (
 	"github.com/gotofritz/timbuktu/internal/config"
 )
 
+// openAIEmbedder speaks the OpenAI /v1/embeddings protocol. It backs the
+// hosted openai provider (bearer token required) and the local mlx provider
+// (no token; MLX_API_KEY optional).
 type openAIEmbedder struct {
+	name      string // provider name for error contexts ("openai" | "mlx")
 	baseURL   string
 	model     string
-	apiKey    string
+	apiKey    string // empty → no Authorization header
 	dimension int
 	client    *http.Client
 	retry     retryPolicy
@@ -34,6 +38,33 @@ func newOpenAIEmbedder(cfg config.EmbeddingConfig) (*openAIEmbedder, error) {
 		return nil, fmt.Errorf("embeddings openai: %w", err)
 	}
 	return &openAIEmbedder{
+		name:      "openai",
+		baseURL:   baseURL,
+		model:     cfg.Model,
+		apiKey:    key,
+		dimension: cfg.Dimension,
+		client:    &http.Client{},
+		retry:     defaultRetryPolicy(),
+	}, nil
+}
+
+// newMLXEmbedder targets a local OpenAI-compatible MLX server's
+// /v1/embeddings endpoint, defaulting to http://localhost:8080. No API key
+// is required; when MLX_API_KEY is set it is sent as a Bearer token and the
+// base URL must be HTTPS or loopback.
+func newMLXEmbedder(cfg config.EmbeddingConfig) (*openAIEmbedder, error) {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+	key := os.Getenv("MLX_API_KEY")
+	if key != "" {
+		if err := config.ValidateKeyedBaseURL(baseURL); err != nil {
+			return nil, fmt.Errorf("embeddings mlx: %w", err)
+		}
+	}
+	return &openAIEmbedder{
+		name:      "mlx",
 		baseURL:   baseURL,
 		model:     cfg.Model,
 		apiKey:    key,
@@ -51,28 +82,30 @@ func (o *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		"input": texts,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshal request: %w", err)
+		return nil, fmt.Errorf("%s: marshal request: %w", o.name, err)
 	}
 
 	newReq := func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/v1/embeddings", bytes.NewReader(body))
 		if err != nil {
-			return nil, fmt.Errorf("openai: build request: %w", err)
+			return nil, fmt.Errorf("%s: build request: %w", o.name, err)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+o.apiKey)
+		if o.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+o.apiKey)
+		}
 		return req, nil
 	}
 
 	resp, err := doWithRetry(ctx, o.client, o.retry, newReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: do request: %w", err)
+		return nil, fmt.Errorf("%s: do request: %w", o.name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, &EmbedError{
-			Provider:   "openai",
+			Provider:   o.name,
 			StatusCode: resp.StatusCode,
 			Message:    errorMessage(resp),
 		}
@@ -85,7 +118,7 @@ func (o *openAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("openai: decode response: %w", err)
+		return nil, fmt.Errorf("%s: decode response: %w", o.name, err)
 	}
 
 	// sort by index to maintain original order

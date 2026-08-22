@@ -230,11 +230,11 @@ database:
   path: ./tbuk.sqlite
 
 llm:
-  provider: llama    # llama | ollama | claude | openai
-  model: ""          # provider default when empty
+  provider: mlx      # mlx | llama | ollama | claude | openai
+  model: ""          # provider default when empty; mlx: HF repo id served
 
 embedding:
-  provider: llama    # llama | ollama | openai
+  provider: mlx      # mlx | llama | ollama | openai
   model: ""
   dimension: 768
 
@@ -358,9 +358,9 @@ internal/
   storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search, rune-safe, configurable size/overlap
-  embeddings/       Embedder interface; llama.cpp, Ollama, OpenAI adapters
+  embeddings/       Embedder interface; MLX, llama.cpp, Ollama, OpenAI adapters
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline
-  llm/              LLM interface; Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
+  llm/              LLM interface; MLX, Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
@@ -449,7 +449,7 @@ text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `tbuk` command not found after install | Go bin dir not in PATH | Add `export PATH="$PATH:$(go env GOPATH)/bin"` to shell profile and restart terminal |
-| `tbuk doctor` shows LLM or embedding unreachable | llama.cpp not running, or wrong port | Start llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` |
+| `tbuk doctor` shows LLM or embedding unreachable | Local server (MLX or llama.cpp) not running, or wrong port | Start your MLX server / llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` |
 | `tbuk doctor` shows `hosted API — not probed` | Provider is `claude`/`openai` (no `/health` endpoint) | Expected — hosted APIs aren't probed; set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and use `tbuk ask` to verify connectivity |
 | `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, context too long, rate limit) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens` |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
