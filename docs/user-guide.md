@@ -199,13 +199,21 @@ LM Studio, or [nativ](https://github.com/Blaizzy/nativ). It is the default
 provider: a fresh `tbuk init` config assumes an MLX server on
 `http://localhost:8080` with no edits.
 
+Both servers below are installed with [uv](https://docs.astral.sh/uv/)'s
+`uv tool install` rather than `pip install` — `pip install` needs an active
+virtualenv (or fights your system Python's PEP 668 "externally managed
+environment" guard); `uv tool install` builds an isolated environment for the
+tool automatically and puts its commands straight on your `PATH`, the same
+way `pipx` does. Install uv itself with `brew install uv` if you don't have
+it, or see the [uv install docs](https://docs.astral.sh/uv/getting-started/installation/).
+
 Chat server (port 8080 — the default). Install the official
 [mlx-lm](https://github.com/ml-explore/mlx-lm) package and start its server;
 the `--model` flag pulls the model from Hugging Face and caches it on first
 run:
 
 ```bash
-pip install mlx-lm
+uv tool install mlx-lm
 mlx_lm.server --model mlx-community/Qwen3-8B-4bit --port 8080
 ```
 
@@ -216,14 +224,29 @@ embedding model whose output size matches `embedding.dimension` in your
 config (default `768`, which `nomic-embed-text` fits):
 
 ```bash
-pip install mlx-openai-server
+uv tool install mlx-openai-server
 mlx-openai-server launch --model-type embeddings \
   --model-path mlx-community/nomic-embed-text-v1.5 --port 8000
 ```
 
-(Alternatively keep embeddings on llama.cpp from Path B — set
-`embedding.provider: llama` — or use LM Studio, which serves both chat and
-embeddings from one process.)
+> **If `uv tool install mlx-openai-server` fails building `outlines-core`
+> with `error: can't find Rust compiler`:** that package has no prebuilt
+> wheel for every Python/macOS combination, so the install falls back to
+> compiling it, which needs Rust. Two fixes:
+> - Point the tool install at an older Python that does have a wheel:
+>   `uv tool install mlx-openai-server --python 3.12`.
+> - Or install Rust and let it compile: `brew install rust`, then retry the
+>   original command.
+>
+> `mlx-openai-server` pulls in a large dependency stack (torch, opencv,
+> outlines) even when you only want its embeddings endpoint, since one
+> package serves chat, vision, and embeddings alike. If neither fix above
+> appeals, use LM Studio instead (below) or keep embeddings on llama.cpp
+> from Path B (`embedding.provider: llama`).
+
+(LM Studio — download from [lmstudio.ai](https://lmstudio.ai), no Python
+install at all — serves both chat and embeddings from one process and is a
+reasonable alternative to running two separate servers above.)
 
 Then point the config at both servers (see section 5 for the full file):
 
