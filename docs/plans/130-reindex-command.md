@@ -1,24 +1,45 @@
-# Plan 130: `tbuk reindex` — re-embed documents from the raw archive
+# Plan 130: raw archive as source of truth — `tbuk reindex`, `tbuk restore`, re-encoding `tbuk import`
 
-Lands issue [#130](https://github.com/gotofritz/timbuktu/issues/130): a new
-command that re-embeds every already-indexed document using whatever content
-the knowledge base actually still has custody of — the `raw/` archive by
-default, not the document's live filesystem path.
+Lands issue [#130](https://github.com/gotofritz/timbuktu/issues/130): three
+related changes, all variations on one idea — the `raw/` archive, not a live
+filesystem path or a trusted-verbatim database, is the durable source of
+truth for a document's content, and embeddings should always be derivable
+locally from it.
+
+1. **`tbuk reindex`** (new command) — re-embed every already-indexed
+   document, reading from `raw/`.
+2. **`tbuk restore`** (new command) — today's `tbuk import` behavior,
+   renamed and otherwise unchanged: verbatim archive restore, trusting the
+   archive's embeddings exactly as exported.
+3. **`tbuk import`** (repurposed) — restore, then always re-encode every
+   restored document from the *local* machine's embedding config. Becomes
+   the safe default for moving a knowledge base between machines with
+   different embedding setups; `tbuk restore` is the explicit opt-in for
+   "I know source and target configs match, skip re-embedding."
+
+This is a PoC with a single user — no backward compatibility constraint.
+`tbuk import`'s behavior changes outright; nothing preserves the old
+behavior under the `import` name.
 
 ## Goal
 
 ```bash
-# after switching embedding.provider/model to a different dimension:
+# fixing an existing KB after switching embedding.provider/model:
 tbuk reindex                    # re-embed every document, reading from raw/
 tbuk reindex --topic go         # only documents tagged "go" (optional — see below)
 tbuk reindex --source-dir /mnt/backup/raw   # resolve raw copies from elsewhere
 tbuk reindex --dry-run          # list what would be re-embedded, do nothing
+
+# moving a KB to a new machine:
+tbuk restore backup.tar         # verbatim — trusts the archive's embeddings exactly
+tbuk import backup.tar          # restore, then re-encode every document from
+                                 # THIS machine's embedding config (the default choice)
 ```
 
-Success = a knowledge base with a mixed-dimension corpus (see "Why now"
-below) becomes consistent again in one command, including for documents
-whose original file no longer exists on this machine — the exact case a
-`tbuk import`-restored knowledge base is in.
+Success = a knowledge base with a mixed-dimension corpus — whether from
+switching providers on an existing KB, or from importing an archive built
+under a different config — becomes consistent again in one command, without
+requiring the document's original file to still exist on this machine.
 
 **Topics status:** verified against the current codebase (no `TopicRepo`,
 no `Topic` type, no `topics.go` anywhere under `internal/`) — the topics
@@ -53,6 +74,15 @@ extracted, raw, prompts — but does not rewrite the `path` column), so it
 typically resolves to nothing on the importing machine. The bytes are right
 there in `raw/<sha256><ext>`, content-addressed and untouched — `reindex`
 reads from there.
+
+The same mismatch happens *at import time*, not just after: today's
+`tbuk import` restores the archive's `chunks` table verbatim, embeddings and
+all. Move a knowledge base from a machine running `embedding.provider: llama`
+(768-dim) to one running `embedding.provider: mlx` (1024-dim) and the
+restored KB is broken on arrival — the exact dimension-mismatch failure mode
+described above, just reached via `import` instead of a config edit. Once
+`reindex` exists (reading from `raw/`, which import already restores), the
+fix is mechanical: run it against whatever `import` just wrote.
 
 ## Design decisions (and alternatives rejected)
 
@@ -122,6 +152,49 @@ reads from there.
    large corpus, same rationale as `export`'s and `import`'s existing
    confirm-before-acting patterns elsewhere in the CLI.
 
+### Import & restore
+
+9. **Today's verbatim-restore behavior becomes `tbuk restore`, unchanged.**
+   Same `internal/importer.Import` / `RunImport` logic, same
+   `--merge`/`--force-config`/`--force-data` flags, same everything — just
+   reached by a different command name. No flag on `import` preserves this;
+   it moves to its own command outright (no backward-compat constraint —
+   see the plan header).
+10. **`tbuk import` (new) = `tbuk restore`'s exact restore step, then
+    reindex only the documents that step just wrote.** No new
+    partial-restore mode in `internal/importer` — reuse the full verbatim
+    restore unchanged (it already writes `raw/`, `extracted/`, and every DB
+    row including chunks), then run the reindex-per-document primitive
+    (from decision 1) against just those documents. `ChunkRepo
+    .ReplaceForDocument`'s existing per-document atomicity means the
+    freshly-restored (possibly wrong-dimension) chunks are replaced one
+    document at a time — no bulk "wipe chunks" step needed. (Rejected: a
+    new narrower "restore identity rows only, skip chunks" mode in
+    `importer` — strictly more new code than composing two operations that
+    already exist, for the same end state.)
+11. **The reindex step is scoped to just-restored documents, not the whole
+    KB.** Needed so `tbuk import --merge` into a large existing KB doesn't
+    silently re-embed everything already there — only what the archive just
+    added/overwrote. Requires `importer.Import`'s result to report which
+    document IDs it wrote, and the ingest-package reindex primitive to
+    accept an explicit document list as a third calling shape alongside
+    "all" and "by topic" (`tbuk reindex` the CLI command keeps defaulting to
+    "all" — this is an additional internal caller, not a new CLI flag).
+12. **`extracted/` restores as part of the verbatim step; the reindex step
+    leaves it alone.** Extraction is deterministic given the same source
+    bytes and extractor version, so re-running it on every import buys
+    nothing. If the archived `extracted/<sha256>.txt` is present, reindex's
+    existing "use the cache if present, else auto-preprocess from `raw/`"
+    behavior (decision 2/3's territory) picks it up for free.
+13. **`tbuk import` re-encodes unconditionally — no opt-out flag.**
+    Considered and rejected a flag (e.g. `--trust-embeddings`) to skip the
+    reindex step and keep the archive's chunks as-is: the expensive part of
+    either path is the embedding API calls, and a flag that skips them only
+    saves anything when source and target already share identical embedding
+    config — at which point `tbuk restore` already does exactly that,
+    faster, with no reindex logic involved at all. A flag on `import`
+    duplicating that case is pure surface area for no new capability.
+
 ## Package changes (sketch — confirm exact signatures when implementing)
 
 ```
@@ -143,6 +216,21 @@ internal/cli/
                          document, prints a per-document summary (ok /
                          skipped-unresolvable / error) and a final count
   reindex_test.go
+
+  restore.go            ← renamed from today's import.go (RunImport /
+                         newImportCmd); behavior unchanged
+  restore_test.go        ← renamed from import_test.go; assertions unchanged
+
+  import.go              ← new: tbuk import — calls the same restore logic
+                         as restore.go, collects the document IDs it wrote,
+                         then calls the ingest-package reindex primitive
+                         (document-list shape) scoped to exactly those IDs
+  import_test.go
+
+internal/importer/
+  importer.go            ← Import's result gains a field reporting which
+                         document IDs/rows were written, so the CLI layer
+                         can scope the reindex step correctly under --merge
 ```
 
 Source resolution needs the file's original extension to pick the right
@@ -164,6 +252,11 @@ Output: one line per document (`re-embedded: <path> (N chunks)` /
 `error: <path> — <err>`), then a summary count, matching the
 style of `IngestDir`'s existing per-file + summary output.
 
+| Command | Behaviour |
+|---|---|
+| `tbuk restore <archive>` | verbatim archive restore — today's `import` behavior, unchanged. `--merge`/`--force-config`/`--force-data` as before. |
+| `tbuk import <archive>` | restore (identical to `restore`), then reindex only the documents that restore step just wrote, from the local embedding config. Same restore-step flags as `restore`; no flag opts out of the reindex step. |
+
 ## Testing (TDD, table-driven, ≥85% per package)
 
 - **ingest:** reindex-from-raw happy path (fake raw dir with a `<sha256><ext>`
@@ -181,6 +274,21 @@ style of `IngestDir`'s existing per-file + summary output.
   reported and the resolvable one still succeeds); summary line counts are
   correct. Extend `integration_test.go` if a real end-to-end
   ingest → switch dimension → reindex → search round-trip is cheap to add.
+- **importer:** `Import`'s result reports the document IDs/rows it wrote —
+  assert this directly (new or extended test) since `tbuk import`'s
+  reindex-scoping depends on it.
+- **cli (restore):** today's `import_test.go` assertions, renamed and
+  retargeted at `restore` — behavior must be byte-identical to what `import`
+  does today.
+- **cli (import, new):** fresh target — restore then reindex touches every
+  restored document (fake embedder call count == restored doc count;
+  stored chunk embeddings end up at the *local* config's dimension even
+  though the archive was built under a different one — this is the named
+  motivating scenario, worth its own test); `--merge` into an existing
+  non-empty KB reindexes only the newly-written/overwritten documents, not
+  pre-existing ones (fake embedder call count excludes pre-existing docs);
+  a failure during the restore step aborts before any reindexing starts
+  (fail fast — never partially reindex a broken restore).
 - `make check-ci` before the PR.
 
 ## Rollout
@@ -192,11 +300,21 @@ this plan is its first commit). Roughly:
 2. `feat(cli): add tbuk reindex command (--source-dir, --dry-run)` — plus
    `--topic` in the same commit only if topics has landed by then (see
    Design decision 6); otherwise a separate fast-follow once it does
-3. `docs: document tbuk reindex` (README quick-start table,
-   `docs/initial-context.md` CLI list, `docs/user-guide.md` — including the
-   embedding-dimension-mismatch troubleshooting row, which currently points
-   at `--force` re-ingest without mentioning this command) + archive this
-   plan.
+3. `feat(cli)!: rename tbuk import's verbatim restore to tbuk restore` —
+   breaking change, no back-compat shim (PoC, single user, explicit
+   instruction — see plan header)
+4. `feat(importer): report written document IDs from Import`
+5. `feat(cli): tbuk import restores then re-encodes from local config`
+6. `docs: document tbuk reindex, tbuk restore, and the new tbuk import`
+   (README quick-start table, `docs/initial-context.md` CLI list and Import
+   section, `docs/user-guide.md` — including the embedding-dimension-mismatch
+   troubleshooting row, which currently points at `--force` re-ingest
+   without mentioning any of these three commands) + archive this plan.
+
+Commits 1–2 (reindex) and 3–5 (restore/import) are independently useful and
+could ship as separate PRs if that proves easier to review — noted here as
+one PR for now since they share the same underlying primitive and this is a
+single small branch.
 
 ## Out of scope (deliberate)
 
@@ -209,6 +327,8 @@ this plan is its first commit). Roughly:
   of the existing archive, not a change to how it's populated.
 - Any change to `update` or `ingest <dir>` — they keep their current,
   narrower semantics; `reindex` is additive.
+- A partial-restore opt-out flag on `tbuk import` — see Design decision 13;
+  `tbuk restore` already covers the "trust the archive" case.
 
 ## Open questions
 
@@ -231,3 +351,11 @@ this plan is its first commit). Roughly:
    from the start, or is the final summary enough? Lean toward a progress
    line given `ingest`'s existing per-file verbose output precedent, but not
    gating.
+4. **Exact shape of `importer.Import`'s written-document-IDs report.** An
+   additive field on whatever its current result type is, versus a repo
+   query keyed on restore-start timestamp — check the current type at
+   implementation time and pick whichever needs less new plumbing.
+5. **Copy-rename vs. refactor for `restore.go`/`restore_test.go`.**
+   Implementation-sequencing detail, not a design fork — likely just a
+   straight rename in one commit (decision 9), with the new `import.go`
+   building on top in a later commit.
