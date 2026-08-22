@@ -968,3 +968,155 @@ func TestClaudeProvider_serverError(t *testing.T) {
 		t.Errorf("StatusCode: want 503, got %d", llmErr.StatusCode)
 	}
 }
+
+// --- MLX tests ---
+
+func TestFactory_mlxNoAuth(t *testing.T) {
+	// MLX servers (mlx_lm.server & co.) require no API key by default —
+	// factory must succeed with no env vars set.
+	t.Setenv("MLX_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider:  "mlx",
+		Model:     "",
+		MaxTokens: 100,
+		BaseURL:   "http://localhost:8080",
+	}
+	if _, err := llm.NewLLM(cfg); err != nil {
+		t.Fatalf("unexpected error for mlx: %v", err)
+	}
+}
+
+func TestFactory_mlxDefaultBaseURL(t *testing.T) {
+	// No BaseURL → provider uses default localhost:8080.
+	t.Setenv("MLX_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider: "mlx",
+		Model:    "",
+	}
+	if _, err := llm.NewLLM(cfg); err != nil {
+		t.Fatalf("unexpected error for mlx without BaseURL: %v", err)
+	}
+}
+
+func TestMLXProvider_stream(t *testing.T) {
+	events := []string{
+		"data: {\"choices\":[{\"delta\":{\"content\":\"Ap\"}}]}\n\n",
+		"data: {\"choices\":[{\"delta\":{\"content\":\"ple\"}}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	// Keyless by default: no Authorization header may be sent.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("mlx must not send Authorization header by default, got %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, e := range events {
+			fmt.Fprint(w, e) //nolint:errcheck
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MLX_API_KEY", "")
+	cfg := &config.LLMConfig{
+		Provider:  "mlx",
+		Model:     "mlx-community/some-model-4bit",
+		MaxTokens: 100,
+		BaseURL:   srv.URL,
+	}
+	provider, err := llm.NewLLM(cfg)
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+
+	ch, err := provider.Chat(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Content: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	tokens := collectTokens(ch)
+	if len(tokens) != 3 {
+		t.Fatalf("want 3 tokens, got %d", len(tokens))
+	}
+	if tokens[0].Text != "Ap" {
+		t.Errorf("token 0: want %q, got %q", "Ap", tokens[0].Text)
+	}
+	if tokens[1].Text != "ple" {
+		t.Errorf("token 1: want %q, got %q", "ple", tokens[1].Text)
+	}
+	if !tokens[2].Done {
+		t.Errorf("last token: want Done=true")
+	}
+}
+
+func TestMLXProvider_optionalKeySendsBearer(t *testing.T) {
+	// When MLX_API_KEY is set the provider sends it as a Bearer token
+	// (some MLX servers support optional key protection).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer sekrit" {
+			t.Errorf("Authorization: want %q, got %q", "Bearer sekrit", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n") //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	t.Setenv("MLX_API_KEY", "sekrit")
+	provider, err := llm.NewLLM(&config.LLMConfig{
+		Provider: "mlx", Model: "m", MaxTokens: 100, BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	ch, err := provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	collectTokens(ch)
+}
+
+func TestMLXProvider_rejectsInsecureRemoteBaseURL(t *testing.T) {
+	// A set key must not cross the network unencrypted — same rule as the
+	// other keyed providers. Keyless mlx accepts any base_url.
+	t.Setenv("MLX_API_KEY", "sekrit")
+	cfg := &config.LLMConfig{
+		Provider: "mlx",
+		Model:    "m",
+		BaseURL:  "http://api.remote.example.com",
+	}
+	if _, err := llm.NewLLM(cfg); err == nil {
+		t.Fatal("expected error for API key on non-HTTPS remote base_url")
+	}
+}
+
+func TestMLXProvider_serverError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "model not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MLX_API_KEY", "")
+	provider, err := llm.NewLLM(&config.LLMConfig{
+		Provider: "mlx", Model: "nope", MaxTokens: 100, BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewLLM: %v", err)
+	}
+	_, err = provider.Chat(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Content: "hi"},
+	})
+	if err == nil {
+		t.Fatal("expected error from 404 response")
+	}
+	var llmErr *llm.LLMError
+	if !llm.AsLLMError(err, &llmErr) {
+		t.Fatalf("want *LLMError, got %T: %v", err, err)
+	}
+	if llmErr.Provider != "mlx" {
+		t.Errorf("provider: want mlx, got %q", llmErr.Provider)
+	}
+	if llmErr.Message != "model not found" {
+		t.Errorf("message: want provider body, got %q", llmErr.Message)
+	}
+}

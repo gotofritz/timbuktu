@@ -49,6 +49,8 @@ func NewEmbedder(cfg config.EmbeddingConfig) (Embedder, error) {
 	switch cfg.Provider {
 	case "llama":
 		return newLlamaEmbedder(cfg), nil
+	case "mlx":
+		return newMLXEmbedder(cfg)
 	case "ollama":
 		return newOllamaEmbedder(cfg), nil
 	case "openai":

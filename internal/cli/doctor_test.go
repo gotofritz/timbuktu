@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -378,4 +379,99 @@ func ftsLineFailed(out string) bool {
 		}
 	}
 	return false
+}
+
+// MLX servers (mlx_lm.server & co.) have no /health endpoint; the status
+// probe for provider "mlx" must hit /v1/models — the one endpoint every
+// OpenAI-compatible server exposes. llama keeps its /health probe.
+func TestRunDoctorTo_mlxProbesModelsNotHealth(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"mlx-community/test-model-4bit"}]}`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+	cfg.LLM.Provider = "mlx"
+	cfg.LLM.BaseURL = srv.URL
+	cfg.Embedding.Provider = "mlx"
+	cfg.Embedding.BaseURL = srv.URL // same URL → "same server as LLM" branch
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, srv.Client(), cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, p := range paths {
+		if p == "/health" {
+			t.Errorf("mlx must not be probed via /health, got requests: %v", paths)
+		}
+	}
+	var sawModels bool
+	for _, p := range paths {
+		if p == "/v1/models" {
+			sawModels = true
+		}
+	}
+	if !sawModels {
+		t.Errorf("expected a /v1/models probe for mlx, got requests: %v", paths)
+	}
+	if !strings.Contains(out.String(), "mlx-community/test-model-4bit") {
+		t.Errorf("expected model id from /v1/models in report, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "healthy") {
+		t.Errorf("expected healthy status for reachable mlx server, got:\n%s", out.String())
+	}
+}
+
+func TestRunDoctorTo_llamaStillProbesHealth(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = srv.URL
+	cfg.Embedding.Provider = "llama"
+	cfg.Embedding.BaseURL = srv.URL
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, srv.Client(), cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var sawHealth bool
+	for _, p := range paths {
+		if p == "/health" {
+			sawHealth = true
+		}
+	}
+	if !sawHealth {
+		t.Errorf("expected /health probe for llama, got requests: %v", paths)
+	}
 }

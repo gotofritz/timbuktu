@@ -16,8 +16,8 @@ import (
 // internal/llm and internal/embeddings. Kept here so a bad provider fails fast
 // at config load with a clear message, rather than deep inside a factory.
 var (
-	validLLMProviders       = map[string]bool{"claude": true, "llama": true, "openai": true, "ollama": true}
-	validEmbeddingProviders = map[string]bool{"llama": true, "openai": true, "ollama": true}
+	validLLMProviders       = map[string]bool{"claude": true, "llama": true, "mlx": true, "openai": true, "ollama": true}
+	validEmbeddingProviders = map[string]bool{"llama": true, "mlx": true, "openai": true, "ollama": true}
 )
 
 // Validate reports the first configuration error, or nil if the config is
@@ -46,10 +46,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: embedding dimension must be positive, got %d", c.Embedding.Dimension)
 	}
 	if !validLLMProviders[c.LLM.Provider] {
-		return fmt.Errorf("config: unknown llm provider %q (want claude, llama, openai, or ollama)", c.LLM.Provider)
+		return fmt.Errorf("config: unknown llm provider %q (want claude, llama, mlx, openai, or ollama)", c.LLM.Provider)
 	}
 	if !validEmbeddingProviders[c.Embedding.Provider] {
-		return fmt.Errorf("config: unknown embedding provider %q (want llama, openai, or ollama)", c.Embedding.Provider)
+		return fmt.Errorf("config: unknown embedding provider %q (want llama, mlx, openai, or ollama)", c.Embedding.Provider)
 	}
 	if c.Ingest.EmbedConcurrency < 1 {
 		return fmt.Errorf("config: ingest embed_concurrency must be at least 1, got %d", c.Ingest.EmbedConcurrency)
@@ -151,17 +151,17 @@ func relativeDefaults() Config {
 			Path: "./tbuk.sqlite",
 		},
 		LLM: LLMConfig{
-			Provider:  "llama",
+			Provider:  "mlx",
 			Model:     "",
 			MaxTokens: 4096,
 			// BaseURL intentionally empty: each provider factory resolves its
-			// own default (llama/openai-compatible → :8080, ollama → :11434,
-			// claude → api.anthropic.com, openai → api.openai.com), so
+			// own default (mlx/llama/openai-compatible → :8080, ollama →
+			// :11434, claude → api.anthropic.com, openai → api.openai.com), so
 			// switching provider doesn't silently target a stale localhost URL.
 			BaseURL: "",
 		},
 		Embedding: EmbeddingConfig{
-			Provider:  "llama",
+			Provider:  "mlx",
 			Model:     "",
 			Dimension: 768,
 			BaseURL:   "",
@@ -275,10 +275,10 @@ func defaultConfigNode() (*yaml.Node, error) {
 	}
 
 	mapKey(mapValue(&node, "llm"), "base_url").HeadComment = "base_url: leave empty to use the provider default\n" +
-		"  llama/openai-compatible → http://localhost:8080\n" +
-		"  ollama                  → http://localhost:11434\n" +
-		"  claude                  → https://api.anthropic.com\n" +
-		"  openai                  → https://api.openai.com"
+		"  mlx/llama (OpenAI-compatible) → http://localhost:8080\n" +
+		"  ollama                        → http://localhost:11434\n" +
+		"  claude                        → https://api.anthropic.com\n" +
+		"  openai                        → https://api.openai.com"
 
 	mapKey(mapValue(&node, "embedding"), "base_url").HeadComment =
 		"base_url: leave empty to use the provider default (see llm above)"

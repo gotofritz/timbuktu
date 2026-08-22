@@ -20,10 +20,21 @@ import (
 const hostedNotProbed = "hosted API — not probed; set ANTHROPIC_API_KEY/OPENAI_API_KEY"
 
 // isHostedProvider reports whether a provider is a hosted API (claude/openai)
-// whose endpoints don't follow the llama.cpp/ollama /health & /v1/models
+// whose endpoints don't follow the local-server /health & /v1/models
 // conventions, so probing them yields misleading results.
 func isHostedProvider(provider string) bool {
 	return provider == "claude" || provider == "openai"
+}
+
+// statusProbeURL picks the liveness endpoint for a local provider. llama.cpp
+// and ollama expose /health; MLX servers (mlx_lm.server & co.) don't, so mlx
+// is probed via /v1/models — the one endpoint every OpenAI-compatible server
+// has.
+func statusProbeURL(provider, baseURL string) string {
+	if provider == "mlx" {
+		return baseURL + "/v1/models"
+	}
+	return baseURL + "/health"
 }
 
 func newDoctorCmd() *cobra.Command {
@@ -93,7 +104,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		printCheck(w, "status", hostedNotProbed, "")
 		printCheck(w, "model", cfg.LLM.Model, "")
 	} else {
-		msg, ok = CheckHTTP(cfg.LLM.BaseURL+"/health", client)
+		msg, ok = CheckHTTP(statusProbeURL(cfg.LLM.Provider, cfg.LLM.BaseURL), client)
 		printCheck(w, "status", msg, boolToStatus(ok))
 		printCheck(w, "model", CheckLLMModel(cfg.LLM.BaseURL, cfg.LLM.Model, client), "")
 	}
@@ -107,7 +118,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	case cfg.Embedding.BaseURL == cfg.LLM.BaseURL && !isHostedProvider(cfg.LLM.Provider):
 		printCheck(w, "status", "same server as LLM", "✓")
 	default:
-		msg, ok = CheckHTTP(cfg.Embedding.BaseURL+"/health", client)
+		msg, ok = CheckHTTP(statusProbeURL(cfg.Embedding.Provider, cfg.Embedding.BaseURL), client)
 		printCheck(w, "status", msg, boolToStatus(ok))
 	}
 	printCheck(w, "dimension", fmt.Sprintf("%d (config)", cfg.Embedding.Dimension), "")

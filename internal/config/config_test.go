@@ -19,11 +19,11 @@ func TestDefaults(t *testing.T) {
 	if cfg.Chunking.Overlap != 50 {
 		t.Errorf("chunking overlap: want 50, got %d", cfg.Chunking.Overlap)
 	}
-	if cfg.LLM.Provider != "llama" {
-		t.Errorf("llm.provider: want llama, got %s", cfg.LLM.Provider)
+	if cfg.LLM.Provider != "mlx" {
+		t.Errorf("llm.provider: want mlx, got %s", cfg.LLM.Provider)
 	}
-	if cfg.Embedding.Provider != "llama" {
-		t.Errorf("embedding.provider: want llama, got %s", cfg.Embedding.Provider)
+	if cfg.Embedding.Provider != "mlx" {
+		t.Errorf("embedding.provider: want mlx, got %s", cfg.Embedding.Provider)
 	}
 	if cfg.Embedding.Dimension != 768 {
 		t.Errorf("embedding.dimension: want 768, got %d", cfg.Embedding.Dimension)
@@ -84,7 +84,7 @@ func TestDefaultsForRoot_derivesPathsFromRoot(t *testing.T) {
 		t.Errorf("database.path = %q, want %q", cfg.Database.Path, filepath.Join(root, "tbuk.sqlite"))
 	}
 	// Non-path defaults must match Defaults() regardless of root.
-	if cfg.Chunking.Size != 400 || cfg.Embedding.Dimension != 768 || cfg.LLM.Provider != "llama" {
+	if cfg.Chunking.Size != 400 || cfg.Embedding.Dimension != 768 || cfg.LLM.Provider != "mlx" {
 		t.Errorf("non-path defaults drifted under a custom root: %+v", cfg)
 	}
 }
@@ -267,8 +267,8 @@ func TestFillMissingDefaults_addsMissingPreservesExisting(t *testing.T) {
 	if want := filepath.Join(root, "raw"); cfg.Ingest.RawDir != want {
 		t.Errorf("ingest.raw_dir = %q, want filled default %q", cfg.Ingest.RawDir, want)
 	}
-	if cfg.LLM.Provider != "llama" {
-		t.Errorf("llm.provider = %q, want filled default llama", cfg.LLM.Provider)
+	if cfg.LLM.Provider != "mlx" {
+		t.Errorf("llm.provider = %q, want filled default mlx", cfg.LLM.Provider)
 	}
 }
 
@@ -318,7 +318,7 @@ func TestLoad_partialYAML(t *testing.T) {
 	if cfg.Chunking.Overlap != 50 {
 		t.Errorf("overlap should keep default 50, got %d", cfg.Chunking.Overlap)
 	}
-	if cfg.LLM.Provider != "llama" {
+	if cfg.LLM.Provider != "mlx" {
 		t.Errorf("llm.provider should keep default, got %s", cfg.LLM.Provider)
 	}
 }
@@ -507,6 +507,8 @@ func TestConfig_Validate(t *testing.T) {
 		{"unknown llm provider", func(c *config.Config) { c.LLM.Provider = "gpt5" }, "llm provider"},
 		{"unknown embedding provider", func(c *config.Config) { c.Embedding.Provider = "word2vec" }, "embedding provider"},
 		{"claude not valid embedder", func(c *config.Config) { c.Embedding.Provider = "claude" }, "embedding provider"},
+		{"mlx valid llm provider", func(c *config.Config) { c.LLM.Provider = "mlx" }, ""},
+		{"mlx valid embedding provider", func(c *config.Config) { c.Embedding.Provider = "mlx" }, ""},
 		{"empty db path", func(c *config.Config) { c.Database.Path = "" }, "database"},
 		{"zero embed concurrency", func(c *config.Config) { c.Ingest.EmbedConcurrency = 0 }, "embed_concurrency"},
 		{"negative embed concurrency", func(c *config.Config) { c.Ingest.EmbedConcurrency = -2 }, "embed_concurrency"},
@@ -588,13 +590,13 @@ func TestExportYAML_keepsPortableKeysActive(t *testing.T) {
 
 	// Provider/model/chunking settings are portable and must stay active
 	// (uncommented) so they survive an import.
-	for _, frag := range []string{"provider: llama", "size: 400", "overlap: 50", "dimension: 768"} {
+	for _, frag := range []string{"provider: mlx", "size: 400", "overlap: 50", "dimension: 768"} {
 		if !strings.Contains(out, frag) {
 			t.Errorf("exported config should keep %q active, got:\n%s", frag, out)
 		}
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "provider: llama") && strings.Contains(line, "#") {
+		if strings.Contains(line, "provider: mlx") && strings.Contains(line, "#") {
 			t.Errorf("portable line unexpectedly commented: %q", line)
 		}
 		if strings.Contains(line, "embed_concurrency:") && strings.Contains(line, "#") {

@@ -80,7 +80,7 @@ Your documents
      ▼
 ┌──────────────────┐
 │   Embed          │  Convert each chunk into a meaning-fingerprint
-│                  │  (embedding) using a local AI model (llama.cpp).
+│                  │  (embedding) using a local AI model (MLX, llama.cpp).
 └──────────────────┘
      │
      ▼
@@ -93,8 +93,8 @@ Your documents
      ▼        │
 ┌──────────────────┐
 │   Generate       │  When you ask a question, find the most relevant
-│                  │  chunks, hand them to a language model (llama.cpp),
-│                  │  and get a written answer back.
+│                  │  chunks, hand them to a language model (MLX,
+│                  │  llama.cpp, or Claude), and get a written answer.
 └──────────────────┘
 ```
 
@@ -132,7 +132,8 @@ personal knowledge base from your own files.
   both at once (hybrid search)
 - Retrieves relevant passages and sends them to a language model to generate
   natural-language answers
-- Works with llama.cpp (default), Ollama, OpenAI, or Claude as the AI backend
+- Works with MLX (default; Apple silicon), llama.cpp, Ollama, OpenAI, or
+  Claude as the AI backend
 
 **What it does not do:**
 - Web crawling or real-time indexing
@@ -158,8 +159,10 @@ This guide assumes:
 
 2. **An AI backend is available.** Timbuktu needs two things: an *embedding*
    model (to fingerprint your text) and a *chat* model (to write answers). The
-   next section shows two ways to provide them — a fully local setup with
-   llama.cpp, or a hybrid setup that uses Claude for the answers.
+   next section shows three ways to provide them — a fully local setup with
+   MLX (the default, for Apple silicon Macs), llama.cpp as the alternative
+   fully-local setup (any OS), or a hybrid setup that uses Claude for the
+   answers.
 
 3. **You have some documents** to index — notes, PDFs, saved articles, anything
    in the supported formats.
@@ -168,21 +171,117 @@ This guide assumes:
 
 Timbuktu always needs a **local embedding model** (embeddings are what make
 meaning-based search work, and there is no hosted embedding provider for
-Claude). For *generating answers* you can either keep everything local with
-llama.cpp, or hand the writing off to Claude. Pick one of the two paths below.
+Claude). For *generating answers* you can keep everything local — MLX is the
+default on an Apple silicon Mac, with llama.cpp as the alternative on any
+OS (or if you'd rather not run MLX) — or hand the writing off to Claude.
+Pick one of the three paths below.
 
-| | Fully local (llama.cpp) | Hybrid (llama.cpp embeddings + Claude) |
-|---|---|---|
-| Answer quality | Depends on local model size | Strongest |
-| Privacy | Nothing leaves your machine | Retrieved chunks are sent to Anthropic |
-| Cost | Free (uses your hardware) | Pay-per-use Anthropic API |
-| Needs internet | No (after models downloaded) | Yes, for `tbuk ask` |
-| Needs a GPU | Recommended for speed | Only for the embedding model |
+| | Fully local (MLX, Apple silicon) | Fully local (llama.cpp, any OS) | Hybrid (local embeddings + Claude) |
+|---|---|---|---|
+| Answer quality | Depends on local model size | Depends on local model size | Strongest |
+| Privacy | Nothing leaves your machine | Nothing leaves your machine | Retrieved chunks are sent to Anthropic |
+| Cost | Free (uses your hardware) | Free (uses your hardware) | Pay-per-use Anthropic API |
+| Needs internet | No (after models downloaded) | No (after models downloaded) | Yes, for `tbuk ask` |
+| Hardware | Apple silicon Mac | Any (GPU recommended) | Only the embedding model runs locally |
 
-Embeddings run locally in **both** paths, so start by setting up llama.cpp for
-embeddings, then choose your generation backend.
+Embeddings run locally in **every** path, so set up a local embedding server
+first (MLX or llama.cpp), then choose your generation backend.
 
-#### Path A — Fully local with llama.cpp
+#### Path A — Fully local with MLX (Apple silicon, the default)
+
+[MLX](https://github.com/ml-explore/mlx) is Apple's machine-learning framework
+for Apple silicon; models quantised for it live on Hugging Face under
+[`mlx-community`](https://huggingface.co/mlx-community). Timbuktu's `mlx`
+provider talks to any **OpenAI-compatible server fronting MLX models** —
+`mlx_lm.server` (the official one, used below),
+[mlx-openai-server](https://github.com/cubist38/mlx-openai-server),
+LM Studio, or [nativ](https://github.com/Blaizzy/nativ). It is the default
+provider: a fresh `tbuk init` config assumes an MLX server on
+`http://localhost:8080` with no edits.
+
+Both servers below are installed with [uv](https://docs.astral.sh/uv/)'s
+`uv tool install` rather than `pip install` — `pip install` needs an active
+virtualenv (or fights your system Python's PEP 668 "externally managed
+environment" guard); `uv tool install` builds an isolated environment for the
+tool automatically and puts its commands straight on your `PATH`, the same
+way `pipx` does. Install uv itself with `brew install uv` if you don't have
+it, or see the [uv install docs](https://docs.astral.sh/uv/getting-started/installation/).
+
+Chat server (port 8080 — the default). Install the official
+[mlx-lm](https://github.com/ml-explore/mlx-lm) package and start its server;
+the `--model` flag pulls the model from Hugging Face and caches it on first
+run:
+
+```bash
+uv tool install mlx-lm
+mlx_lm.server --model mlx-community/Qwen3-8B-4bit --port 8080
+```
+
+Embedding server (port 8000). `mlx_lm.server` serves chat only, so run an
+embedding-capable MLX server beside it —
+[mlx-openai-server](https://github.com/cubist38/mlx-openai-server), which
+uses [mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings) as its
+backend. Set `embedding.dimension` in your config to whatever the model you
+pick actually outputs — it is not auto-detected. A verified example,
+[`mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`](https://huggingface.co/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ)
+(small, fast, official `mlx-community` conversion), natively outputs
+**1024**-dimensional vectors:
+
+```bash
+uv tool install mlx-openai-server
+mlx-openai-server launch --model-type embeddings \
+  --model-path mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ --port 8000
+```
+
+The underlying Qwen3-Embedding model supports Matryoshka truncation down to
+32 dimensions, but whether `mlx-openai-server`'s API exposes that is
+unverified — stick with the native 1024 unless you've confirmed truncation
+works for your setup. (There is no confirmed `mlx-community` conversion of a
+classic 768-dimensional BERT-style embedder like `nomic-embed-text` or `bge`
+at the time of writing — if you want to match `embedding.dimension: 768`
+exactly, use llama.cpp for embeddings instead, per Path B below.)
+
+> **If `uv tool install mlx-openai-server` fails building `outlines-core`
+> with `error: can't find Rust compiler`:** that package has no prebuilt
+> wheel for every Python/macOS combination, so the install falls back to
+> compiling it, which needs Rust. Two fixes:
+> - Point the tool install at an older Python that does have a wheel:
+>   `uv tool install mlx-openai-server --python 3.12`.
+> - Or install Rust and let it compile: `brew install rust`, then retry the
+>   original command.
+>
+> `mlx-openai-server` pulls in a large dependency stack (torch, opencv,
+> outlines) even when you only want its embeddings endpoint, since one
+> package serves chat, vision, and embeddings alike. If neither fix above
+> appeals, use LM Studio instead (below) or keep embeddings on llama.cpp
+> from Path B (`embedding.provider: llama`).
+
+(LM Studio — download from [lmstudio.ai](https://lmstudio.ai), no Python
+install at all — serves both chat and embeddings from one process and is a
+reasonable alternative to running two separate servers above.)
+
+Then point the config at both servers (see section 5 for the full file):
+
+```yaml
+llm:
+  provider: mlx                          # the default — line optional
+  model: mlx-community/Qwen3-8B-4bit     # HF repo id, as passed to the server
+  base_url: http://localhost:8080
+
+embedding:
+  provider: mlx
+  model: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+  base_url: http://localhost:8000
+  dimension: 1024                        # matches this model's native output
+```
+
+Set `llm.model` / `embedding.model` to the same Hugging Face repo id you
+started each server with — MLX servers identify models by repo id, and some
+reject requests that omit or misname it. If a server enforces an API key,
+export it as `MLX_API_KEY` and Timbuktu sends it as a Bearer token (loopback
+or HTTPS URLs only).
+
+#### Path B — Alternative: fully local with llama.cpp (any OS)
 
 llama.cpp runs GGUF models on your own machine and exposes an HTTP server.
 Install it from the [llama.cpp
@@ -238,9 +337,9 @@ embedding:
   dimension: 768
 ```
 
-#### Path B — Hybrid: local embeddings + Claude for answers
+#### Path C — Hybrid: local embeddings + Claude for answers
 
-Keep the llama.cpp **embedding** server from Path A (Claude has no embedding
+Keep a local **embedding** server from Path A or B (Claude has no embedding
 API, so this stays local), and let Claude write the answers. The `claude`
 provider is the same Anthropic API that powers Claude Code.
 
@@ -260,9 +359,10 @@ provider is the same Anthropic API that powers Claude Code.
      model: claude-sonnet-5    # any current Claude model id
 
    embedding:
-     provider: llama            # still local
-     base_url: http://localhost:8080
-     dimension: 768
+     provider: mlx              # still local (or llama, per your Path A/B choice)
+     model: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+     base_url: http://localhost:8000
+     dimension: 1024
    ```
 
 `tbuk doctor` won't probe the Claude endpoint (hosted APIs have no health
@@ -292,14 +392,15 @@ Database
   documents:   0
   chunks:      0
 
-LLM (llama)
+LLM (mlx)
   url:         http://localhost:8080
   status:      ✓ healthy
+  model:       mlx-community/Qwen3-8B-4bit
 
-Embedding (llama)
-  url:         http://localhost:8080
+Embedding (mlx)
+  url:         http://localhost:8000
   status:      ✓ healthy
-  dimension:   768
+  dimension:   1024
 
 Preprocessing
   extractors:  markdown, text, html, pdf
@@ -386,13 +487,13 @@ database:
   path: ./tbuk.sqlite    # relative to the data root (the config file's folder)
 
 llm:
-  provider: llama    # llama | ollama | claude | openai
-  model: ""          # leave empty to use the model currently loaded in llama.cpp
+  provider: mlx      # mlx | llama | ollama | claude | openai
+  model: ""          # mlx: the HF repo id served; llama.cpp: empty = loaded model
   base_url: http://localhost:8080
 
 embedding:
-  provider: llama    # llama | ollama | openai
-  model: ""          # leave empty to use the model currently loaded in llama.cpp
+  provider: mlx      # mlx | llama | ollama | openai
+  model: ""          # as above
   base_url: http://localhost:8080
   dimension: 768
 
@@ -430,16 +531,23 @@ your embedding server is rate-limited or easily overloaded; raising it past a
 handful rarely helps and can trip provider rate limits. Must be at least `1`.
 
 **Settings you set once, per backend** (see [section 4](#4-before-you-start)
-for the two backend paths):
+for the three backend paths):
 
-- `llm.base_url` / `embedding.base_url` — the address of each llama.cpp server.
+- `llm.base_url` / `embedding.base_url` — the address of each local server.
   If you run separate embedding and chat servers, give them different ports
-  (e.g. `8080` for embeddings, `8081` for chat).
-- `llm.provider` — `llama` for the fully local path, or `claude` for the hybrid
-  path. With `claude`, also set `llm.model` (Claude has no loaded-model default)
-  and export `ANTHROPIC_API_KEY`. `embedding.provider` stays `llama` either way.
-- `llm.model` / `embedding.model` — leave empty for llama.cpp when only one
-  model is loaded per server; set them if the server needs an explicit name.
+  (e.g. MLX chat on `8080`, embeddings on `8000`; or llama.cpp embeddings on
+  `8080`, chat on `8081`).
+- `llm.provider` — `mlx` (the default) for the MLX path, `llama` for the
+  llama.cpp path, or `claude` for the hybrid path. With `claude`, also set
+  `llm.model` (Claude has no loaded-model default) and export
+  `ANTHROPIC_API_KEY`. `embedding.provider` stays local (`mlx` or `llama`)
+  either way.
+- `llm.model` / `embedding.model` — for `mlx`, set each to the Hugging Face
+  repo id the server was started with (some MLX servers reject requests that
+  omit it). For llama.cpp, leave empty when only one model is loaded per
+  server.
+- `MLX_API_KEY` — only if your MLX server enforces an API key; sent as a
+  Bearer token (the server URL must then be loopback or HTTPS).
 
 ---
 
@@ -494,8 +602,8 @@ tbuk preprocess --dry-run ~/notes/first-note.md
 tbuk ingest ~/notes/first-note.md
 ```
 
-This reads the extracted text, sends each chunk to llama.cpp to compute its
-embedding, and stores everything in the database. You will see a one-line
+This reads the extracted text, sends each chunk to your embedding server to
+compute its embedding, and stores everything in the database. You will see a one-line
 result:
 
 ```
