@@ -10,7 +10,7 @@ default, not the document's live filesystem path.
 ```bash
 # after switching embedding.provider/model to a different dimension:
 tbuk reindex                    # re-embed every document, reading from raw/
-tbuk reindex --topic go         # only documents tagged "go"
+tbuk reindex --topic go         # only documents tagged "go" (optional — see below)
 tbuk reindex --source-dir /mnt/backup/raw   # resolve raw copies from elsewhere
 tbuk reindex --dry-run          # list what would be re-embedded, do nothing
 ```
@@ -19,6 +19,17 @@ Success = a knowledge base with a mixed-dimension corpus (see "Why now"
 below) becomes consistent again in one command, including for documents
 whose original file no longer exists on this machine — the exact case a
 `tbuk import`-restored knowledge base is in.
+
+**Topics status:** verified against the current codebase (no `TopicRepo`,
+no `Topic` type, no `topics.go` anywhere under `internal/`) — the topics
+feature described in `docs/plans/32-topics.md` is **not implemented yet**,
+despite that plan sitting in `docs/plans/` alongside a git history commit
+titled "topics: core schema and filtering" (that commit touches none of
+`internal/storage`, `internal/search`, or `internal/cli` — whatever it
+landed isn't the plan-32 implementation, and plan 32 itself is still
+unarchived, which per this repo's convention means its work isn't done).
+`--topic` is therefore **optional scope** for this plan, not a v1
+requirement — see Design decision 6.
 
 ## Why now
 
@@ -84,12 +95,21 @@ reads from there.
    rejected: no precedent for that kind of fuzzy remapping anywhere in the
    codebase, and it's ambiguous the moment directory structure changed at
    all. Defaults to `cfg.Ingest.RawDir`.
-6. **`--topic` filters which documents are targeted**, reusing the topics
-   feature (#111, merged) rather than inventing a second filter mechanism.
-   Exact call site to be confirmed against `internal/storage`'s current
-   topic-repo API when implementing (verify method names/signatures then —
-   not re-derived here to avoid documenting an interface that has since
-   moved).
+6. **`--topic` is optional scope, ship `reindex` without it if topics still
+   doesn't exist.** Topics (`docs/plans/32-topics.md`) is not implemented in
+   the current codebase (verified — see "Topics status" above), so
+   `reindex`'s core value (re-embed from `raw/`) must not be blocked on it
+   landing first. Two valid sequences, either is fine:
+   - `reindex` ships first, without `--topic`; whoever implements topics
+     later adds it as a fast-follow (plan 32 now has a section flagging this
+     — see "Cross-plan note" there), reusing the same filter semantics
+     `search --topic`/`ask --topic` land with.
+   - Topics ships first; then `reindex --topic` is a small addition here,
+     reusing whatever `TopicRepo`/filter API plan 32 actually produces (not
+     re-derived in this plan, to avoid documenting an interface that doesn't
+     exist yet and may not match this description once written).
+   Either way, `--topic` is additive to `reindex` — the command's initial
+   scope is "every document" plus `--source-dir`/`--dry-run` only.
 7. **No skip-if-unchanged check.** Unlike `ingest`/`update`, `reindex` always
    re-embeds every document it targets. There is nothing meaningful to
    compare against — the source content is presumed unchanged; the trigger
@@ -135,7 +155,7 @@ non-issue, not a gap to design around.
 | Flag | Behaviour |
 |---|---|
 | `tbuk reindex` | re-embed every document in the KB |
-| `--topic x,y` | only documents carrying at least one listed topic (reuses the existing topic-filter semantics — OR/union, matching `search --topic`) |
+| `--topic x,y` | **optional scope** — only documents carrying at least one listed topic, OR/union, matching whatever semantics `search --topic`/`ask --topic` ship with. Add only once topics (`docs/plans/32-topics.md`) actually exists; omit from v1 if it doesn't yet — see Design decision 6 |
 | `--source-dir DIR` | resolve `<sha256><ext>` under `DIR` instead of `cfg.Ingest.RawDir` |
 | `--dry-run` | print what would happen; touch nothing |
 
@@ -169,7 +189,9 @@ One PR, branch `feature/reindex-command` (already created off `main`;
 this plan is its first commit). Roughly:
 
 1. `feat(ingest): add reindex operation reading from raw archive`
-2. `feat(cli): add tbuk reindex command (--topic, --source-dir, --dry-run)`
+2. `feat(cli): add tbuk reindex command (--source-dir, --dry-run)` — plus
+   `--topic` in the same commit only if topics has landed by then (see
+   Design decision 6); otherwise a separate fast-follow once it does
 3. `docs: document tbuk reindex` (README quick-start table,
    `docs/initial-context.md` CLI list, `docs/user-guide.md` — including the
    embedding-dimension-mismatch troubleshooting row, which currently points
@@ -190,11 +212,15 @@ this plan is its first commit). Roughly:
 
 ## Open questions
 
-1. **Exact `TopicRepo`/filter API to call for `--topic`.** Confirm current
-   method names/signatures in `internal/storage` (and `search.Options` /
-   `retrieval.Filters` if those are the right layer to reuse instead of a
-   direct repo call) at implementation time rather than trusting this plan's
-   description of a feature that landed separately.
+1. **Whether `--topic` ships in the first PR at all.** Depends entirely on
+   whether topics has landed by the time this is implemented — check
+   `internal/storage` for `TopicRepo`/`Topic` fresh at implementation time
+   (this plan's "not implemented yet" is current as of the date this plan
+   was written, not a permanent fact). If it has landed, confirm its actual
+   method names/signatures and filter-layer shape (`search.Options` /
+   `retrieval.Filters`) before wiring `--topic` in, rather than trusting this
+   plan's earlier (and already-corrected-once) assumptions about an
+   interface documented in a different plan.
 2. **Should `reindex` also refresh automatic metadata** (`filename`,
    `extension`, `mime`, `dir` — normally refreshed on every ingest per
    `docs/initial-context.md`)? Likely yes, for consistency with `ingest`/
