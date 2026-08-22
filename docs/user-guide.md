@@ -219,15 +219,27 @@ mlx_lm.server --model mlx-community/Qwen3-8B-4bit --port 8080
 
 Embedding server (port 8000). `mlx_lm.server` serves chat only, so run an
 embedding-capable MLX server beside it —
-[mlx-openai-server](https://github.com/cubist38/mlx-openai-server) — with an
-embedding model whose output size matches `embedding.dimension` in your
-config (default `768`, which `nomic-embed-text` fits):
+[mlx-openai-server](https://github.com/cubist38/mlx-openai-server), which
+uses [mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings) as its
+backend. Set `embedding.dimension` in your config to whatever the model you
+pick actually outputs — it is not auto-detected. A verified example,
+[`mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`](https://huggingface.co/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ)
+(small, fast, official `mlx-community` conversion), natively outputs
+**1024**-dimensional vectors:
 
 ```bash
 uv tool install mlx-openai-server
 mlx-openai-server launch --model-type embeddings \
-  --model-path mlx-community/nomic-embed-text-v1.5 --port 8000
+  --model-path mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ --port 8000
 ```
+
+The underlying Qwen3-Embedding model supports Matryoshka truncation down to
+32 dimensions, but whether `mlx-openai-server`'s API exposes that is
+unverified — stick with the native 1024 unless you've confirmed truncation
+works for your setup. (There is no confirmed `mlx-community` conversion of a
+classic 768-dimensional BERT-style embedder like `nomic-embed-text` or `bge`
+at the time of writing — if you want to match `embedding.dimension: 768`
+exactly, use llama.cpp for embeddings instead, per Path B below.)
 
 > **If `uv tool install mlx-openai-server` fails building `outlines-core`
 > with `error: can't find Rust compiler`:** that package has no prebuilt
@@ -258,9 +270,9 @@ llm:
 
 embedding:
   provider: mlx
-  model: mlx-community/nomic-embed-text-v1.5
+  model: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
   base_url: http://localhost:8000
-  dimension: 768
+  dimension: 1024                        # matches this model's native output
 ```
 
 Set `llm.model` / `embedding.model` to the same Hugging Face repo id you
@@ -348,9 +360,9 @@ provider is the same Anthropic API that powers Claude Code.
 
    embedding:
      provider: mlx              # still local (or llama, per your Path A/B choice)
-     model: mlx-community/nomic-embed-text-v1.5
+     model: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
      base_url: http://localhost:8000
-     dimension: 768
+     dimension: 1024
    ```
 
 `tbuk doctor` won't probe the Claude endpoint (hosted APIs have no health
@@ -388,7 +400,7 @@ LLM (mlx)
 Embedding (mlx)
   url:         http://localhost:8000
   status:      ✓ healthy
-  dimension:   768
+  dimension:   1024
 
 Preprocessing
   extractors:  markdown, text, html, pdf
