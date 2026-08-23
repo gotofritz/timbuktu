@@ -91,7 +91,10 @@ func writeBuiltinBriefTemplate(dir string) error {
 description: "Telegraphic, tweet-like answers from retrieved context."
 model: ""
 temperature: 0.3
-max_tokens: 280
+# The output budget, not the 280-character limit restated: a model that reasons
+# before it writes spends this first, and a budget the size of the answer is one
+# it can exhaust without emitting a word.
+max_tokens: 1024
 retrieval:
   top_k: 5
 output: text

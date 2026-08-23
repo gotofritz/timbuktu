@@ -318,6 +318,28 @@ func TestInitCommand_writesBriefTemplate(t *testing.T) {
 	}
 }
 
+// brief asks for an answer of at most 280 characters. Its max_tokens is the
+// API's output budget, not that limit restated: a model that reasons before it
+// writes spends the budget first and returns nothing, so the ceiling has to
+// leave room for both.
+func TestInitCommand_briefTemplateBudgetIsNotTheCharLimit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init failed: %v", err)
+	}
+
+	td := prompts.NewTemplateDir(filepath.Join(home, ".tbuk", "prompts"))
+	tmpl, err := td.Load("brief")
+	if err != nil {
+		t.Fatalf("load brief: %v", err)
+	}
+	if got := tmpl.Manifest().MaxTokens; got < 512 {
+		t.Errorf("brief max_tokens = %d, want room for reasoning plus a 280-char answer", got)
+	}
+}
+
 func TestInitCommand_briefTemplateIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
