@@ -756,6 +756,12 @@ model's general knowledge instead (the response then reflects the model's
 priors, not your documents, and no `Sources:` section is shown). Pass
 `--require-context` to abort in that case rather than answer ungrounded.
 
+If the model itself returns nothing — an answer that is blank above the
+`Sources:` list — `tbuk ask` says so on stderr. The usual cause is a template
+whose `max_tokens` is too small: it is the model's output budget, and a model
+that reasons before it writes can spend all of it and emit no answer. Raise
+`max_tokens` in `~/.tbuk/prompts/<template>/manifest.yaml`.
+
 ### Building up from simple to specific
 
 **Vague questions** work, but give vague answers:
@@ -824,6 +830,12 @@ tbuk search --mode keyword "API rate limit"
 
 Best when you remember the exact phrase. Faster because no embedding is
 computed.
+
+A document does not have to contain every word you typed. Common words (`the`,
+`about`, `what`, `how`…) are ignored, the rest are matched independently, and
+results are ranked by BM25 — so a document using a rare word you asked for beats
+one that only shares the ordinary ones. Ask for more words to get a better
+ranking, not a narrower filter.
 
 ### Semantic (meaning) search
 

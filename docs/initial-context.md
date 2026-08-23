@@ -327,6 +327,10 @@ Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK
 applied before truncating to TopK.
 Keyword: user input is sanitized for FTS5 — each whitespace-separated term becomes a
 double-quoted phrase, neutralizing operators/special chars; real query errors propagate.
+Terms are OR-combined, not left to FTS5's implicit AND, and English stop words are dropped
+first (all-stop-word queries keep them). AND required every word of a question to appear in
+one chunk, so `tbuk ask`'s queries matched nothing and Hybrid silently ran vector-only;
+BM25 ranking and TopK, not the match operator, are what keep the leg precise.
 
 ---
 
