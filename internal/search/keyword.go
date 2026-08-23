@@ -44,15 +44,57 @@ func (s *Searcher) Keyword(ctx context.Context, query string, opts Options) ([]S
 	return results, rows.Err()
 }
 
+// stopWords are the English function words a question is mostly made of. They
+// are dropped from a MATCH expression because they carry no signal about which
+// chunk is wanted: BM25 discounts them by IDF, but only once the corpus is big
+// enough for them to be common in it, and a personal knowledge base of a few
+// dozen documents is not. Removing them makes ranking depend on the terms the
+// user actually meant, whatever the corpus size.
+var stopWords = map[string]bool{
+	"a": true, "about": true, "all": true, "am": true, "an": true, "and": true,
+	"any": true, "are": true, "as": true, "at": true, "be": true, "been": true,
+	"but": true, "by": true, "can": true, "did": true, "do": true, "does": true,
+	"for": true, "from": true, "had": true, "has": true, "have": true, "how": true,
+	"i": true, "if": true, "in": true, "is": true, "it": true, "its": true,
+	"know": true, "me": true, "my": true, "no": true, "not": true, "of": true,
+	"on": true, "or": true, "so": true, "some": true, "tell": true, "that": true,
+	"the": true, "their": true, "them": true, "then": true, "there": true,
+	"these": true, "they": true, "this": true, "to": true, "was": true, "we": true,
+	"were": true, "what": true, "when": true, "where": true, "which": true,
+	"who": true, "why": true, "will": true, "with": true, "would": true,
+	"you": true, "your": true,
+}
+
 // sanitizeFTS5Query neutralises FTS5 operators so arbitrary user input is a
 // valid MATCH expression: each whitespace-separated term becomes a
-// double-quoted phrase (embedded quotes doubled). Space-separated phrases are
-// implicitly AND-combined by FTS5. Returns "" for input with no terms.
+// double-quoted phrase (embedded quotes doubled). Returns "" for input with no
+// terms.
+//
+// Terms are OR-combined rather than left to FTS5's implicit AND. A question
+// ("what do you know about PPAs") carries words no single chunk has to contain,
+// so an AND match returned nothing at all for exactly the queries `tbuk ask`
+// sends — and a Hybrid whose keyword leg is always empty is vector search
+// wearing a different name. Recall is what this leg is for; BM25 ranking and
+// TopK are what keep it precise.
+//
+// Stop words are dropped first, so what is OR-combined is the content of the
+// query. A query of nothing but stop words keeps them all rather than matching
+// everything or nothing.
 func sanitizeFTS5Query(query string) string {
 	fields := strings.Fields(query)
-	quoted := make([]string, 0, len(fields))
+	kept := make([]string, 0, len(fields))
 	for _, f := range fields {
+		if !stopWords[strings.ToLower(f)] {
+			kept = append(kept, f)
+		}
+	}
+	if len(kept) == 0 {
+		kept = fields
+	}
+
+	quoted := make([]string, 0, len(kept))
+	for _, f := range kept {
 		quoted = append(quoted, `"`+strings.ReplaceAll(f, `"`, `""`)+`"`)
 	}
-	return strings.Join(quoted, " ")
+	return strings.Join(quoted, " OR ")
 }

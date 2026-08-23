@@ -357,6 +357,134 @@ func TestKeywordSearch_dbErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestKeywordSearch_naturalLanguageQuestion pins the behaviour that made
+// `tbuk ask` blind to its most on-topic document: a question carries common
+// words no single chunk has to contain, so requiring every term matched
+// nothing at all and the hybrid keyword leg contributed zero results.
+func TestKeywordSearch_naturalLanguageQuestion(t *testing.T) {
+	db := openTestDB(t)
+	onTopic := seedDoc(t, db, "/ppas.md", "PPAs")
+	seedChunk(t, db, onTopic, 0,
+		"A PPA is a power purchase agreement. PPAs fix a price for energy over a term.", nil)
+	inPassing := seedDoc(t, db, "/market-guide.md", "Market guide")
+	seedChunk(t, db, inPassing, 0,
+		"What do you know about this market? You should know about tariffs, about grid access, "+
+			"and about what you do with surplus power.", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "what do you know about ppas", search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("want the on-topic document for a natural-language question, got no results")
+	}
+	if results[0].Path != "/ppas.md" {
+		t.Errorf("want /ppas.md ranked first, got %q", results[0].Path)
+	}
+}
+
+// TestKeywordSearch_ranksByTermOverlap guards the other half of the trade: now
+// that a query no longer demands every term, BM25 ranking is what keeps
+// precision. The chunk carrying both terms must beat the one carrying only the
+// common one.
+func TestKeywordSearch_ranksByTermOverlap(t *testing.T) {
+	db := openTestDB(t)
+	both := seedDoc(t, db, "/both.md", "Both")
+	seedChunk(t, db, both, 0, "power purchase agreements are signed yearly", nil)
+	oneTerm := seedDoc(t, db, "/one.md", "One")
+	seedChunk(t, db, oneTerm, 0, "the power supply hums", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "power purchase", search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("want both chunks matched, got %d", len(results))
+	}
+	if results[0].Path != "/both.md" {
+		t.Errorf("want /both.md ranked first, got %q", results[0].Path)
+	}
+}
+
+// TestKeywordSearch_dropsStopWords checks that a common word in the question
+// does not drag in documents that match nothing else.
+func TestKeywordSearch_dropsStopWords(t *testing.T) {
+	db := openTestDB(t)
+	onTopic := seedDoc(t, db, "/ppas.md", "PPAs")
+	seedChunk(t, db, onTopic, 0, "PPAs fix a price for energy over a term", nil)
+	noise := seedDoc(t, db, "/noise.md", "Noise")
+	seedChunk(t, db, noise, 0, "a note about the weather", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "about ppas", search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if got := paths(results); len(got) != 1 || got[0] != "/ppas.md" {
+		t.Errorf("want only /ppas.md, got %v", got)
+	}
+}
+
+// TestKeywordSearch_allStopWordsStillMatches keeps a query made entirely of
+// stop words usable: dropping every term would silently match nothing.
+func TestKeywordSearch_allStopWordsStillMatches(t *testing.T) {
+	db := openTestDB(t)
+	docID := seedDoc(t, db, "/q.md", "Q")
+	seedChunk(t, db, docID, 0, "what is it that we do", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "what is it", search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error("want a match for an all-stop-word query, got none")
+	}
+}
+
+// TestHybridSearch_keywordLegSurvivesAQuestion checks the fusion end of the
+// same bug: with the keyword leg returning nothing, Hybrid silently degraded to
+// vector-only, so a document the embedder ranked poorly could not be rescued by
+// an exact term match.
+func TestHybridSearch_keywordLegSurvivesAQuestion(t *testing.T) {
+	db := openTestDB(t)
+	onTopic := seedDoc(t, db, "/ppas.md", "PPAs")
+	seedChunk(t, db, onTopic, 0,
+		"A PPA is a power purchase agreement. PPAs fix a price for energy over a term.",
+		[]float32{0, 1, 0})
+	other := seedDoc(t, db, "/notes.md", "Notes")
+	for i := range 5 {
+		seedChunk(t, db, other, i, "meeting notes about the quarter", []float32{1, 0, 0})
+	}
+
+	// The query embedding points away from the on-topic chunk, so only the
+	// keyword leg can surface it.
+	s := search.New(db, &stubEmbedder{vec: []float32{1, 0, 0}, dim: 3})
+	results, err := s.Hybrid(context.Background(), "what do you know about ppas", search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Hybrid: %v", err)
+	}
+	found := false
+	for _, r := range results {
+		if r.Path == "/ppas.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want /ppas.md fused in from the keyword leg, got %+v", paths(results))
+	}
+}
+
+func paths(results []search.SearchResult) []string {
+	out := make([]string, 0, len(results))
+	for _, r := range results {
+		out = append(out, r.Path)
+	}
+	return out
+}
+
 // ── Metadata Search ────────────────────────────────────────────────────────────
 
 func TestMetadataSearch_singleFilter(t *testing.T) {
