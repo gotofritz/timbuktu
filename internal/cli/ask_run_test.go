@@ -808,3 +808,57 @@ func buildFilterTemplate(t *testing.T) *prompts.Template {
 	}
 	return tmpl
 }
+
+// A model that streams no text at all leaves the user staring at a bare
+// "Sources:" list with nothing above it. Say so, rather than exiting 0 in
+// silence.
+func TestRunAsk_emptyCompletion_warns(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out, errBuf bytes.Buffer
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve([]retrieval.RetrievedChunk{{Text: "ctx", Citation: "a.md §0"}}, nil),
+		mockChat(nil, nil), // stream closes with no text
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errBuf),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(errBuf.String()), "returned no text") {
+		t.Errorf("want empty-completion warning on errOut, got: %q", errBuf.String())
+	}
+}
+
+// The warning is about the model saying nothing, not about a normalizer
+// filtering everything out — a completion that arrives and reduces to zero
+// records is a different situation and must stay quiet.
+func TestRunAsk_normalizedToNothing_doesNotWarn(t *testing.T) {
+	tmpl := buildNormalizingTemplate(t)
+	var out, errBuf bytes.Buffer
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve([]retrieval.RetrievedChunk{{Text: "ctx", Citation: "a.md §0"}}, nil),
+		mockChat([]string{"Here are your cards:\n"}, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errBuf),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if strings.Contains(strings.ToLower(errBuf.String()), "returned no text") {
+		t.Errorf("must not warn when the model did produce text, got: %q", errBuf.String())
+	}
+}

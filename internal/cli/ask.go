@@ -223,6 +223,11 @@ func RunAsk(
 	// and a record stream stays byte-exact.
 	endsWithNewline := false
 
+	// A completion with no text in it leaves nothing above the Sources list.
+	// Tracked on the raw stream, not the printed output, so a normalizer that
+	// legitimately reduces a real completion to nothing is not mistaken for it.
+	gotText := false
+
 	// A declared normalize pipeline rewrites whole cards, so the completion has
 	// to be in hand before anything is printed — streaming is not available for
 	// those templates.
@@ -237,6 +242,7 @@ func RunAsk(
 				break
 			}
 		}
+		gotText = sb.Len() > 0
 		text, err := normalize.Apply(sb.String(), manifest.Normalize)
 		if err != nil {
 			return fmt.Errorf("normalize output: %w", err)
@@ -252,6 +258,7 @@ func RunAsk(
 			}
 			_, _ = fmt.Fprint(out, tok.Text)
 			if tok.Text != "" {
+				gotText = true
 				endsWithNewline = strings.HasSuffix(tok.Text, "\n")
 			}
 			if tok.Done {
@@ -261,6 +268,17 @@ func RunAsk(
 	}
 	if !endsWithNewline {
 		_, _ = fmt.Fprintln(out)
+	}
+
+	// Silence is indistinguishable from a model that had nothing to say, so name
+	// the usual cause: a max_tokens sized for the answer's length leaves nothing
+	// for a model that reasons before it writes, and the whole budget goes to
+	// text the API never returns.
+	if !gotText {
+		_, _ = fmt.Fprintln(cfg.errOut,
+			"warning: the model returned no text — the answer is empty; if the template's "+
+				"max_tokens is small, raise it (a reasoning model can spend the whole budget "+
+				"before writing anything)")
 	}
 
 	if len(chunks) > 0 {
