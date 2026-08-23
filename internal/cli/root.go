@@ -34,6 +34,12 @@ func New() *cobra.Command {
 		Short: "Local-first RAG knowledge base",
 		Long:  "tbuk indexes documents and lets you query them with your preferred LLM.",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// Past argument validation, so anything that fails from here on is a
+			// command that ran and failed, not one typed wrong. Usage text would
+			// bury the error under a screen of flags nobody asked about. Cobra
+			// validates args before this hook, so misuse still gets its help.
+			cmd.SilenceUsage = true
+
 			// Resolve the data root and config path. The config always lives
 			// directly under the root, so the two flags relate as follows:
 			//   --root DIR            → root=DIR, config=DIR/config.yaml
@@ -99,6 +105,7 @@ func New() *cobra.Command {
 	root.AddCommand(newTemplateCmd())
 	root.AddCommand(newDeleteCmd())
 	root.AddCommand(newUpdateCmd())
+	root.AddCommand(newReindexCmd())
 	root.AddCommand(newStatsCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newExportCmd())
@@ -136,8 +143,9 @@ func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Cobra has already written the error to stderr; printing it here too
+	// reported every failure twice.
 	if err := New().ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

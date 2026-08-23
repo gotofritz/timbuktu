@@ -28,8 +28,12 @@ jobs:
       # Inspect commits since the last tag and determine the highest-priority bump.
       #
       # Rules (from highest to lowest priority):
-      #   (feat|fix|refactor|perf|ci)!: → minor  (no major; breaking changes are minor bumps)
+      #   feat!:                        → major  (a breaking change to what ships)
+      #   (fix|refactor|perf|ci)!:      → minor
       #   (feat|fix|refactor|perf|ci):  → patch
+      #
+      # These match the table in README.md, which has always documented feat!:
+      # as a major bump; the workflow used to cap every breaking change at minor.
       #
       # Any commit type not listed (docs:, chore:, test:, …) is ignored.
       # If no releasable commits exist since the last tag, BUMP=none and no tag
@@ -46,10 +50,15 @@ jobs:
 
           BUMP="none"
           while IFS= read -r msg; do
-            # breaking change (!) → minor (highest priority; short-circuit on first match)
-            if echo "$msg" | grep -qE '^(feat|fix|refactor|perf|ci)(\([^)]*\))?!:'; then
-              BUMP="minor"
+            # breaking feature → major (highest priority; short-circuit on first match)
+            if echo "$msg" | grep -qE '^feat(\([^)]*\))?!:'; then
+              BUMP="major"
               break
+            fi
+            # any other breaking change → minor
+            if echo "$msg" | grep -qE '^(fix|refactor|perf|ci)(\([^)]*\))?!:'; then
+              BUMP="minor"
+              continue
             fi
             # non-breaking releasable type → patch
             if echo "$msg" | grep -qE '^(feat|fix|refactor|perf|ci)(\([^)]*\))?:'; then
@@ -76,6 +85,7 @@ jobs:
           fi
 
           case "$BUMP" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR+1)); PATCH=0 ;;
             patch) PATCH=$((PATCH+1)) ;;
           esac

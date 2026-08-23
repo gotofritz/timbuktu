@@ -17,11 +17,21 @@ type migration struct {
 	sql     string
 }
 
+// schemaVersion is the version the one migration below records.
+//
+// It is 2 rather than 1 because an earlier build created this schema in two
+// steps, and a knowledge base made by that build already records version 2 —
+// numbering the single schema 2 lets those open untouched while a new one
+// starts here. Nothing in the wild predates that, so there is no upgrade path
+// to carry: a knowledge base either does not exist yet or already has this
+// schema.
+const schemaVersion = 2
+
 var migrations = []migration{
-	{1, migration001},
+	{schemaVersion, schemaSQL},
 }
 
-const migration001 = `
+const schemaSQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
@@ -33,6 +43,10 @@ CREATE TABLE IF NOT EXISTS documents (
     sha256     TEXT    NOT NULL,
     title      TEXT    NOT NULL DEFAULT '',
     mime_type  TEXT    NOT NULL DEFAULT '',
+    -- Where this document's archived copy lives, relative to the configured
+    -- raw directory. Empty means none is known: ingested with --no-raw, or
+    -- with the archive switched off.
+    raw_path   TEXT    NOT NULL DEFAULT '',
     created_at TEXT    NOT NULL,
     updated_at TEXT    NOT NULL
 );

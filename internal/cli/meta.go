@@ -68,7 +68,11 @@ func openMetaRepos(cmd *cobra.Command) (*storage.DocumentRepo, *storage.Metadata
 }
 
 // RunMetaSet resolves path to a document and sets each key=value pair.
-// Exported for testing.
+//
+// Every pair is parsed before any is written, so a bad one rejects the lot
+// rather than leaving the document half-updated. A repeated key is refused
+// outright: metadata holds one value per key, so writing both would throw the
+// first away while the output confirmed them both. Exported for testing.
 func RunMetaSet(ctx context.Context, out io.Writer, docs *storage.DocumentRepo, meta *storage.MetadataRepo, path string, pairs []string) error {
 	path, err := NormalizePath(path)
 	if err != nil {
@@ -81,15 +85,27 @@ func RunMetaSet(ctx context.Context, out io.Writer, docs *storage.DocumentRepo, 
 		}
 		return fmt.Errorf("look up %s: %w", path, err)
 	}
+	type pair struct{ key, value string }
+	parsed := make([]pair, 0, len(pairs))
+	seen := make(map[string]bool, len(pairs))
 	for _, kv := range pairs {
 		key, value, ok := strings.Cut(kv, "=")
 		if !ok || key == "" {
 			return fmt.Errorf("invalid pair %q: must be key=value", kv)
 		}
-		if err := meta.Set(ctx, doc.ID, key, value); err != nil {
+		if seen[key] {
+			return fmt.Errorf("key %q given more than once: a document holds one value per key, "+
+				"so only the last would survive", key)
+		}
+		seen[key] = true
+		parsed = append(parsed, pair{key: key, value: value})
+	}
+
+	for _, p := range parsed {
+		if err := meta.Set(ctx, doc.ID, p.key, p.value); err != nil {
 			return fmt.Errorf("set metadata: %w", err)
 		}
-		fmt.Fprintf(out, "%s=%s\n", key, value) //nolint:errcheck
+		fmt.Fprintf(out, "%s=%s\n", p.key, p.value) //nolint:errcheck
 	}
 	return nil
 }

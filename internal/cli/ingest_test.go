@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -120,5 +121,43 @@ func TestPrintDirResults_allOK(t *testing.T) {
 	}
 	if !strings.Contains(outBuf.String(), "Done:") {
 		t.Errorf("missing Done summary: %s", outBuf.String())
+	}
+}
+
+// A directory ingest prints what needs acting on, not a line per file.
+func TestPrintDirResults_quietByDefault(t *testing.T) {
+	results := []ingest.Result{
+		{Path: "/notes/a.md", Chunks: 3},
+		{Path: "/notes/b.md", Skipped: true},
+		{Path: "/notes/c.md", Err: errors.New("extractor exploded")},
+	}
+
+	var out, errOut bytes.Buffer
+	if err := cli.PrintDirResults(results, false, &out, &errOut); err == nil {
+		t.Fatal("expected an error for the failed file")
+	}
+
+	if strings.Contains(out.String(), "/notes/a.md") {
+		t.Errorf("an ingested file should not be listed by default, got:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "/notes/c.md") {
+		t.Errorf("failures must always be reported, got:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "1 ingested, 1 skipped, 1 errors") {
+		t.Errorf("summary missing, got:\n%s", out.String())
+	}
+}
+
+func TestPrintDirResults_verboseListsEveryFile(t *testing.T) {
+	results := []ingest.Result{{Path: "/notes/a.md", Chunks: 3}, {Path: "/notes/b.md", Skipped: true}}
+
+	var out, errOut bytes.Buffer
+	if err := cli.PrintDirResults(results, true, &out, &errOut); err != nil {
+		t.Fatalf("PrintDirResults: %v", err)
+	}
+	for _, want := range []string{"/notes/a.md", "/notes/b.md"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("verbose should list %s, got:\n%s", want, out.String())
+		}
 	}
 }

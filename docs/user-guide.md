@@ -641,6 +641,10 @@ original into `~/.tbuk/raw/`. So even if you later move, edit, or delete the
 source file, the exact bytes you indexed are still on hand. Copies are named by
 content fingerprint, so re-ingesting the same file never makes a duplicate.
 
+This archive is what lets `tbuk reindex` rebuild your whole index after an
+embedding-model change (see [section 12](#12-keeping-up-to-date)) without
+needing a single original file.
+
 To skip the copy for a single run, pass `--no-raw`:
 
 ```bash
@@ -717,15 +721,43 @@ tbuk list --limit 20
 tbuk list --format json | jq '.[].path'
 ```
 
-### Finding documents by metadata
+### Tagging documents, and finding them again
+
+Timbuktu keeps a set of **key=value labels** on every document. Some it writes
+itself at ingest time — `filename`, `extension`, `mime`, `dir` — and you can
+attach your own:
 
 ```bash
-tbuk find topic=cooking
+tbuk meta set ~/notes/soup.md tag=cooking
+tbuk meta set ~/notes/soup.md tag=cooking author=Mum year=1998
+tbuk meta list ~/notes/soup.md
 ```
 
-This finds documents tagged with specific metadata. Metadata tagging is an
-advanced feature covered in section 13. For a plain inventory of everything
-indexed, use `tbuk list`; for aggregate counts, use `tbuk stats`.
+Then find documents by any of them:
+
+```bash
+tbuk find tag=cooking
+tbuk find extension=md
+tbuk find tag=cooking author=Mum      # several filters: all must match
+```
+
+Matching is exact — `tag=cooking` does not find `tag=Cooking` or
+`tag=cooking-fast`. There is no wildcard; `tbuk search` is the tool for
+"documents that mention cooking".
+
+Two things worth knowing before you lean on this:
+
+- **One value per key, per document.** `tag=cooking` and `tag=quick` on the
+  same document is not possible — the second replaces the first. Timbuktu
+  refuses a command that sets the same key twice rather than silently keeping
+  the last one. If you need several labels, use distinct keys
+  (`tag=cooking cuisine=italian`) or a compound value you search consistently.
+- **Your labels survive re-ingesting.** Editing a document and running
+  `tbuk ingest` again refreshes the automatic keys and leaves yours alone. They
+  travel with `tbuk export`/`tbuk import` too.
+
+For a plain inventory of everything indexed, use `tbuk list`; for aggregate
+counts, use `tbuk stats`.
 
 ---
 
@@ -1014,6 +1046,79 @@ tbuk ingest ~/notes/
 You can run this any time after editing your documents. A reasonable habit is
 to run it once a day, or after any batch of edits.
 
+### When you change your embedding model
+
+Switching `embedding.provider` or `embedding.model` changes the *shape* of the
+numbers Timbuktu stores — a 768-number vector where the new model produces
+1024, or the other way round. Everything already indexed stays in the old
+shape, and searches stop working:
+
+```
+query embedding has 1024 dimensions but stored vectors have 768
+```
+
+`tbuk doctor` flags the same thing. One command fixes it:
+
+```bash
+tbuk reindex
+```
+
+That re-embeds every document in your knowledge base with the new model. It
+does not need your original files. The text comes from whichever of three
+places still has it:
+
+1. the **extracted text** Timbuktu kept when it first read the document (if a
+   later version of Timbuktu reads that kind of file better, the old text is
+   not reused — the document is read again);
+2. the **untouched copy** in its raw archive (each document records where its
+   own copy is, so it is found whatever it is called);
+3. the original file, if it is still where you ingested it from.
+
+So it works for documents whose originals now live on another machine, or
+nowhere at all — and even for ones whose archived copy has gone too, as long as
+the extracted text survived.
+
+Check what it will do before spending the time:
+
+```bash
+tbuk reindex --dry-run
+```
+
+That lists every document and where its content would come from, without
+embedding anything. Output looks like:
+
+```
+[1/3] /Users/you/notes/first-note.md → would re-embed from the archive (/Users/you/.tbuk/raw/9f2a….md)
+[2/3] /Users/you/notes/old.md → would re-embed from /Users/you/notes/old.md (no archived copy)
+[3/3] /Users/you/gone/deleted.md → skipped: no archived copy and stored path unreadable
+Done: 2 would be re-embedded, 1 skipped, 0 errors
+```
+
+A document is only skipped when all three come up empty. The line names every
+path it looked at, so you can see what is missing.
+
+By default `tbuk reindex` prints only those problem documents and a closing
+count — one unreadable document among hundreds should be easy to spot, not
+buried. Add `-v` to see a line for every document. The rest of the run carries on regardless.
+
+One case worth knowing: a `raw/` folder you assembled yourself, holding your
+documents under *their own* names rather than the content-addressed ones
+Timbuktu writes, is not an archive it can match up — nothing in the database
+points at those files. The fix is to ingest that folder as the ordinary source
+folder it is (`tbuk ingest ~/that-folder`); from then on each document records
+where its copy went.
+
+If your raw archive lives somewhere else — restored from a backup, say — point
+at it for one run:
+
+```bash
+tbuk reindex --source-dir /mnt/backup/raw
+```
+
+Remember to set `embedding.dimension` in your config to the new model's value
+first; reindex writes what the model gives it, and the rest of Timbuktu reads
+that setting.
+
 ### Backing up or moving your knowledge base
 
 `tbuk export` bundles everything — your config plus every data folder
@@ -1042,59 +1147,132 @@ tbuk export --root /data/work-kb ~/backups/work.tar
 ```
 
 Inside the archive, the config's data-folder paths are **commented out**. That
-keeps the export portable: when `tbuk import` restores it, each folder is
-re-created under the target machine's own data root rather than pinned to the
-paths from the machine that made the export. Your provider, model, and chunking
-settings are preserved.
+keeps the export portable, so nothing in it is tied to the absolute paths of
+the machine that made it.
 
-### Restoring from an archive
+### Importing an archive on another machine
 
-`tbuk import` unpacks a snapshot back into a knowledge base. Point `--root` (or
-`--config`) at where it should land, just like every other command:
+`tbuk import` reads a snapshot back into a knowledge base:
 
 ```bash
-tbuk import ~/backups/kb.tar                        # restore into ~/.tbuk
-tbuk import --root /data/work-kb ~/backups/kb.tar   # restore into a specific root
+tbuk import ~/backups/kb.tar                        # into ~/.tbuk
+tbuk import --root /data/work-kb ~/backups/kb.tar   # into a specific root
 ```
 
-Into a **fresh root**, import **adopts the config from the archive** and
-re-creates every folder — database, extracted-text cache, raw archive, prompt
-templates — at that root's default locations. This is the "move my knowledge
-base to a new machine" case: run it against an empty directory and you get a
-working copy, no `init` needed.
+It takes out of the archive the things that are *yours*: your **documents**
+(the untouched copies in `raw/`), the **index** describing them — each one's
+path, title, and any labels you attached with `tbuk meta set` — and your
+**prompt templates**. The documents are then embedded here, with this
+machine's settings.
 
-Into a root that **already has a `config.yaml`**, that config is kept and the
-archived folders are copied into the locations *it* names, so a knowledge base
-whose database lives on another disk stays consistent. Pass `--force-config` to
-take the archive's config instead — the data is then re-homed under the root to
-match it.
-
-To fold a snapshot **into an existing** knowledge base instead of setting up a
-new one, use `--merge`. That keeps the config already at the target and copies
-the archived folders into the locations *it* names (or the defaults when the
-target has no config yet):
+You can do one half at a time:
 
 ```bash
-tbuk import --merge ~/backups/kb.tar
+tbuk import data ~/backups/kb.tar        # documents only
+tbuk import templates ~/backups/kb.tar   # templates only
 ```
 
-Import never overwrites files that already exist — so it won't clobber a live
-database — and reports how many it skipped. Two flags let the archive's copies
-win, and they are separate because replacing your settings and replacing your
-documents are rarely the same decision:
+All three take the same flags. Templates come across first, because they are
+instant and need no model server — so if the embedding step is slow or fails,
+you still have your templates. `tbuk import templates` needs no model server
+running at all.
+
+Everything else in the archive is ignored on purpose:
+
+- **The settings file is never read.** It describes the machine it came from —
+  where its folders live, which model server it talks to — and none of that is
+  likely right here. Your own `config.yaml` is left exactly as it is.
+- **The stored numbers are never reused.** Vectors made by one embedding model
+  are meaningless to another, and nothing in an archive says which model made
+  them. Rather than guess, import works them out again from your documents.
+
+That second point is why importing takes a while: it is embedding every
+document, exactly as if you had ingested them here. What you get for the wait
+is a knowledge base that works on arrival.
+
+Look before you leap:
 
 ```bash
-tbuk import --force-data ~/backups/kb.tar      # database, extracted text, raw archive, prompts
-tbuk import --force-config ~/backups/kb.tar    # adopt the archive's config.yaml, leave the data alone
-tbuk import --force-config --force-data ~/backups/kb.tar   # replace everything
+tbuk import --dry-run ~/backups/kb.tar
 ```
 
-Neither flag is needed for a fresh knowledge base: anything that does not exist
-yet is written either way.
+```
+[1/2] template mine → would install
+[2/2] template qa → skipped: already installed
+[1/3] /old-machine/notes/a.md → would import from 9f2a….md
+[2/3] /old-machine/notes/b.md → would import from 4c81….md
+[3/3] /old-machine/notes/c.md → would skip: the archive holds no copy of this file
+Dry run: 2 document(s) would be imported, 1 skipped, 0 errors; 1 template(s) would be imported, 1 skipped, 0 errors
+```
 
-If you need to pin a folder to a fixed location, extract the archive and
-uncomment that path in `config.yaml`, then import with `--merge` so that config
-is honoured.
+A dry run writes nothing at all. The skipped document in that example was
+ingested with `--no-raw` on the other machine, so the archive has its index
+entry but not its content — there is nothing to import it from.
+
+#### Importing into a knowledge base you already have
+
+A document already indexed **at the same path**, or a template already
+installed under the **same name**, is left alone. That makes importing the same
+archive twice a no-op, and lets you re-run an interrupted import safely. Two
+flags change that:
+
+```bash
+tbuk import --on-conflict overwrite ~/backups/kb.tar   # archive's copy wins
+tbuk import --on-conflict ask ~/backups/kb.tar         # decide one at a time
+```
+
+With `ask`, you are prompted per document and per template:
+
+```
+template mine is already installed. Replace it with the archive's copy? [y/N]
+/notes/a.md is already indexed. Replace it with the archive's copy? [y/N]
+```
+
+Every machine has the built-in templates (`qa`, `brief`, `anki`), so the
+archive's copies of those always collide — which means that by default only
+templates you actually made yourself come across. If you had edited a built-in
+on the other machine and want that version here, use `--on-conflict overwrite`.
+A template is replaced as a whole, never merged file-by-file, so what you end
+up with is always a template that loads.
+
+If a document fails to embed — your model server is down, say — it is undone
+rather than left half-imported, so running the import again picks it up where
+it stopped.
+
+#### Importing onto a brand-new machine
+
+Point it at an empty directory and it sets one up for you first, exactly as
+`tbuk init` would, then tells you what it is about to use and waits:
+
+```
+Created config: /Users/you/.tbuk/config.yaml
+Documents will be embedded with mlx (the provider's default model), at 768 dimensions, per /Users/you/.tbuk/config.yaml.
+Continue? [y/N]
+```
+
+Answer `n` if those are not your settings: the config stays where it is, so you
+can edit it and run the import again. `--yes` skips the question for scripts.
+`tbuk import templates` never asks — it embeds nothing, so there is nothing to
+spend.
+
+### Rewinding your own knowledge base
+
+There is no "restore" command. Reusing an archive's stored numbers is only safe
+when both machines run the same embedding model, and Timbuktu has no way to
+check that — the mismatch would show up as quietly bad answers rather than an
+error, which is the worst way for anything to fail.
+
+Rolling *your own* machine back to a snapshot is a different matter: your
+settings have not changed, so the numbers in the archive are still yours. That
+needs no command, because `tbuk export` writes an ordinary uncompressed tar:
+
+```bash
+tar -xf ~/backups/kb.tar -C ~/.tbuk
+```
+
+That puts everything back, `config.yaml` included — worth a glance first if
+you have changed settings since. If you have changed your embedding model since
+that snapshot, run `tbuk reindex` afterwards.
 
 ---
 

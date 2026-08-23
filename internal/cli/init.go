@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,27 +32,15 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	// Seed built-in templates under the configured prompts root so init and
 	// the ask/template commands agree on where templates live.
 	promptsRoot := configFrom(cmd).Prompts.Dir
-	qaDir := filepath.Join(promptsRoot, "qa")
-	briefDir := filepath.Join(promptsRoot, "brief")
-	ankiDir := filepath.Join(promptsRoot, "anki")
-
-	for _, dir := range []string{tbukDir, qaDir, briefDir, ankiDir} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("create dir %s: %w", dir, err)
-		}
-	}
 
 	cfgPath := filepath.Join(tbukDir, "config.yaml")
 	switch existing, err := os.ReadFile(cfgPath); {
 	case errors.Is(err, os.ErrNotExist):
-		defaultYAML, err := config.DefaultYAMLForRoot(tbukDir)
-		if err != nil {
-			return fmt.Errorf("render default config: %w", err)
+		if err := Scaffold(os.Stdout, tbukDir, promptsRoot); err != nil {
+			return err
 		}
-		if err := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); err != nil {
-			return fmt.Errorf("write config: %w", err)
-		}
-		fmt.Printf("Created config: %s\n", cfgPath)
+		fmt.Printf("Initialised tbuk at %s\n", tbukDir)
+		return nil
 	case err != nil:
 		return fmt.Errorf("read config %s: %w", cfgPath, err)
 	default:
@@ -72,18 +61,62 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	if err := writeBuiltinTemplates(promptsRoot); err != nil {
+		return err
+	}
+
+	fmt.Printf("Initialised tbuk at %s\n", tbukDir)
+	return nil
+}
+
+// Scaffold sets up an empty data root the way `tbuk init` does: the root and
+// built-in prompt-template directories, the templates themselves, and a default
+// config.yaml under root. It is only for a root with no config yet — an
+// existing config is a machine's own settings and is never touched. Factored
+// out of init so `tbuk import` can prepare a fresh machine before importing
+// into it. Exported for testing.
+func Scaffold(out io.Writer, root, promptsRoot string) error {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return fmt.Errorf("create dir %s: %w", root, err)
+	}
+	if err := writeBuiltinTemplates(promptsRoot); err != nil {
+		return err
+	}
+	cfgPath := filepath.Join(root, "config.yaml")
+	defaultYAML, err := config.DefaultYAMLForRoot(root)
+	if err != nil {
+		return fmt.Errorf("render default config: %w", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	fmt.Fprintf(out, "Created config: %s\n", cfgPath) //nolint:errcheck
+	return nil
+}
+
+// builtinTemplateNames are the templates `tbuk init` (and Scaffold) install.
+// An import into a fresh root scaffolds before it runs, so these are what the
+// archive's own copies collide with — which a dry run has to account for.
+var builtinTemplateNames = []string{"anki", "brief", "qa"}
+
+// writeBuiltinTemplates creates the built-in prompt templates under
+// promptsRoot, creating the directories they live in.
+func writeBuiltinTemplates(promptsRoot string) error {
+	qaDir := filepath.Join(promptsRoot, "qa")
+	briefDir := filepath.Join(promptsRoot, "brief")
+	ankiDir := filepath.Join(promptsRoot, "anki")
+	for _, dir := range []string{qaDir, briefDir, ankiDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create dir %s: %w", dir, err)
+		}
+	}
 	if err := writeBuiltinQATemplate(qaDir); err != nil {
 		return err
 	}
 	if err := writeBuiltinBriefTemplate(briefDir); err != nil {
 		return err
 	}
-	if err := writeBuiltinAnkiTemplate(ankiDir); err != nil {
-		return err
-	}
-
-	fmt.Printf("Initialised tbuk at %s\n", tbukDir)
-	return nil
+	return writeBuiltinAnkiTemplate(ankiDir)
 }
 
 func writeBuiltinBriefTemplate(dir string) error {

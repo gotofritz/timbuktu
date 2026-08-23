@@ -83,7 +83,10 @@ func TestContextCommand_advertisesOnlyRealFlags(t *testing.T) {
 		}
 		for _, f := range flag.FindAllStringSubmatch(m[0], -1) {
 			name := f[1]
-			if sub.Flags().Lookup(name) != nil || cli.New().PersistentFlags().Lookup(name) != nil {
+			// LocalFlags merges a command's own persistent flags; Flags does
+			// not until it has parsed, which would hide a real mismatch on any
+			// command that declares its flags persistently (import does).
+			if sub.LocalFlags().Lookup(name) != nil || cli.New().PersistentFlags().Lookup(name) != nil {
 				checked++
 				continue
 			}

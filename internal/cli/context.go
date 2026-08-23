@@ -23,6 +23,7 @@ tbuk ingest --force <path>       re-index even if file is unchanged
 tbuk preprocess <path>           extract text only (inspect before indexing)
 tbuk update <path>               re-index a file only if it changed
 tbuk delete <path>               remove a document from the knowledge base
+tbuk reindex                     re-embed every document from raw/ after an embedding config change (--source-dir, --dry-run)
 
 ## Querying
 
@@ -39,7 +40,11 @@ tbuk stats                       document and chunk counts, DB size
 tbuk list                        list all indexed documents
 tbuk find <key=value>...         find documents by metadata
 tbuk export <path>               tar snapshot of the KB (config + data folders) for backup/transfer
-tbuk import <archive>            restore a KB from a tar snapshot (--merge, --force-config, --force-data)
+tbuk import <archive>            import a snapshot's documents + prompt templates, embedded locally (--on-conflict skip|overwrite|ask, --dry-run, --yes)
+tbuk import data <archive>       documents only (same flags)
+tbuk import templates <archive>  prompt templates only, no embedding provider needed (same flags)
+                                 never reads the archive's config or embeddings
+                                 rewind your own KB instead with: tar -xf kb.tar -C ~/.tbuk
 
 ## Templates
 
@@ -65,6 +70,8 @@ ingest.embed_concurrency  parallel embed requests per file (default 4)
 - HTTP 500 "input too large": chunk exceeds server ubatch (default 512 tokens).
   Fix: restart embedding server with -b 1024 -ub 1024, or lower chunking.size.
 - SHA256 dedup: unchanged files are skipped. Use --force to re-index.
+- "query embedding has N dimensions but stored vectors have M": embedding.provider
+  or embedding.model changed. Fix: tbuk reindex (re-embeds from raw/, no originals needed).
 - tbuk ask answers from model general knowledge if retrieval finds nothing.
   Use --require-context to abort instead.
 - Claude provider: set ANTHROPIC_API_KEY; embedding must still be local (llama/ollama).

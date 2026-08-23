@@ -39,7 +39,9 @@ func newIngestCmd() *cobra.Command {
 			}
 			fi, err := os.Stat(path)
 			if err != nil {
-				return fmt.Errorf("stat %s: %w", path, err)
+				// os.Stat's error already names the operation and the path;
+				// wrapping it repeated both back at the user.
+				return err
 			}
 
 			opts := ingest.Options{Force: force, NoRaw: noRaw}
@@ -53,7 +55,8 @@ func newIngestCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "re-ingest even if file is unchanged")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "show skipped files")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
+		"print a line per file; by default only problems and the summary are shown")
 	cmd.Flags().BoolVar(&noRaw, "no-raw", false, "do not copy the source into ~/.tbuk/raw")
 	return cmd
 }
@@ -83,7 +86,10 @@ func printDirResults(results []ingest.Result, verbose bool) error {
 	return PrintDirResults(results, verbose, os.Stdout, os.Stderr)
 }
 
-// PrintDirResults writes progress lines to outW and errors to errW.
+// PrintDirResults writes a summary to outW and errors to errW. Only what needs
+// acting on is printed by default — a failure, and the closing counts — since a
+// line per file buries the one that went wrong. Verbose prints them all,
+// including files skipped as unchanged.
 func PrintDirResults(results []ingest.Result, verbose bool, outW, errW io.Writer) error {
 	total := len(results)
 	ingested, skipped, errs := 0, 0, 0
@@ -101,7 +107,9 @@ func PrintDirResults(results []ingest.Result, verbose bool, outW, errW io.Writer
 			}
 			continue
 		}
-		_, _ = fmt.Fprintf(outW, "%s %s → %d chunks embedded\n", prefix, r.Path, r.Chunks)
+		if verbose {
+			_, _ = fmt.Fprintf(outW, "%s %s → %d chunks embedded\n", prefix, r.Path, r.Chunks)
+		}
 		ingested++
 	}
 	_, _ = fmt.Fprintf(outW, "Done: %d ingested, %d skipped, %d errors\n", ingested, skipped, errs)

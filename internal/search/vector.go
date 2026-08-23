@@ -71,8 +71,9 @@ func (s *Searcher) rankVector(ctx context.Context, queryVec []float32, opts Opti
 			// similarity would silently score every such chunk 0, so fail loud.
 			return nil, fmt.Errorf(
 				"vector search: query embedding has %d dimensions but stored vectors have %d — "+
-					"the embedding model/config changed since ingest; re-ingest the corpus or "+
-					"restore the previous embedding configuration",
+					"the embedding model/config changed since ingest; run `tbuk reindex` to "+
+					"re-embed the corpus under the current configuration, or restore the "+
+					"previous embedding configuration",
 				len(queryVec), len(emb))
 		}
 		score := cosineSimilarity(queryVec, emb)

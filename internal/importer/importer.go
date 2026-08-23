@@ -1,8 +1,14 @@
-// Package importer restores a knowledge base from a tar archive written by
-// `tbuk export`. It is the inverse of internal/export: each archived component
-// (database, extracted-text store, raw archive, prompt templates) is written
-// back under a target root, either re-homed at the root's default locations or
-// merged into the folders named by an existing target config.
+// Package importer reads a tar archive written by `tbuk export` and takes from
+// it the two things a knowledge base can be rebuilt from on any machine: the
+// archived source files under raw/, and the database, copied aside to be read
+// as a manifest of what those files were.
+//
+// It deliberately takes nothing else. A config describes the machine it lives
+// on — its paths, providers and models — so adopting another machine's config
+// is never right; the extracted-text cache is re-derivable from the raw bytes;
+// and prompt templates belong to the machine that runs them. Embeddings in the
+// archived database are not read at all: they are re-derived locally, because
+// vectors made by a different model cannot be searched here.
 package importer
 
 import (
@@ -17,61 +23,69 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gotofritz/timbuktu/internal/config"
 	"github.com/gotofritz/timbuktu/internal/export"
 )
 
-// Canonical archive-relative component names, matching what a default
-// `tbuk export` produces. Data paths in the exported config are commented out,
-// so the archive always uses these default names regardless of where the source
-// stored each component.
+// Canonical archive-relative names, matching what a default `tbuk export`
+// produces. Data paths in the exported config are commented out, so the archive
+// always uses these default names regardless of where the source stored each
+// component.
 const (
-	dbName        = "tbuk.sqlite"
-	extractedRoot = "extracted"
-	rawRoot       = "raw"
-	promptsRoot   = "prompts"
+	dbName      = "tbuk.sqlite"
+	rawRoot     = "raw"
+	promptsRoot = "prompts"
 )
 
-// Options controls where an archive's entries are written.
+// Options controls what Extract writes and where.
 type Options struct {
-	// Root is the target data root. Entries that do not match a known component
-	// (or whose component is disabled in Config) are written verbatim under it.
-	Root string
-	// Config supplies the destination path for each component. In merge mode this
-	// is the target's existing config; otherwise it is the root's defaults.
-	Config config.Config
-	// ConfigDest is where the archive's config.yaml is written. Empty means the
-	// archive config is discarded and the target's existing config is kept
-	// (merge mode).
-	ConfigDest string
-	// ForceConfig overwrites an existing file at ConfigDest. A config is a
-	// machine's own settings, so it is protected separately from the data.
-	ForceConfig bool
-	// ForceData overwrites existing database, extracted-text, raw and prompt
-	// files. When false, an existing file is left in place and recorded in
-	// Result.Skipped.
-	ForceData bool
+	// RawDir is where the archive's raw/ entries are written, keeping any
+	// sub-path below raw/. Empty writes none of them — enough for a dry run,
+	// which still learns what the archive holds from Result.RawNames.
+	RawDir string
+	// DBDest is where the archive's database (and its WAL/SHM sidecars) is
+	// written, for the caller to open as a manifest. This is a path the caller
+	// owns — a temp file, never a live knowledge base — so an existing file
+	// there is overwritten. Empty skips the database.
+	DBDest string
+	// PromptsDir is where the archive's prompt templates are written, keeping
+	// their <name>/... layout. Empty writes none of them — again enough for a
+	// dry run, which learns the names from Result.PromptNames. Existing files
+	// there are overwritten, so point this at a directory you own and decide
+	// per template what to keep: whether a template should replace one already
+	// installed is the caller's policy, not this package's.
+	PromptsDir string
 }
 
-// Result reports the destinations written and skipped.
+// Result reports what the archive held and what was written.
 type Result struct {
+	// Written lists the destinations actually written. A raw copy already in
+	// place is not among them.
 	Written []string
-	Skipped []string
+	// RawNames lists every raw entry's path below raw/, whether or not it was
+	// written, so a caller can tell which documents the archive can supply.
+	RawNames []string
+	// PromptNames lists each prompt template the archive holds, once, whether
+	// or not it was written. A template is a directory below prompts/, so a
+	// loose file directly under prompts/ belongs to none and is left out.
+	PromptNames []string
+	// DBPath is where the archive's database was written, empty when the
+	// archive carried none or Options.DBDest was empty.
+	DBPath string
 }
 
-// Import extracts the tar archive in r according to opts. Each entry is mapped
-// to a destination under opts.Config's component paths (database, extracted
-// store, raw archive, prompts) or, failing that, verbatim under opts.Root.
-// Existing files are overwritten only with the matching force option
-// (ForceConfig for the archive's config, ForceData for everything else),
-// otherwise skipped.
-// Entries that would escape the destination via an absolute path or `..` are
-// rejected.
-func Import(r io.Reader, opts Options) (Result, error) {
+// Extract reads the tar archive in r, writing its raw/ entries under
+// opts.RawDir, its prompt templates under opts.PromptsDir, and its database to
+// opts.DBDest. Every other entry — the config, the extracted-text cache,
+// anything unrecognised — is read past and discarded.
+//
+// A raw copy already present is left untouched: raw names are content-addressed
+// (<sha256><ext>), so the same name means the same bytes. Entries that would
+// escape their destination via an absolute path or `..` are rejected.
+func Extract(r io.Reader, opts Options) (Result, error) {
 	var res Result
 	// A seekable source can be checked for completeness before a single file is
 	// written: an archive cut at a block boundary reads back as a clean EOF, and
-	// restoring the entries that survived would leave a knowledge base silently
+	// importing the entries that survived would leave a knowledge base silently
 	// missing the rest. A stream that cannot seek is read as it arrives.
 	if rs, ok := r.(io.ReadSeeker); ok {
 		head, err := peekHead(rs)
@@ -123,25 +137,25 @@ func Import(r io.Reader, opts Options) (Result, error) {
 			return res, fmt.Errorf("unsafe archive entry %q", hdr.Name)
 		}
 
-		if name == export.ConfigName {
-			if opts.ConfigDest == "" {
-				continue // merge: keep the target's existing config
-			}
-			consumed, err := writeFile(opts.ConfigDest, tr, opts.ForceConfig, &res)
-			if err != nil {
-				return res, entryError(err, entries, head)
-			}
-			bodyPending = !consumed
-			continue
+		if rest, ok := rawRel(name); ok {
+			// Recorded whether or not it is written, so a dry run still learns
+			// which documents the archive can supply.
+			res.RawNames = append(res.RawNames, rest)
+		}
+		if tmpl, ok := promptName(name); ok && !contains(res.PromptNames, tmpl) {
+			res.PromptNames = append(res.PromptNames, tmpl)
 		}
 
-		dest, ok := destFor(name, opts.Config)
-		if !ok {
-			dest = filepath.Join(opts.Root, filepath.FromSlash(name))
+		dest, skipIfPresent, want := destFor(name, opts)
+		if !want {
+			continue // config, extracted text, prompts, anything else: not ours
 		}
-		consumed, err := writeFile(dest, tr, opts.ForceData, &res)
+		consumed, err := writeFile(dest, tr, skipIfPresent, &res)
 		if err != nil {
 			return res, entryError(err, entries, head)
+		}
+		if name == dbName {
+			res.DBPath = dest
 		}
 		bodyPending = !consumed
 	}
@@ -149,6 +163,71 @@ func Import(r io.Reader, opts Options) (Result, error) {
 		return res, archiveError(errNoEntries, entries, head)
 	}
 	return res, nil
+}
+
+// destFor maps a slash-separated archive entry to where Extract should put it.
+// want is false for every entry this package deliberately ignores.
+// skipIfPresent marks the content-addressed raw copies, where an existing file
+// is the same file; the database destination is the caller's own temp path and
+// is always written.
+func destFor(name string, opts Options) (dest string, skipIfPresent, want bool) {
+	switch name {
+	case dbName, dbName + "-wal", dbName + "-shm":
+		if opts.DBDest == "" {
+			return "", false, false
+		}
+		return opts.DBDest + strings.TrimPrefix(name, dbName), false, true
+	}
+	if rest, ok := rawRel(name); ok {
+		if opts.RawDir == "" {
+			return "", false, false
+		}
+		return filepath.Join(opts.RawDir, filepath.FromSlash(rest)), true, true
+	}
+	if rest, ok := promptRel(name); ok {
+		if opts.PromptsDir == "" {
+			return "", false, false
+		}
+		return filepath.Join(opts.PromptsDir, filepath.FromSlash(rest)), false, true
+	}
+	return "", false, false
+}
+
+// rawRel returns an entry's path below raw/, and whether it is a raw entry.
+func rawRel(name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, rawRoot+"/")
+	return rest, ok && rest != ""
+}
+
+// promptRel returns an entry's path below prompts/, and whether it belongs to a
+// template. A file directly under prompts/ has no template to belong to.
+func promptRel(name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, promptsRoot+"/")
+	if !ok || !strings.Contains(rest, "/") {
+		return "", false
+	}
+	return rest, true
+}
+
+// promptName returns the template an entry belongs to — the first path segment
+// below prompts/ — and whether it belongs to one at all.
+func promptName(name string) (string, bool) {
+	rest, ok := promptRel(name)
+	if !ok {
+		return "", false
+	}
+	first, _, _ := strings.Cut(rest, "/")
+	return first, first != ""
+}
+
+// contains reports whether list already holds want.
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // peekHead reads the opening bytes used for format sniffing and rewinds.
@@ -250,36 +329,6 @@ func formatOf(head []byte) string {
 	return ""
 }
 
-// destFor maps a slash-separated archive entry name to its destination under
-// cfg's component paths. It returns ok=false when the entry belongs to no known
-// component, or to one that is disabled (empty path) in cfg, so the caller can
-// fall back to placing it verbatim under the root.
-func destFor(name string, cfg config.Config) (string, bool) {
-	switch name {
-	case dbName:
-		return cfg.Database.Path, cfg.Database.Path != ""
-	case dbName + "-wal":
-		return cfg.Database.Path + "-wal", cfg.Database.Path != ""
-	case dbName + "-shm":
-		return cfg.Database.Path + "-shm", cfg.Database.Path != ""
-	}
-	for _, c := range []struct{ prefix, base string }{
-		{extractedRoot, cfg.Preprocess.OutputDir},
-		{rawRoot, cfg.Ingest.RawDir},
-		{promptsRoot, cfg.Prompts.Dir},
-	} {
-		rest, ok := strings.CutPrefix(name, c.prefix+"/")
-		if !ok {
-			continue
-		}
-		if c.base == "" {
-			return "", false
-		}
-		return filepath.Join(c.base, filepath.FromSlash(rest)), true
-	}
-	return "", false
-}
-
 // safeEntryName reports whether a cleaned archive entry name stays within its
 // destination — no absolute path and no `..` escape.
 func safeEntryName(name string) bool {
@@ -295,16 +344,15 @@ func safeEntryName(name string) bool {
 	return true
 }
 
-// writeFile copies the current archive entry to dest, creating parent dirs. An
-// existing dest is overwritten only when force is set; otherwise it is left
-// intact and recorded as skipped. Written files are owner-only (0o600). The
-// bool reports whether the entry's body was read, which the caller needs to
+// writeFile copies the current archive entry to dest, creating parent dirs.
+// With skipIfPresent an existing destination is left intact and not recorded as
+// written; otherwise dest is overwritten. Written files are owner-only (0o600).
+// The bool reports whether the entry's body was read, which the caller needs to
 // attribute a later short read to the right entry.
-func writeFile(dest string, r io.Reader, force bool, res *Result) (bool, error) {
-	if !force {
+func writeFile(dest string, r io.Reader, skipIfPresent bool, res *Result) (bool, error) {
+	if skipIfPresent {
 		switch _, err := os.Stat(dest); {
 		case err == nil:
-			res.Skipped = append(res.Skipped, dest)
 			return false, nil
 		case !os.IsNotExist(err):
 			return false, fmt.Errorf("stat %s: %w", dest, err)

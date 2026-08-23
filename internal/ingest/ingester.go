@@ -133,8 +133,10 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	// Archive the untouched source before extraction/embedding, so a copy
 	// failure (e.g. disk full) aborts the ingest and is retried whole rather
 	// than leaving an indexed document with no raw backup.
+	rawPath := ""
 	if ing.rawDir != "" && !opts.NoRaw {
-		if err := ing.copySourceToRaw(path, sha); err != nil {
+		var err error
+		if rawPath, err = ing.copySourceToRaw(path, sha); err != nil {
 			return Result{Path: path, Err: err}
 		}
 	}
@@ -167,8 +169,9 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 		if found && existingDim != newDim {
 			return Result{Path: path, Err: fmt.Errorf(
 				"ingest: %s: embedding dimension mismatch: knowledge base uses %d-dim vectors "+
-					"but the current embedding model/config produces %d — clear the database and "+
-					"re-ingest, or restore the previous embedding configuration",
+					"but the current embedding model/config produces %d — run `tbuk reindex` to "+
+					"bring the whole knowledge base to the current configuration, or restore "+
+					"the previous embedding configuration",
 				path, existingDim, newDim)}
 		}
 	}
@@ -187,7 +190,7 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	if existing != nil {
 		doc = existing
 	} else {
-		doc = &storage.Document{Path: path, SHA256: "", Title: title, MimeType: mime}
+		doc = &storage.Document{Path: path, SHA256: "", Title: title, MimeType: mime, RawPath: rawPath}
 		if err := ing.docs.Create(ctx, doc); err != nil {
 			return Result{Path: path, Err: fmt.Errorf("ingest: create doc: %w", err)}
 		}
@@ -211,6 +214,9 @@ func (ing *Ingester) IngestFile(ctx context.Context, path string, opts Options) 
 	// point is the document considered up to date.
 	doc.SHA256 = sha
 	doc.MimeType = mime
+	if rawPath != "" {
+		doc.RawPath = rawPath
+	}
 	if err := ing.docs.Update(ctx, doc); err != nil {
 		return Result{Path: path, Err: fmt.Errorf("ingest: update doc: %w", err)}
 	}
@@ -343,16 +349,60 @@ func (ing *Ingester) writeAutoMetadata(ctx context.Context, docID int64, path, m
 // readOrExtract returns extracted text from extractedDir/<sha>.txt.
 // If the file doesn't exist, calls extractor and saves the result.
 func (ing *Ingester) readOrExtract(ctx context.Context, path, sha string) (string, error) {
-	extractedPath := filepath.Join(ing.extractedDir, sha+".txt")
-	data, err := os.ReadFile(extractedPath)
-	if err == nil {
-		return string(data), nil
+	text, _, ok, err := ing.cachedText(sha)
+	if err != nil {
+		return "", err
 	}
-	if !os.IsNotExist(err) {
-		return "", fmt.Errorf("ingest: read extracted file: %w", err)
+	if ok {
+		return text, nil
 	}
+	return ing.extractAndCache(ctx, path, sha)
+}
 
-	// auto-preprocess: extract and save for future use
+// cachedText returns the text already extracted for sha, and where it is. The
+// cache is keyed on the document's content, not on any path, so it answers even
+// when every file the document was read from has since gone.
+func (ing *Ingester) cachedText(sha string) (text, path string, ok bool, err error) {
+	if ing.extractedDir == "" || sha == "" {
+		return "", "", false, nil
+	}
+	path = filepath.Join(ing.extractedDir, preprocess.CacheName(sha))
+	data, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
+		return string(data), path, true, nil
+	case os.IsNotExist(readErr):
+		return "", path, false, nil
+	default:
+		return "", path, false, fmt.Errorf("ingest: read extracted file: %w", readErr)
+	}
+}
+
+// staleCachedText returns text cached for sha by an earlier extractor version.
+// It is only worth reading when the document cannot be re-extracted at all —
+// every source file gone — where older text beats no document.
+func (ing *Ingester) staleCachedText(sha string) (text, path string, ok bool, err error) {
+	if ing.extractedDir == "" || sha == "" {
+		return "", "", false, nil
+	}
+	for _, name := range preprocess.OlderCacheNames(sha) {
+		p := filepath.Join(ing.extractedDir, name)
+		data, readErr := os.ReadFile(p)
+		switch {
+		case readErr == nil:
+			return string(data), p, true, nil
+		case os.IsNotExist(readErr):
+			continue
+		default:
+			return "", p, false, fmt.Errorf("ingest: read extracted file: %w", readErr)
+		}
+	}
+	return "", "", false, nil
+}
+
+// extractAndCache extracts the file at path and saves the text under sha for
+// next time.
+func (ing *Ingester) extractAndCache(ctx context.Context, path, sha string) (string, error) {
 	text, extractErr := ing.extractor.ExtractFile(ctx, path)
 	if extractErr != nil {
 		return "", fmt.Errorf("ingest: auto-preprocess %s: %w", path, extractErr)
@@ -360,55 +410,58 @@ func (ing *Ingester) readOrExtract(ctx context.Context, path, sha string) (strin
 	if err := os.MkdirAll(ing.extractedDir, 0o700); err != nil {
 		return "", fmt.Errorf("ingest: mkdir extractedDir: %w", err)
 	}
-	if err := os.WriteFile(extractedPath, []byte(text), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ing.extractedDir, preprocess.CacheName(sha)), []byte(text), 0o600); err != nil {
 		return "", fmt.Errorf("ingest: save extracted: %w", err)
 	}
 	return text, nil
 }
 
 // copySourceToRaw archives the source file at path into rawDir as
-// <sha256><ext>, preserving the original extension so the copy stays openable.
+// <sha256><ext>, returning that name relative to rawDir so the document can
+// record where its copy went. The extension is preserved so the copy stays
+// openable.
 // The name is content-addressed (like the extracted store), so distinct sources
 // never collide and an identical re-ingest is a no-op. The copy is written to a
 // temp file and renamed so a crash mid-write can't leave a truncated file under
 // the content-addressed name (which a later run would trust and skip). Owner-only
 // perms match the rest of the knowledge base.
-func (ing *Ingester) copySourceToRaw(path, sha string) error {
-	dst := filepath.Join(ing.rawDir, sha+filepath.Ext(path))
+func (ing *Ingester) copySourceToRaw(path, sha string) (string, error) {
+	rel := sha + filepath.Ext(path)
+	dst := filepath.Join(ing.rawDir, rel)
 	if _, err := os.Stat(dst); err == nil {
-		return nil // already archived — content-addressed name means identical bytes
+		return rel, nil // already archived — content-addressed name means identical bytes
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("ingest: stat raw copy: %w", err)
+		return "", fmt.Errorf("ingest: stat raw copy: %w", err)
 	}
 
 	if err := os.MkdirAll(ing.rawDir, 0o700); err != nil {
-		return fmt.Errorf("ingest: mkdir rawDir: %w", err)
+		return "", fmt.Errorf("ingest: mkdir rawDir: %w", err)
 	}
 
 	src, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("ingest: open source for raw copy: %w", err)
+		return "", fmt.Errorf("ingest: open source for raw copy: %w", err)
 	}
 	defer func() { _ = src.Close() }()
 
 	tmp, err := os.CreateTemp(ing.rawDir, sha+".*.tmp") // CreateTemp uses 0o600
 	if err != nil {
-		return fmt.Errorf("ingest: create temp raw copy: %w", err)
+		return "", fmt.Errorf("ingest: create temp raw copy: %w", err)
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed away
 
 	if _, err := io.Copy(tmp, src); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("ingest: copy source to raw: %w", err)
+		return "", fmt.Errorf("ingest: copy source to raw: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("ingest: close raw copy: %w", err)
+		return "", fmt.Errorf("ingest: close raw copy: %w", err)
 	}
 	if err := os.Rename(tmpName, dst); err != nil {
-		return fmt.Errorf("ingest: finalize raw copy: %w", err)
+		return "", fmt.Errorf("ingest: finalize raw copy: %w", err)
 	}
-	return nil
+	return rel, nil
 }
 
 // IngestDir walks dir recursively, ingesting all supported file types.

@@ -6,6 +6,50 @@ free-form tag attached to a document. Topics gate every retrieval surface
 everything about X" digest, and scope `export` to a subset of the knowledge
 base.
 
+## Open first: are topics and metadata labels one thing or two?
+
+**Decide this before implementing anything below.** It is not decided here, and
+it is out of scope for the PR that raised it (#130 / PR #132) — but the answer
+changes what milestone 1 should build.
+
+Timbuktu already ships a tagging mechanism: `tbuk meta set <path> tag=cooking`
+plus `tbuk find tag=cooking`, backed by the `metadata` table. This plan adds a
+second one. Both let a user label a document and then find it by that label,
+and a reader can be forgiven for asking why there are two.
+
+What actually differs today:
+
+| | metadata labels (shipped) | topics (this plan) |
+|---|---|---|
+| values per key | one — `PRIMARY KEY (document_id, key)` | many per document |
+| filters retrieval | no; `find` only lists documents | `search --topic`, `ask --topic` |
+| enumerate / count / rename | no | `topic list/show`, rename in one row |
+| digest, scoped export | no | yes |
+
+So they are not redundant — Design decision 1 below explains why topics cannot
+simply be metadata rows. But "not redundant" is not the same as "obviously two
+features", and shipping both without a stated boundary leaves the user guessing
+which to reach for, and leaves us maintaining two label vocabularies that
+neither compose nor convert.
+
+Three answers, none picked:
+
+1. **Two features, sharply separated.** Topics are the *shelf* a document sits
+   on (few, curated, drive retrieval); metadata is free-form annotation (many
+   keys, describes the document, drives lookup). Requires: saying so in the
+   docs, and deciding what `tag=` means once topics exist — probably
+   discouraging it in favour of a topic.
+2. **Topics subsume tags.** `tag=` becomes a topic on migration, `find tag=x`
+   keeps working as an alias, and metadata goes back to being for non-label
+   facts (`author`, `year`). Costs a migration and a deprecation.
+3. **Metadata grows multi-value and topics are dropped.** Change the primary
+   key, add the retrieval filters to the metadata path instead. Cheaper in new
+   concepts, more expensive in migration risk, and loses the cheap counts and
+   rename that a junction table gives.
+
+Whoever picks up milestone 1 should settle this first and record the answer
+here; the rest of the plan assumes answer 1 without ever having argued for it.
+
 ## Goal
 
 Let the user say *which shelf a document sits on* and then work shelf-by-shelf:
@@ -76,7 +120,12 @@ export is a *valid KB archive* that `tbuk import` restores unchanged.
    by folder structure". Only active with flag; default (no `--infer-topics`) →
    no change to existing behavior.
 
-## Schema (migration 002)
+## Schema (the next migration)
+
+> Numbering: `storage/migrate.go` now holds a single migration at
+> `schemaVersion` = 2, which creates the whole current schema. Topics append the
+> next entry — version 3 — rather than a "002".
+
 
 Appended to the `migrations` slice in `storage/migrate.go`, same style as 001:
 
@@ -103,7 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_document_topics_topic ON document_topics(topic_id
 internal/storage/
   topics.go         ← TopicRepo (new)
   topics_test.go
-  migrate.go        ← migration 002 appended
+  migrate.go        ← the next migration appended
 
 internal/search/
   search.go         ← Options.Topics []string
@@ -186,7 +235,7 @@ All `--topic` flags are `StringSlice` — repeatable and comma-splitting
 | `topic delete <name> [--yes]` | remove topic + all its links; confirm prompt like `delete`. Documents untouched. |
 | `topic digest <name> [...]` | milestone 2, below. |
 | `export <path> --topic x,y` | milestone 3, below. |
-| `reindex --topic x,y` | cross-plan — see "Cross-plan note" below; wire in whichever plan (this one or #130) lands second. |
+| `reindex --topic x,y` | cross-plan — `tbuk reindex` has landed without it (#130), so wiring it in belongs to this plan; see "Cross-plan note" below. |
 
 ## Milestone 2 — `topic digest`
 
@@ -235,7 +284,7 @@ counts in the summary line (`exported 12 of 240 documents (topics: go)`).
 
 ## Testing (TDD, table-driven, ≥85% per package)
 
-- **storage:** migration 002 applies over a v1 DB (and fresh); TopicRepo CRUD;
+- **storage:** the new migration applies over the current schema (and fresh); TopicRepo CRUD;
   normalization (`Go` ≡ `go`); `IDsForNames` miss → `ErrNotFound`; document
   delete cascades links; `Delete`/`Rename` edge cases. In-memory SQLite.
 - **search:** topics filter on vector/keyword/hybrid; multi-topic doc returns
@@ -268,25 +317,26 @@ AGENTS.md, before merge), and `docs/user-guide.md`. This plan is archived to
 
 ## Cross-plan note: `tbuk reindex --topic`
 
-Issue [#130](https://github.com/gotofritz/timbuktu/issues/130) /
-`docs/plans/130-reindex-command.md` proposes `tbuk reindex`, a bulk
-re-embed command, with an optional `--topic` filter that depends on this
-plan. Sequencing between the two plans isn't decided, so handle whichever
-order actually happens:
+**Settled: `tbuk reindex` landed first, without `--topic`.** Issue
+[#130](https://github.com/gotofritz/timbuktu/issues/130) shipped the bulk
+re-embed command per its Design decision 6, since topics did not exist to
+filter on. So the obligation now sits here: **milestone 1's rollout must wire
+`--topic` into `reindex`**, as a fourth consumer of the
+filter alongside `ingest`/`search`/`ask` — it is not optional cleanup, it is
+the half of `reindex` that was deferred to this plan.
 
-- **If milestone 1 here lands first** (this plan gives `search`/`ask` their
-  `--topic` filter first): when `reindex` is implemented, wire `--topic`
-  into it too, reusing the same filter semantics (OR/union) and whatever
-  `TopicRepo`/filter-layer API milestone 1 actually produces — don't trust
-  plan 130's guess at that API, it predates this landing.
-- **If `tbuk reindex` lands first** (without `--topic`, per plan 130's
-  Design decision 6): milestone 1's rollout here should add a line item
-  wiring `--topic` into `reindex` alongside `ingest`/`search`/`ask`, so it
-  isn't forgotten as a fourth consumer of the filter.
+What exists to wire into (`internal/ingest/reindex.go`,
+`internal/cli/reindex.go`): `ReindexAll(ctx, opts)` lists every document and
+hands it to `ReindexDocuments(ctx, docs, opts)`. A topic filter needs only a
+third entry point that lists the documents carrying the listed topics and
+calls `ReindexDocuments` with them — the per-document work is unchanged — plus
+a `--topic` string-slice flag on the command. `ReindexDocuments` already
+accepts an explicit document list for exactly this reason.
 
-Either way, `reindex --topic x,y` behaves like `search --topic x,y` — one
-topic vocabulary, one filter semantics, wired into every command that
-targets a document subset.
+`reindex --topic x,y` behaves like `search --topic x,y` — one topic
+vocabulary, one filter semantics, wired into every command that targets a
+document subset. Reuse whatever `TopicRepo`/filter-layer API milestone 1
+actually produces; plan 130's guess at that API predates it.
 
 ## Out of scope (deliberate)
 

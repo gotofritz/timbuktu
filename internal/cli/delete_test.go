@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
+	"github.com/gotofritz/timbuktu/internal/preprocess"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
@@ -131,7 +132,7 @@ func TestRunDelete_removesExtractedCacheFile(t *testing.T) {
 
 	extractedDir := t.TempDir()
 	sha := "cafebabe"
-	cachePath := filepath.Join(extractedDir, sha+".txt")
+	cachePath := filepath.Join(extractedDir, preprocess.CacheName(sha))
 	if err := os.WriteFile(cachePath, []byte("extracted text"), 0o600); err != nil {
 		t.Fatalf("write cache file: %v", err)
 	}
@@ -198,5 +199,35 @@ func TestRunDelete_showsChunkCount(t *testing.T) {
 	}
 	if !strings.Contains(output, "chunk") {
 		t.Errorf("expected 'chunk' in output, got: %s", output)
+	}
+}
+
+// Deleting a document clears its extracted text under every extractor version,
+// not only the current one, so nothing is left behind to be found later.
+func TestRunDelete_removesEveryCachedVersion(t *testing.T) {
+	sqlDB := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(sqlDB)
+	extractedDir := t.TempDir()
+	sha := "deadbeef"
+
+	doc := &storage.Document{Path: "/notes/a.md", SHA256: sha, Title: "A"}
+	if err := docs.Create(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := append([]string{preprocess.CacheName(sha)}, preprocess.OlderCacheNames(sha)...)
+	for _, name := range paths {
+		if err := os.WriteFile(filepath.Join(extractedDir, name), []byte("text"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := cli.RunDelete(context.Background(), &bytes.Buffer{}, sqlDB, docs, extractedDir, "/notes/a.md"); err != nil {
+		t.Fatalf("RunDelete: %v", err)
+	}
+	for _, name := range paths {
+		if _, err := os.Stat(filepath.Join(extractedDir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the delete (stat err = %v)", name, err)
+		}
 	}
 }

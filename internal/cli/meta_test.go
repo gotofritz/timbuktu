@@ -214,3 +214,80 @@ func TestMetaCommand_missingArgs(t *testing.T) {
 		t.Error("expected error: meta list with no path")
 	}
 }
+
+// seedMetaDoc creates a document to hang metadata off.
+func seedMetaDoc(t *testing.T, docs *storage.DocumentRepo, path string) *storage.Document {
+	t.Helper()
+	doc := &storage.Document{Path: path, SHA256: "aa", Title: "t", MimeType: "text/markdown"}
+	if err := docs.Create(context.Background(), doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	return doc
+}
+
+// Metadata holds one value per key, so a repeated key silently threw the first
+// value away — while the output confirmed both as set.
+func TestRunMetaSet_rejectsARepeatedKey(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	meta := storage.NewMetadataRepo(db)
+	ctx := context.Background()
+	doc := seedMetaDoc(t, docs, "/tmp/soup.md")
+
+	var out bytes.Buffer
+	err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/soup.md", []string{"tag=food", "tag=recipe"})
+	if err == nil {
+		t.Fatal("expected an error for a repeated key")
+	}
+	if !strings.Contains(err.Error(), "tag") {
+		t.Errorf("error should name the repeated key, got %q", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("nothing should be reported as set, got %q", out.String())
+	}
+	if _, err := meta.Get(ctx, doc.ID, "tag"); err == nil {
+		t.Error("no value should have been written for the rejected key")
+	}
+}
+
+// A bad pair anywhere rejects the lot: applying the pairs before it and then
+// failing leaves the document half-updated with no way to tell.
+func TestRunMetaSet_writesNothingWhenALaterPairIsInvalid(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	meta := storage.NewMetadataRepo(db)
+	ctx := context.Background()
+	doc := seedMetaDoc(t, docs, "/tmp/x.md")
+
+	var out bytes.Buffer
+	err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/x.md", []string{"tag=design", "noequals"})
+	if err == nil {
+		t.Fatal("expected an error for the malformed pair")
+	}
+	if _, err := meta.Get(ctx, doc.ID, "tag"); err == nil {
+		t.Error("the valid pair before the bad one should not have been written")
+	}
+	if out.Len() != 0 {
+		t.Errorf("nothing should be reported as set, got %q", out.String())
+	}
+}
+
+// Distinct keys are unaffected.
+func TestRunMetaSet_multipleDistinctKeys(t *testing.T) {
+	db := openMemoryDB(t)
+	docs := storage.NewDocumentRepo(db)
+	meta := storage.NewMetadataRepo(db)
+	ctx := context.Background()
+	doc := seedMetaDoc(t, docs, "/tmp/y.md")
+
+	var out bytes.Buffer
+	if err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/y.md",
+		[]string{"tag=design", "author=Alice", "project=timbuktu"}); err != nil {
+		t.Fatalf("RunMetaSet: %v", err)
+	}
+	for key, want := range map[string]string{"tag": "design", "author": "Alice", "project": "timbuktu"} {
+		if got, err := meta.Get(ctx, doc.ID, key); err != nil || got != want {
+			t.Errorf("%s = %q (err %v), want %q", key, got, err, want)
+		}
+	}
+}

@@ -89,7 +89,7 @@ func writeExtractedFile(t *testing.T, extractedDir, sha, text string) {
 	if err := os.MkdirAll(extractedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(extractedDir, sha+".txt")
+	p := filepath.Join(extractedDir, preprocess.CacheName(sha))
 	if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
