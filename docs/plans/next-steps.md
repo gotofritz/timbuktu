@@ -53,7 +53,7 @@ scattered across it; the matrix above points at them by group.
 
 ## Quick Wins — high impact, low effort
 
-1. **Database management / seamless switching.** *(user-requested)*
+1. [#140](../../../../issues/140) **Database management / seamless switching.** *(user-requested)*
    Today `database.path` is a single value in `config.yaml`. Add first-class
    support for multiple knowledge bases ("collections" / "workspaces"): a
    `--db <path>` global flag and/or `TBUK_DB` env var overriding config, plus
