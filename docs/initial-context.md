@@ -24,6 +24,7 @@ internal/
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5; parseQuery (phrases, exclusions)
   searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
+  squeeze/          Text(), Chunks() — lossy prose compaction of retrieved text, code left byte-exact
   export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract() — a tar snapshot's raw sources + its database as a manifest; ignores config, cache, prompts
 ```
@@ -86,7 +87,7 @@ the "DB switching" roadmap item — a whole-collection switch rather than a sing
 ```go
 type Config struct {
     Database  DatabaseConfig   // path
-    LLM       LLMConfig        // provider, model, max_tokens, base_url
+    LLM       LLMConfig        // provider, model, max_tokens, context_tokens, base_url
     Embedding EmbeddingConfig  // provider, model, dimension, base_url
     Chunking  ChunkingConfig   // size (tokens), overlap (tokens)
 }
@@ -94,7 +95,7 @@ type Config struct {
 
 Defaults: llm.provider=`mlx`, embedding.provider=`mlx`, dimension=768, chunk size=400, overlap=50. The `mlx` provider targets any OpenAI-compatible server fronting MLX models on Apple silicon (mlx_lm.server, mlx-openai-server, LM Studio, nativ); `llama` (llama.cpp) remains the cross-platform local alternative. Chunk size kept below llama.cpp default ubatch size (512 tokens) to avoid HTTP 500 errors from the embedding server. To use larger chunks, raise both `-b` and `-ub` at server startup (they must match; e.g. `llama-server -b 1024 -ub 1024 …`).
 
-`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, empty db path, an unknown llm/embedding provider, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
+`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, a context_tokens that does not exceed max_tokens, empty db path, an unknown llm/embedding provider, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
 
 ---
 
@@ -593,9 +594,37 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
+Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
+
+#### Context budget
+
+`retrieval.max_tokens` bounds the retrieved chunks; the context budget bounds
+the *whole* prompt — system + template + chunks + question — so an oversized
+prompt is caught locally instead of by the provider (HTTP 4xx "context length
+exceeded"). The window is `llm.context_tokens` (0 = guard off), overridable per
+template by a top-level `context_tokens` in `manifest.yaml`; what it leaves for
+the prompt is the window minus the reply's budget (`manifest.max_tokens`, else
+`llm.max_tokens`). `Config.Validate` rejects a config window that does not
+exceed `llm.max_tokens`, and `tbuk doctor` reports both numbers plus any
+template whose own `max_tokens` swallows its window.
+
+```go
+func WithContextBudget(window, outputReserve int) AskOption
+func fitToContext(render renderFn, chunks []retrieval.RetrievedChunk, budget int) (fittedPrompt, error)
+```
+
+`fitToContext` renders, measures with `chunking.CountTokens` (chars/4, the same
+estimator as the chunker — approximate by design, see #120), and climbs a
+ladder while over budget: **compact** the retrieved text via `internal/squeeze`
+(whitespace and filler words out, fenced/indented code byte-exact), then
+**drop** trailing — lowest-ranked — chunks one at a time. Compaction comes
+first because text the model can still read beats a passage it can no longer
+cite. Each rung warns on the diagnostics stream; a prompt that still overflows
+with no chunks left is an error naming the knobs, and `--require-context`
+aborts when the guard leaves no context at all. Citations reflect what
+survived, so the `Sources:` footer never lists a passage the model did not see.
 
 #### Output normalization
 

@@ -862,3 +862,285 @@ func TestRunAsk_normalizedToNothing_doesNotWarn(t *testing.T) {
 		t.Errorf("must not warn when the model did produce text, got: %q", errBuf.String())
 	}
 }
+
+// --- context-window budget guard (#141) -------------------------------------
+
+// buildTemplateWith writes a one-off template and loads it.
+func buildTemplateWith(t *testing.T, manifest, system, user string) *prompts.Template {
+	t.Helper()
+	dir := t.TempDir()
+	tmplDir := filepath.Join(dir, "qa")
+	if err := os.MkdirAll(tmplDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   system,
+		"user.tmpl":     user,
+	} {
+		if err := os.WriteFile(filepath.Join(tmplDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl, err := prompts.NewTemplateDir(dir).Load("qa")
+	if err != nil {
+		t.Fatalf("load template: %v", err)
+	}
+	return tmpl
+}
+
+// guardTemplate is the fixture the budget tests share: no retrieval trim of its
+// own, so the only thing bounding the prompt is the context guard.
+func guardTemplate(t *testing.T) *prompts.Template {
+	t.Helper()
+	return buildTemplateWith(t,
+		"name: qa\nretrieval:\n  top_k: 5\noutput: text\n",
+		"sys",
+		"{{ .Question }}{{ range .Chunks }}\n{{ .Citation }}\n{{ .Text }}{{ end }}")
+}
+
+// guardChunks are three chunks of prose that squeezes down by a third: 240
+// bytes each raw (~60 tokens), 159 squeezed (~40).
+func guardChunks() []retrieval.RetrievedChunk {
+	body := strings.Repeat("the cat sat on the mat. ", 10)
+	return []retrieval.RetrievedChunk{
+		{Citation: "/a.md §0", Text: body},
+		{Citation: "/b.md §1", Text: body},
+		{Citation: "/c.md §2", Text: body},
+	}
+}
+
+// recordingChat captures the messages sent to the model.
+func recordingChat(got *[]llm.Message) func(context.Context, []llm.Message, ...llm.CallOptions) (<-chan llm.Token, error) {
+	return func(_ context.Context, msgs []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		*got = msgs
+		ch := make(chan llm.Token, 2)
+		ch <- llm.Token{Text: "ok"}
+		ch <- llm.Token{Done: true}
+		close(ch)
+		return ch, nil
+	}
+}
+
+// refusingChat fails the test if the model is called at all.
+func refusingChat(t *testing.T) func(context.Context, []llm.Message, ...llm.CallOptions) (<-chan llm.Token, error) {
+	t.Helper()
+	return func(_ context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		t.Error("model was called although the prompt does not fit the context window")
+		ch := make(chan llm.Token, 1)
+		ch <- llm.Token{Done: true}
+		close(ch)
+		return ch, nil
+	}
+}
+
+// Without a window there is no guard: an oversized prompt goes out untouched,
+// exactly as it did before the guard existed.
+func TestRunAsk_contextGuardOffWithoutAWindow(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		guardTemplate(t), "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(0, 50))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(msgs[1].Content, "the cat sat on the mat") {
+		t.Errorf("chunk text should reach the model verbatim, got: %q", msgs[1].Content)
+	}
+	for _, cit := range []string{"/a.md §0", "/b.md §1", "/c.md §2"} {
+		if !strings.Contains(out.String(), cit) {
+			t.Errorf("want %s cited, got: %q", cit, out.String())
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("no guard, so no warning; got: %q", errOut.String())
+	}
+}
+
+// A prompt that fits is sent exactly as rendered — the guard is invisible.
+func TestRunAsk_contextGuardLeavesAFittingPromptAlone(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		guardTemplate(t), "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(10_000, 50))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(msgs[1].Content, "the cat sat on the mat") {
+		t.Errorf("prompt should be untouched, got: %q", msgs[1].Content)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("want no warning for a prompt that fits, got: %q", errOut.String())
+	}
+}
+
+// Over budget, the retrieved text is compacted before any passage is dropped:
+// every chunk still reaches the model and is still cited.
+func TestRunAsk_contextGuardSqueezesBeforeDropping(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	// budget = 200 − 50 = 150 tokens: ~190 raw, ~129 once compacted.
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		guardTemplate(t), "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(200, 50))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if strings.Contains(msgs[1].Content, "the cat sat on the mat") {
+		t.Errorf("chunk text should have been compacted, got: %q", msgs[1].Content)
+	}
+	if !strings.Contains(msgs[1].Content, "cat sat on mat.") {
+		t.Errorf("compacted text should still carry the facts, got: %q", msgs[1].Content)
+	}
+	for _, cit := range []string{"/a.md §0", "/b.md §1", "/c.md §2"} {
+		if !strings.Contains(out.String(), cit) {
+			t.Errorf("want %s still cited, got: %q", cit, out.String())
+		}
+	}
+	if !strings.Contains(errOut.String(), "compacted") {
+		t.Errorf("want a warning naming the compaction, got: %q", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "dropped") {
+		t.Errorf("nothing needed dropping, got: %q", errOut.String())
+	}
+}
+
+// When compaction is not enough, the lowest-ranked chunks go, and the warning
+// says how many.
+func TestRunAsk_contextGuardDropsChunksWhenCompactionIsNotEnough(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	// budget = 150 − 50 = 100 tokens: ~129 compacted with three chunks, ~86
+	// with two.
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		guardTemplate(t), "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(150, 50))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "dropped 1 of 3") {
+		t.Errorf("want a warning naming what was dropped, got: %q", errOut.String())
+	}
+	if strings.Contains(out.String(), "/c.md §2") {
+		t.Errorf("dropped chunk must not be cited, got: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "/a.md §0") || !strings.Contains(out.String(), "/b.md §1") {
+		t.Errorf("want the surviving chunks cited, got: %q", out.String())
+	}
+}
+
+// A prompt that cannot fit even with no context at all fails here, with the
+// knobs named — not at the provider, as an HTTP 4xx.
+func TestRunAsk_contextGuardErrorsWhenNothingFits(t *testing.T) {
+	var out, errOut bytes.Buffer
+
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), refusingChat(t),
+		guardTemplate(t), strings.Repeat("q", 400), nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(60, 50))
+	if err == nil {
+		t.Fatal("want an error when even a context-free prompt overflows")
+	}
+	if !strings.Contains(err.Error(), "context_tokens") {
+		t.Errorf("error should name the knob to raise, got: %v", err)
+	}
+}
+
+// A template pinned to a wide-window model overrides the config's window.
+func TestRunAsk_contextGuardManifestWindowWins(t *testing.T) {
+	tmpl := buildTemplateWith(t,
+		"name: qa\ncontext_tokens: 100000\nretrieval:\n  top_k: 5\noutput: text\n",
+		"sys",
+		"{{ .Question }}{{ range .Chunks }}\n{{ .Citation }}\n{{ .Text }}{{ end }}")
+
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		tmpl, "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(60, 50))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(msgs[1].Content, "the cat sat on the mat") {
+		t.Errorf("manifest window should win, leaving the prompt untouched: %q", msgs[1].Content)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("want no warning, got: %q", errOut.String())
+	}
+}
+
+// The template's own output budget is what the window has to hold back for,
+// when it declares one.
+func TestRunAsk_contextGuardReservesManifestMaxTokens(t *testing.T) {
+	tmpl := buildTemplateWith(t,
+		"name: qa\nmax_tokens: 50\nretrieval:\n  top_k: 5\noutput: text\n",
+		"sys",
+		"{{ .Question }}{{ range .Chunks }}\n{{ .Citation }}\n{{ .Text }}{{ end }}")
+
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	// The option's reserve of 1 is ignored: max_tokens 50 leaves a 100-token
+	// budget out of 150, so the text is compacted.
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		tmpl, "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(150, 1))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "dropped 1 of 3") {
+		t.Errorf("want the manifest's max_tokens reserved, got: %q", errOut.String())
+	}
+}
+
+// --require-context means "answer from my documents or not at all", so a budget
+// that leaves room for none of them aborts rather than answering ungrounded.
+func TestRunAsk_contextGuardRequireContextWhenAllDropped(t *testing.T) {
+	var out, errOut bytes.Buffer
+
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), refusingChat(t),
+		guardTemplate(t), "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithRequireContext(true),
+		cli.WithContextBudget(70, 50))
+	if err == nil {
+		t.Fatal("want an error when the guard leaves no context and --require-context is set")
+	}
+	if !strings.Contains(err.Error(), "require-context") {
+		t.Errorf("error should name the flag that caused the abort, got: %v", err)
+	}
+}
+
+// Without --require-context the same budget answers anyway, warning that every
+// retrieved passage was dropped.
+func TestRunAsk_contextGuardDropsEverythingAndWarns(t *testing.T) {
+	var out, errOut bytes.Buffer
+	var msgs []llm.Message
+
+	err := cli.RunAsk(context.Background(), &out, mockRetrieve(guardChunks(), nil), recordingChat(&msgs),
+		guardTemplate(t), "q", nil, 0, false,
+		cli.WithErrOut(&errOut),
+		cli.WithContextBudget(70, 50))
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "dropped 3 of 3") {
+		t.Errorf("want a warning that everything was dropped, got: %q", errOut.String())
+	}
+	if strings.Contains(out.String(), "Sources:") {
+		t.Errorf("nothing survived, so nothing to cite, got: %q", out.String())
+	}
+}

@@ -12,8 +12,10 @@ The items below are therefore refinements, not repairs.
 
 ## Must have
 
-### M1. Context-window budget guard on `tbuk ask` [#141](../../../../issues/141)
+### M1. Context-window budget guard on `tbuk ask` [#141](../../../../issues/141) — ✅ DONE
 `ask` assembles retrieved chunks into the prompt with no check against the model's context window; an oversized prompt only fails when the provider rejects it (HTTP 4xx, already listed in README troubleshooting). Add a token budget for the rendered prompt (config or manifest driven, building on the existing `retrieval.max_tokens` trimming) so the failure is prevented locally instead of diagnosed remotely. Already identified as a Quick Win in `next-steps.md`; promoted here because it affects correctness of the core command.
+
+**Shipped:** `llm.context_tokens` (default 8192, 0 = off) with a per-template `context_tokens` override bounds the whole rendered prompt against the window minus the reply's `max_tokens`. Over budget, `ask` compacts the retrieved text (`internal/squeeze`), then drops the lowest-ranked chunks, warning at each step, and fails locally — naming the knobs — when even a chunk-free prompt overflows. `tbuk doctor` reports the budget. Subplan: [`2026-09-05-2317-c9baa8f-33-context-guard.md`](../archive/2026-09-05-2317-c9baa8f-33-context-guard.md).
 
 ### M2. Scheduled vulnerability scan [#119](../../../../issues/119)
 `govulncheck` runs only on push/PR. In quiet periods, newly disclosed CVEs in shipped dependencies (`ledongthuc/pdf` parses untrusted input; `x/net`; `modernc.org/sqlite`) go undetected until the next commit. Add a weekly `schedule:` trigger to the CI workflow's govulncheck job (or a small dedicated workflow) reusing the existing gate policy.
@@ -41,8 +43,10 @@ Cobra generates bash/zsh/fish completions nearly for free. Expose `tbuk completi
 ### C2. More extractors (docx, epub, source code) [#124](../../../../issues/124)
 Supported inputs stop at `.md`/`.txt`/`.pdf`/`.html`. docx and epub are common personal-knowledge formats; both have small pure-Go parsing paths. Fits the existing `Extractor` interface without architectural change. (Roadmap Quick Win; sequencing after the in-flight Source abstraction, subplan 18, may be natural.)
 
-### C3. Document base_url and max_tokens in the sample config [#125](../../../../issues/125)
+### C3. Document base_url and max_tokens in the sample config [#125](../../../../issues/125) — ✅ DONE
 The README's sample `config.yaml` omits `llm.base_url`, `llm.max_tokens`, and `embedding.base_url`, though troubleshooting refers to them. Add them (commented) to the sample and the `tbuk init` default YAML so users don't have to discover keys from docs prose.
+
+**Shipped:** all three keys are in the README sample, commented with their defaults, and the troubleshooting row that names `base_url` points back at it. The `tbuk init` default YAML already emitted them (`defaultConfigNode` head comments), so only the README was behind.
 
 ### C4. Retrieval quality evaluation harness [#126](../../../../issues/126)
 A tiny eval command (fixed query→expected-doc pairs over a fixture corpus, reporting hit-rate/MRR) would let chunking/RRF/estimator changes (e.g. S1) be tuned with evidence instead of anecdote. Deliberately small; the full retrieval-quality cluster stays in `next-steps.md`.

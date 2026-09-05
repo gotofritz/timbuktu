@@ -236,11 +236,16 @@ database:
 llm:
   provider: mlx      # mlx | llama | ollama | claude | openai
   model: ""          # provider default when empty; mlx: HF repo id served
+  max_tokens: 4096   # output budget for one answer
+  base_url: ""       # empty = provider default: mlx/llama http://localhost:8080,
+                     # ollama :11434, claude api.anthropic.com, openai api.openai.com
+  context_tokens: 8192   # the model's whole window (prompt + reply); 0 disables the ask budget guard
 
 embedding:
   provider: mlx      # mlx | llama | ollama | openai
   model: ""
   dimension: 768
+  base_url: ""       # empty = provider default (see llm above)
 
 chunking:
   size: 400          # tokens (approximated as chars/4); keep ≤ llama.cpp batch size (default 512)
@@ -454,7 +459,10 @@ them with `tbuk meta list <path>`.
 A template's `manifest.yaml` drives the LLM call: `model`, `temperature`, and
 `max_tokens` are passed through to the provider on every `tbuk ask`. Omit
 `temperature` to use the provider default; set `temperature: 0` for a
-deterministic answer (an explicit `0` is honored, not treated as "unset").
+deterministic answer (an explicit `0` is honored, not treated as "unset"). A
+template that pins a `model` with a different context window can pin the window
+too, with a top-level `context_tokens:` — it overrides `llm.context_tokens` for
+that template (see [Context budget](#context-budget)).
 
 A template can also declare how its output should be repaired. Models hold a
 requested format for a while and then slide back into markdown lists, so
@@ -484,6 +492,38 @@ When a template declares `records`, its output is meant for another program, so
 `tbuk ask` keeps stdout to the records alone — the `Sources:` footer is printed
 on stderr instead of being dropped, which means `tbuk ask -t anki … > cards.txt`
 gives a clean file while the citations still show up in the terminal.
+
+### Context budget
+
+`tbuk ask` bounds the whole prompt — system prompt, template, retrieved chunks
+and question — against the model's context window before calling the provider,
+so an oversized prompt fails locally with an actionable message rather than
+remotely as `HTTP 4xx: context length exceeded`.
+
+The window is `llm.context_tokens` (default `8192`; `0` turns the guard off),
+overridable per template by a top-level `context_tokens` in `manifest.yaml`.
+What is left for the prompt is the window minus the answer's budget — the
+template's `max_tokens`, else `llm.max_tokens` — so the reply always has room.
+Token counts are the same chars/4 estimate the chunker uses: approximate, so
+leave a little headroom rather than setting the window to the model's exact
+maximum.
+
+Over budget, `ask` climbs a ladder and says on stderr what it did:
+
+1. **compacts the retrieved text** — repeated whitespace and blank lines
+   collapsed, English articles and filler words dropped. Fenced and indented
+   code, identifiers, URLs and inline code spans are left byte-exact, and the
+   question and template are never touched.
+2. **drops the lowest-ranked chunks**, one at a time, naming how many of how
+   many went. `Sources:` then lists only what the model actually saw.
+3. **fails** — if even a chunk-free prompt does not fit, before any HTTP call,
+   naming the knobs to change.
+
+Compaction comes before dropping because text the model can still read beats a
+passage it can no longer cite. With `--require-context`, a budget that leaves
+room for no chunks at all aborts instead of answering from the model's priors.
+`tbuk doctor` reports the window, what it leaves for the prompt, and any
+template whose own `max_tokens` swallows it.
 
 ### Encoding code for search
 
@@ -601,9 +641,11 @@ text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `tbuk` command not found after install | Go bin dir not in PATH | Add `export PATH="$PATH:$(go env GOPATH)/bin"` to shell profile and restart terminal |
-| `tbuk doctor` shows LLM or embedding unreachable | Local server (MLX or llama.cpp) not running, or wrong port | Start your MLX server / llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` |
+| `tbuk doctor` shows LLM or embedding unreachable | Local server (MLX or llama.cpp) not running, or wrong port | Start your MLX server / llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` (every key is in the sample under [Configuration](#configuration)) |
 | `tbuk doctor` shows `hosted API — not probed` | Provider is `claude`/`openai` (no `/health` endpoint) | Expected — hosted APIs aren't probed; set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and use `tbuk ask` to verify connectivity |
-| `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, context too long, rate limit) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens` |
+| `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, rate limit; a too-long prompt is normally caught locally first) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens`. If it *is* a context-length rejection, `llm.context_tokens` is set higher than the model's real window (or `0`) |
+| `tbuk ask` warns `compacted the retrieved text` or `dropped N of M retrieved chunks` | The rendered prompt exceeded `llm.context_tokens` minus the answer's `max_tokens` | Expected when the budget is tight — raise `llm.context_tokens` to your model's real window, lower `--top`, or lower the template's `max_tokens` |
+| `tbuk ask` fails with `prompt needs ~N tokens but only M are available` | Even a prompt with no retrieved context does not fit the budget | Shorten the question, raise `llm.context_tokens`, or lower the template's `max_tokens`; `tbuk doctor` shows both numbers |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
 | `tbuk ask` returns irrelevant or vague answers | Low retrieval quality or document not ingested | Run `tbuk search <query>` to inspect retrieved chunks; run `tbuk update <path>` if the file changed |
 | `tbuk ask` is very slow | Large `--top` value, slow model, or large chunks | Reduce `--top`; use a faster LLM model; reduce `chunking.size` in config. Press `Ctrl-C` to cancel — retrieval and streaming are interrupted cleanly |

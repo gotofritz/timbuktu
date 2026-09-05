@@ -651,3 +651,116 @@ func TestRunDoctorTo_llamaStillProbesHealth(t *testing.T) {
 		t.Errorf("expected /health probe for llama, got requests: %v", paths)
 	}
 }
+
+// ── context budget (#141) ─────────────────────────────────────────────────────
+
+// writeTemplateAt drops a bare template into a prompts root so doctor can read
+// its budgets.
+func writeTemplateAt(t *testing.T, root, name, manifest string) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for file, content := range map[string]string{
+		"manifest.yaml": manifest,
+		"system.tmpl":   "sys",
+		"user.tmpl":     "{{ .Question }}",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The window and what it leaves for the prompt are the two numbers that decide
+// whether an ask gets trimmed, so doctor reports both.
+func TestRunDoctorTo_reportsContextBudget(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\nmax_tokens: 2048\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+	cfg.LLM.MaxTokens = 4096
+	cfg.LLM.ContextTokens = 8192
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"context", "8192", "4096 for the prompt"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("doctor report missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunDoctorTo_reportsContextGuardOff(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = t.TempDir()
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+	cfg.LLM.ContextTokens = 0
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "guard off") {
+		t.Errorf("want the report to say the guard is off:\n%s", out.String())
+	}
+}
+
+// A template whose own output budget swallows the window can never produce a
+// prompt that fits, so name it before the first ask fails.
+func TestRunDoctorTo_flagsTemplateWithNoPromptRoom(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\nmax_tokens: 512\n")
+	writeTemplateAt(t, promptRoot, "greedy", "name: greedy\nmax_tokens: 9000\n")
+	writeTemplateAt(t, promptRoot, "wide", "name: wide\nmax_tokens: 9000\ncontext_tokens: 131072\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+	cfg.LLM.MaxTokens = 4096
+	cfg.LLM.ContextTokens = 8192
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "greedy") {
+		t.Errorf("want the over-budget template named:\n%s", got)
+	}
+	// wide pins a window of its own that fits its output budget; qa is fine.
+	if strings.Contains(got, "wide:") || strings.Contains(got, "qa:") {
+		t.Errorf("only the over-budget template should be flagged:\n%s", got)
+	}
+}
+
+func TestRunDoctorTo_templateBudgetsOK(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\nmax_tokens: 2048\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "budgets") {
+		t.Errorf("want a template budget line:\n%s", out.String())
+	}
+}

@@ -97,3 +97,26 @@ func TestContextCommand_advertisesOnlyRealFlags(t *testing.T) {
 		t.Fatal("no flags were checked; the line pattern no longer matches the context text")
 	}
 }
+
+// The cheatsheet is what an agent reads before it runs anything, so the budget
+// guard's knobs and its two warnings have to be in it (#141).
+func TestContextCommand_documentsContextBudget(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := cli.New()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"context"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("context command failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"llm.context_tokens",
+		"context_tokens",
+		"compacted",
+		"dropped",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("context output missing %q", want)
+		}
+	}
+}

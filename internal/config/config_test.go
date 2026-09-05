@@ -649,3 +649,117 @@ func TestExportYAML_roundTripReHomesUnderTargetRoot(t *testing.T) {
 		t.Errorf("chunking.size: want 512 (portable), got %d", loaded.Chunking.Size)
 	}
 }
+
+// llm.context_tokens is the model's whole context window — the budget `tbuk ask`
+// fits the rendered prompt into before calling the provider (#141). It defaults
+// to a value every local server can honour; 0 turns the guard off.
+func TestDefaults_contextTokens(t *testing.T) {
+	cfg := config.Defaults()
+	if cfg.LLM.ContextTokens != 8192 {
+		t.Errorf("llm.context_tokens: want 8192, got %d", cfg.LLM.ContextTokens)
+	}
+	if cfg.LLM.ContextTokens <= cfg.LLM.MaxTokens {
+		t.Errorf("default context_tokens (%d) must leave room for a prompt after max_tokens (%d)",
+			cfg.LLM.ContextTokens, cfg.LLM.MaxTokens)
+	}
+}
+
+func TestLoad_contextTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "llm:\n  provider: mlx\n  max_tokens: 2048\n  context_tokens: 32768\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LLM.ContextTokens != 32768 {
+		t.Errorf("llm.context_tokens: want 32768, got %d", cfg.LLM.ContextTokens)
+	}
+}
+
+func TestConfig_Validate_contextTokens(t *testing.T) {
+	base := config.Defaults()
+
+	cases := []struct {
+		name    string
+		mutate  func(*config.Config)
+		wantErr string
+	}{
+		{"zero disables the guard", func(c *config.Config) { c.LLM.ContextTokens = 0 }, ""},
+		{"negative rejected", func(c *config.Config) { c.LLM.ContextTokens = -1 }, "context_tokens"},
+		{
+			"window equal to the output budget leaves no prompt room",
+			func(c *config.Config) { c.LLM.MaxTokens = 4096; c.LLM.ContextTokens = 4096 },
+			"context_tokens",
+		},
+		{
+			"window below the output budget leaves no prompt room",
+			func(c *config.Config) { c.LLM.MaxTokens = 4096; c.LLM.ContextTokens = 2048 },
+			"context_tokens",
+		},
+		{"window above the output budget is fine", func(c *config.Config) { c.LLM.ContextTokens = 131072 }, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("Validate() = %v, want nil", err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("Validate() = nil, want error mentioning %q", tc.wantErr)
+			case tc.wantErr != "" && err != nil && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("Validate() = %v, want it to mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// The key ships in the config `tbuk init` writes, explained, and is backfilled
+// into a config written before the guard existed.
+func TestDefaultYAML_documentsContextTokens(t *testing.T) {
+	yamlStr, err := config.DefaultYAML()
+	if err != nil {
+		t.Fatalf("DefaultYAML: %v", err)
+	}
+	if !strings.Contains(yamlStr, "context_tokens: 8192") {
+		t.Errorf("DefaultYAML missing context_tokens:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "0 disables") {
+		t.Errorf("DefaultYAML should say 0 disables the guard:\n%s", yamlStr)
+	}
+}
+
+func TestFillMissingDefaults_addsContextTokens(t *testing.T) {
+	existing := []byte("llm:\n  provider: mlx\n  max_tokens: 2048\n")
+
+	merged, added, err := config.FillMissingDefaults(existing)
+	if err != nil {
+		t.Fatalf("FillMissingDefaults: %v", err)
+	}
+	have := map[string]bool{}
+	for _, a := range added {
+		have[a] = true
+	}
+	if !have["llm.context_tokens"] {
+		t.Errorf("added = %v, want it to include llm.context_tokens", added)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, merged, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load(merged): %v", err)
+	}
+	if cfg.LLM.ContextTokens != 8192 {
+		t.Errorf("llm.context_tokens = %d, want filled default 8192", cfg.LLM.ContextTokens)
+	}
+	if cfg.LLM.MaxTokens != 2048 {
+		t.Errorf("llm.max_tokens = %d, want preserved 2048", cfg.LLM.MaxTokens)
+	}
+}
