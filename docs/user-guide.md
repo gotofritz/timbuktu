@@ -492,6 +492,8 @@ llm:
   provider: mlx      # mlx | llama | ollama | claude | openai
   model: ""          # mlx: the HF repo id served; llama.cpp: empty = loaded model
   base_url: http://localhost:8080
+  max_tokens: 4096      # how long an answer may get
+  context_tokens: 8192  # how much the model can hold at once, question and answer together
 
 embedding:
   provider: mlx      # mlx | llama | ollama | openai
@@ -531,6 +533,14 @@ keeps in flight at once for a single file. The default of `4` overlaps network
 round-trips so large ingests finish faster. Lower it to `1` (fully serial) if
 your embedding server is rate-limited or easily overloaded; raising it past a
 handful rarely helps and can trip provider rate limits. Must be at least `1`.
+
+`llm.context_tokens` is the size of the model's memory for one exchange — the
+question, the passages retrieved for it, and the answer, all together. Timbuktu
+keeps the prompt inside it (see [Fitting the model's context
+window](#fitting-the-models-context-window) in section 9). The default of
+`8192` suits most local models; set it to the window your model actually has —
+larger models are often 32768 or more — and you get more of your notes in every
+answer. Set it to `0` to switch the check off entirely.
 
 **Settings you set once, per backend** (see [section 4](#4-before-you-start)
 for the three backend paths):
@@ -796,6 +806,43 @@ whose `max_tokens` is too small: it is the model's output budget, and a model
 that reasons before it writes can spend all of it and emit no answer. Raise
 `max_tokens` in `~/.tbuk/prompts/<template>/manifest.yaml`.
 
+### Fitting the model's context window
+
+A model can only hold so much at once. Everything Timbuktu sends — the
+instructions, your question, and the passages it retrieved — has to fit
+alongside the answer it still has to write. That size is `llm.context_tokens`
+in `~/.tbuk/config.yaml`, and the answer's share of it is `max_tokens`.
+
+Before calling the model, `tbuk ask` checks the prompt against that budget. If
+it is too big, it says so on stderr and makes room in two steps:
+
+```
+warning: the prompt exceeds the model's context budget — compacted the retrieved text …
+warning: still over the context budget after compacting — dropped 2 of 10 retrieved chunks …
+```
+
+**Compacting** squeezes the retrieved passages — repeated spaces and blank
+lines go, and so do words like "the", "a", "really", "basically" that a model
+can read straight past. Code, file paths, URLs and anything in backticks are
+left exactly as they were, and your question is never touched. **Dropping**
+removes the weakest matches, lowest-scoring first; the `Sources:` list then
+shows only the passages the model actually saw.
+
+If even a question with no passages at all would not fit, `ask` stops before
+calling the model:
+
+```
+prompt needs ~2100 tokens but only 1000 are available for it, even with no
+retrieved context: shorten the question, or raise llm.context_tokens …
+```
+
+Seeing these warnings often means one of three things: `llm.context_tokens` is
+lower than your model's real window (raise it), `--top` is asking for more
+passages than fit (lower it), or the template's `max_tokens` is reserving too
+much for the answer. `tbuk doctor` prints the window and how much of it is left
+for the prompt. With `--require-context`, a budget too small for even one
+passage aborts instead of answering from the model's general knowledge.
+
 ### Building up from simple to specific
 
 **Vague questions** work, but give vague answers:
@@ -830,7 +877,9 @@ tbuk ask --top 10 "What do I know about machine learning?"
 
 More chunks = more context = better synthesis, but also slower and uses more of
 the model's capacity. Start with the default and increase only if answers feel
-incomplete.
+incomplete. Ask for more than the context window holds and the extra passages
+are compacted, then dropped again, with a warning saying so — see [Fitting the
+model's context window](#fitting-the-models-context-window).
 
 ### Saving output to a file
 
@@ -1066,6 +1115,12 @@ Now use it:
 ```bash
 tbuk ask --template actions "What are all the things I need to do this week?"
 ```
+
+A manifest may also set `max_tokens` (how long the answer may get) and
+`context_tokens` (the window of the model this template runs on, overriding
+`llm.context_tokens` in the config — useful when the template pins a `model:`
+of its own with a bigger or smaller window). See [Fitting the model's context
+window](#fitting-the-models-context-window).
 
 ### Passing variables to templates
 

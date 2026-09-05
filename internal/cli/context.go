@@ -69,6 +69,8 @@ database.path          SQLite file location
 llm.provider           mlx | llama | ollama | claude | openai (default mlx)
 llm.base_url           local server URL (default http://localhost:8080; ollama :11434)
 llm.model              model name (required for claude/openai; HF repo id for mlx)
+llm.max_tokens         output budget per answer (default 4096)
+llm.context_tokens     model's whole window, prompt + reply (default 8192; 0 disables the guard)
 embedding.provider     mlx | llama | ollama | openai  (claude has no embedding API)
 embedding.base_url     embedding server URL
 embedding.dimension    must match the loaded model (default 768)
@@ -85,6 +87,14 @@ ingest.embed_concurrency  parallel embed requests per file (default 4)
   or embedding.model changed. Fix: tbuk reindex (re-embeds from raw/, no originals needed).
 - tbuk ask answers from model general knowledge if retrieval finds nothing.
   Use --require-context to abort instead.
+- tbuk ask fits the whole prompt (system + template + chunks + question) into
+  llm.context_tokens minus the answer's max_tokens, before calling the model.
+  Over budget it first says "compacted the retrieved text" (whitespace and
+  filler words squeezed out), then "dropped N of M retrieved chunks", and if
+  even a context-free prompt overflows it fails locally instead of calling.
+  Fix: raise llm.context_tokens to your model's real window, lower --top, or
+  lower the template's max_tokens. A template may pin its own window with a
+  top-level context_tokens in manifest.yaml.
 - Claude provider: set ANTHROPIC_API_KEY; embedding must still be local (llama/ollama).
 - tbuk doctor "tokenizer: ✗ ...": the index was built under an earlier
   tokenizer. "default unicode61" splits every term at _; "tokenchars '_-'"

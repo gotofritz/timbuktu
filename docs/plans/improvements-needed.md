@@ -12,8 +12,10 @@ The items below are therefore refinements, not repairs.
 
 ## Must have
 
-### M1. Context-window budget guard on `tbuk ask` [#141](../../../../issues/141)
+### M1. Context-window budget guard on `tbuk ask` [#141](../../../../issues/141) — ✅ DONE
 `ask` assembles retrieved chunks into the prompt with no check against the model's context window; an oversized prompt only fails when the provider rejects it (HTTP 4xx, already listed in README troubleshooting). Add a token budget for the rendered prompt (config or manifest driven, building on the existing `retrieval.max_tokens` trimming) so the failure is prevented locally instead of diagnosed remotely. Already identified as a Quick Win in `next-steps.md`; promoted here because it affects correctness of the core command.
+
+**Shipped:** `llm.context_tokens` (default 8192, 0 = off) with a per-template `context_tokens` override bounds the whole rendered prompt against the window minus the reply's `max_tokens`. Over budget, `ask` compacts the retrieved text (`internal/squeeze`), then drops the lowest-ranked chunks, warning at each step, and fails locally — naming the knobs — when even a chunk-free prompt overflows. `tbuk doctor` reports the budget. Subplan: `33-context-guard.md`.
 
 ### M2. Scheduled vulnerability scan [#119](../../../../issues/119)
 `govulncheck` runs only on push/PR. In quiet periods, newly disclosed CVEs in shipped dependencies (`ledongthuc/pdf` parses untrusted input; `x/net`; `modernc.org/sqlite`) go undetected until the next commit. Add a weekly `schedule:` trigger to the CI workflow's govulncheck job (or a small dedicated workflow) reusing the existing gate policy.

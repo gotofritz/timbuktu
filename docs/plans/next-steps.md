@@ -65,12 +65,16 @@ scattered across it; the matrix above points at them by group.
    while sharing one prompt/cache root (`--db`/`TBUK_DB`) and named collections
    resolved from config.
 
-2. [#141](../../../../issues/141) **Context-window budget guard on `ask`.** *(user-requested: context management)*
+2. ✅ [#141](../../../../issues/141) **Context-window budget guard on `ask`.** *(user-requested: context management)*
    `retrieval.max_tokens` already trims retrieved chunks, but nothing bounds
    the *whole* prompt (system + template + chunks + question) against the
    model's context window. Add a single budget check that trims/warns before
    the call so `ask` never fails with "context length exceeded". Low effort,
-   removes a sharp edge.
+   removes a sharp edge. *Shipped:* `llm.context_tokens` (with a per-template
+   `context_tokens` override) bounds the rendered prompt; over budget `ask`
+   compacts the retrieved text (`internal/squeeze`), then drops the
+   lowest-ranked chunks, then fails locally. Subplan:
+   **`33-context-guard.md`**.
 
 3. ✅ **Export / import / backup.** `tbuk export <file>` and `tbuk import <file>` to snapshot a knowledge base (DB + extracted cache, or a portable dump). High value for a local-first tool; mostly plumbing over existing repos.
 
