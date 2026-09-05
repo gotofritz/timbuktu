@@ -407,6 +407,8 @@ Preprocessing
 
 Search
   fts5:        ✓ available
+  indexed:     ✓ search_text (reduced encoding)
+  tokenizer:   ✓ unicode61 tokenchars '_-' (exact terms, phrases, exclusions)
   vector:      ✓ available
   hybrid:      ✓ available
 
@@ -869,6 +871,53 @@ results are ranked by BM25 — so a document using a rare word you asked for bea
 one that only shares the ordinary ones. Ask for more words to get a better
 ranking, not a narrower filter.
 
+### Asking for exactly what you mean
+
+`tbuk search` reads your query as an expression, so you can be more precise than
+"any of these words". (`tbuk ask` does not — it takes a question, and a question
+has no operators in it.)
+
+**An exact term.** Punctuation inside a word is part of the word, so
+`main_consumption` and `check-ci` are single terms:
+
+```bash
+tbuk search 'main_consumption'   # only notes with the underscore form
+tbuk search 'main consumption'   # notes with either form
+```
+
+Typing the punctuation is how you say you meant it. Type the words apart and
+you get both.
+
+**A phrase.** Wrap it in double quotes to require the words next to each other,
+in that order:
+
+```bash
+tbuk search '"main consumption"'       # not "consumption of the main supply"
+tbuk search '"the main consumption"'   # inside quotes, even "the" counts
+```
+
+**An exclusion.** A `-` in front of a word leaves out anything containing it:
+
+```bash
+tbuk search 'main consumption -main_consumption'   # the words apart, not the identifier
+tbuk search 'meter -deprecated'
+```
+
+The dash only means "exclude" at the start of a word, so `check-ci` still
+searches for that term. An exclusion needs something to exclude *from*: a query
+of nothing but exclusions returns no results.
+
+Two things worth knowing:
+
+- In the default hybrid mode an exclusion is honoured throughout — a chunk you
+  excluded will not come back through the meaning-based half. In `--mode vector`
+  there is nothing to exclude against, so the word is simply dropped from the
+  query.
+- Quoting a phrase does not, on its own, rule out a note whose code mentions the
+  identifier: the index stores `main_consumption` alongside the words it is made
+  of, so both are there and adjacent. Add `-main_consumption` when you want only
+  the prose.
+
 ### Finding notes that contain code
 
 Notes about software are half prose and half code, and the code is mostly
@@ -891,6 +940,12 @@ is found by `readMeter`, by `read meter`, by `read the meter` (the comment), and
 by `read holding` (the error string) — but not by `func` or `return`. The same
 goes for an identifier in an inline span in ordinary prose: a note mentioning
 `` `main_consumption` `` answers both `main_consumption` and `main consumption`.
+
+That second reach comes from the split words being stored, not from the search
+taking your query apart — so it works for an identifier in a fenced block or in
+`` `backticks` ``, and not for one typed bare in a sentence. A bare
+`main_consumption` in prose is found by typing it exactly. Backticks are the
+usual way to write it anyway, and they are what makes it searchable both ways.
 
 What you get *back* is the chunk as you wrote it, code fences and all. Only the
 index and the meaning-fingerprints see the reduced form; nothing is lost from
@@ -1196,6 +1251,29 @@ and rebuilds the search index, so search keeps working straight away. The second
 re-reads and re-fingerprints your documents, which is what actually applies the
 new encoding. Until the first has run, `tbuk ingest` will fail on a missing
 column.
+
+How the search index splits words is the third. It used to break every word at
+`_` and `-`, which made `main_consumption` and `main consumption` the same
+thing: an exact term, a phrase and an exclusion all answered as if you had never
+typed the punctuation (see [Asking for exactly what you mean](#asking-for-exactly-what-you-mean)).
+Nothing failed — the answers were just wrong. `tbuk doctor` says so under
+**Search**:
+
+```
+Search
+  fts5:      ✓ available
+  indexed:   ✓ search_text (reduced encoding)
+  tokenizer: ✗ default unicode61 — '_' and '-' split terms; run scripts/retokenize-fts/
+```
+
+From a checkout of the source:
+
+```bash
+go run ./scripts/retokenize-fts ~/.tbuk/tbuk.sqlite   # your database path
+```
+
+That one takes seconds and needs no `tbuk reindex`: it rebuilds the index from
+what is already stored and leaves your documents and fingerprints alone.
 
 ### Backing up or moving your knowledge base
 
@@ -1511,7 +1589,10 @@ tbuk ingest --force ~/notes/
 
    If the retrieved chunks are irrelevant, the problem is retrieval, not
    generation. Try a different search mode (`--mode vector` or `--mode
-   keyword`) or rephrase your question.
+   keyword`) or rephrase your question. Note that `tbuk search` reads
+   operators and `tbuk ask` does not: if a `-word` or a `"phrase"` in your
+   search changed what came back, that difference is yours, not the retrieval
+   step's.
 
 2. Try `--top 10` to retrieve more chunks:
 

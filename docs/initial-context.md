@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
-  search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
+  search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5; parseQuery (phrases, exclusions)
   searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
   export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract() — a tar snapshot's raw sources + its database as a manifest; ignores config, cache, prompts
@@ -106,7 +106,7 @@ SQLite, WAL mode, foreign keys ON. Pragmas are set in the DSN (`dsnFor`) so ever
 documents   — id, path (UNIQUE), sha256, title, mime_type, raw_path, created_at, updated_at
 chunks      — id, document_id (FK→documents CASCADE), chunk_index, text, search_text, token_count, embedding BLOB
 metadata    — document_id (FK→documents CASCADE), key, value  (PK: document_id+key)
-chunks_fts  — FTS5 virtual table over chunks.search_text, auto-synced via INSERT/DELETE triggers
+chunks_fts  — FTS5 virtual table over chunks.search_text (tokenize="unicode61 tokenchars '_-'"), auto-synced via INSERT/DELETE triggers
 ```
 
 `chunks` holds one segment in two encodings. `text` is the segment as written —
@@ -123,8 +123,10 @@ schema: a knowledge base either does not exist yet or already has this shape,
 so there is no upgrade path to carry. `schemaSQL` is therefore edited in place
 rather than followed by a versioned migration, and an existing knowledge base is
 brought forward by a throwaway script under `scripts/` (AGENTS.md, "proof of
-concept"); `search_text` was added that way, and `storage.HasSearchTextColumn`
-is how `tbuk doctor` spots a knowledge base that has not had it run. (`schemaVersion` is 2 because an earlier
+concept"); `search_text` and the `chunks_fts` tokenizer were both changed that
+way, and `storage.HasSearchTextColumn` / `storage.HasPunctuationTokenizer` are
+how `tbuk doctor` spots a knowledge base that has not had the matching script
+run. (`schemaVersion` is 2 because an earlier
 build created the same schema in two steps and recorded 2; keeping the number
 lets those knowledge bases open untouched.) Future changes append to the
 `migrations` slice. Each migration's SQL and its version record are applied in
@@ -383,7 +385,12 @@ implemented, and reindex is not gated on them.
 
 Doctor shows document/chunk counts from the live DB. The FTS5 health check is
 gated on database health (its own flag), not on any embedding server's
-reachability, so a down embedder can't mask FTS corruption. Hosted providers
+reachability, so a down embedder can't mask FTS corruption. Its Search section
+also reports the two things about an index that fail silently rather than
+loudly: a missing `chunks.search_text`, and an index still on the default
+tokenizer (`'_'`/`'-'` split terms, so exact terms, phrases and exclusions all
+answer as if the punctuation had not been typed). Each names the script under
+`scripts/` that fixes it. Hosted providers
 (`claude`/`openai`) are not HTTP-probed — they lack the local-server
 `/health` & `/v1/models` endpoints — so doctor prints `hosted API — not probed`
 instead of a misleading status. Local status probes pick their path per
@@ -429,10 +436,17 @@ A chunk that reduces to nothing — all syntax, no names — keeps its text as
 written (`ingest.reduceForSearch`), since an unembedded chunk drops out of the
 knowledge base entirely.
 
-Known limitation: a chunk boundary that cuts a fenced block leaves the tail
-chunks with no opening fence, and those are treated as prose — the chunker
-defects tracked separately (a block cut mid-line, overlap starting mid-word) are
-what make this reachable.
+Known limitations:
+
+- A chunk boundary that cuts a fenced block leaves the tail chunks with no
+  opening fence, and those are treated as prose — the chunker defects tracked
+  separately (a block cut mid-line, overlap starting mid-word) are what make
+  this reachable.
+- Prose passes through unchanged, so an identifier written bare in prose (no
+  backticks, no fence) gets no split form. Since the index no longer breaks it
+  at `_`/`-` either, a loose `main consumption` does not reach it — only the
+  exact term does. Backticking it, which is what markdown notes normally do, is
+  enough.
 
 ---
 
@@ -451,16 +465,17 @@ type SearchResult struct {
 }
 
 type Options struct {
-    TopK     int               // default 5
-    MinScore float64           // skip results below threshold
-    Metadata map[string]string // AND-combined pre-filter (unused by Vector/Keyword)
+    TopK      int               // default 5
+    MinScore  float64           // skip results below threshold
+    Metadata  map[string]string // AND-combined pre-filter (unused by Vector/Keyword)
+    Operators bool              // read the query as an expression (phrases, exclusions)
 }
 
 type Searcher struct { /* db, embedder */ }
 
 func New(db *sql.DB, emb embeddings.Embedder) *Searcher
 func (s *Searcher) Vector(ctx, query, opts)   ([]SearchResult, error) // cosine, two-phase: rank (id,embedding) then hydrate top-K
-func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25 (query sanitized to quoted phrases)
+func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25 (query parsed to a MATCH expression)
 func (s *Searcher) Metadata(ctx, filters)     ([]SearchResult, error) // AND-joined metadata keys
 func (s *Searcher) Hybrid(ctx, query, opts)   ([]SearchResult, error) // RRF k=60 over vector+keyword
 func CheckFTS5(db *sql.DB) error                                       // probes chunks_fts index
@@ -472,12 +487,51 @@ Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK
 applied before truncating to TopK.
 Keyword: matches `chunks.search_text` (the reduced encoding) and returns `chunks.text`
 (the chunk as written), so a code chunk is *found* by its names and comments but
-*shown* as it was written. User input is sanitized for FTS5 — each whitespace-separated term becomes a
-double-quoted phrase, neutralizing operators/special chars; real query errors propagate.
-Terms are OR-combined, not left to FTS5's implicit AND, and English stop words are dropped
-first (all-stop-word queries keep them). AND required every word of a question to appear in
-one chunk, so `tbuk ask`'s queries matched nothing and Hybrid silently ran vector-only;
-BM25 ranking and TopK, not the match operator, are what keep the leg precise.
+*shown* as it was written.
+
+### Query semantics
+
+`internal/search/query.go` turns a user query into an FTS5 MATCH expression.
+Every operand is a double-quoted string with embedded quotes doubled, so
+arbitrary input is always valid syntax rather than syntax errors; real query
+errors propagate.
+
+`Options.Operators` picks between two readings of the same input:
+
+- **Lenient** (`tbuk ask`, via `retrieval.Retriever` → `Hybrid`) — every
+  whitespace-separated field is a positive term, punctuation and all. Terms are
+  OR-combined, not left to FTS5's implicit AND: AND required every word of a
+  question to appear in one chunk, so `tbuk ask`'s queries matched nothing and
+  Hybrid silently ran vector-only. BM25 ranking and TopK, not the match
+  operator, are what keep the leg precise.
+- **Operator-aware** (`tbuk search`) — a double-quoted run is one phrase term,
+  and a `-` at the *start* of a field excludes. The dash counts only there, so
+  `check-ci` is a term and `-draft` is an exclusion; a leading dash is searched
+  literally by quoting the word. Exclusions become the right-hand side of
+  FTS5's binary `NOT`; an exclusion with no positive term beside it yields no
+  expression at all, since FTS5 has no "everything except".
+
+English stop words are dropped from bare positive terms (an all-stop-word query
+keeps them). They survive inside a quoted phrase, where dropping one breaks the
+phrase, and inside an exclusion, which is explicit enough to take at face value.
+
+Both readings depend on the index keeping `_` and `-` inside a token
+(`tokenize="unicode61 tokenchars '_-'"` on `chunks_fts`): under the FTS5 default
+tokenizer `main_consumption` and `main consumption` are the same two tokens, and
+nothing downstream can tell an exact term from the words apart — `NOT
+main_consumption` excluded both. What keeps a loose query reaching an identifier
+is the split form `searchtext.Reduce` emits beside it, not the tokenizer, so the
+reach follows the encoding: an identifier in a fence or an inline span carries
+its split form, one written bare in prose does not.
+
+Hybrid applies exclusions again after fusion (`excludedChunkIDs`): the keyword
+leg has already dropped them, but the vector leg knows nothing about `NOT` and
+would hand back exactly what was excluded. Filtering happens before `MinScore`
+and TopK so an excluded chunk does not spend a slot. The vector leg embeds
+`parsedQuery.vectorText()` — the positive half as prose, stop words kept — since
+embedding `-main_consumption` verbatim pulls the excluded chunks *towards* the
+query. A `--mode vector` search therefore drops exclusions rather than honouring
+them; cosine similarity has no `NOT`.
 
 ---
 
@@ -790,7 +844,7 @@ tbuk version                   print version string
 tbuk doctor                    probe config, DB (with doc/chunk counts), LLM/embedding/search
 tbuk preprocess <path>         extract text → save to extracted store (--dry-run, --output-dir)
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
-tbuk search <query>            search chunks (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
+tbuk search <query>            search chunks; query read as an expression — "phrase", -exclude (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document

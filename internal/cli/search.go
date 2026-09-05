@@ -23,7 +23,20 @@ func newSearchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search the knowledge base",
-		Args:  cobra.ExactArgs(1),
+		Long: `Search the knowledge base.
+
+The query is read as an expression: bare words match any of them, a quoted run
+matches that phrase, and a leading '-' excludes. Punctuation inside a word is
+part of it, so main_consumption and check-ci are single terms.
+
+  tbuk search 'main consumption'                     either form
+  tbuk search 'main_consumption'                     that term only
+  tbuk search 'main consumption -main_consumption'   the words apart, not the identifier
+  tbuk search '"main consumption"'                   that phrase
+
+An exclusion needs something to exclude from: a query of nothing but exclusions
+returns no results. Quote a word to search for a leading dash literally.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
 				return fmt.Errorf("invalid format %q: must be text or json", format)
@@ -54,7 +67,11 @@ func newSearchCmd() *cobra.Command {
 			}
 
 			s := search.New(app.DB(), emb)
-			opts := search.Options{TopK: topK, MinScore: minScore}
+			// A person typed this query, so the punctuation and operators in
+			// it are meant: a quoted run is a phrase, and a leading '-'
+			// excludes (issue #136). `tbuk ask` keeps the lenient reading —
+			// its query is a natural-language question, not an expression.
+			opts := search.Options{TopK: topK, MinScore: minScore, Operators: true}
 
 			var results []search.SearchResult
 			switch mode {

@@ -20,6 +20,18 @@ import (
 // pass selected every chunk's full text and appended every above-threshold row
 // before sorting all n, so peak memory grew with the whole corpus.
 func (s *Searcher) Vector(ctx context.Context, query string, opts Options) ([]SearchResult, error) {
+	// Cosine similarity has no NOT and no phrase, so with operators in play
+	// what is embedded is the positive half of the query, syntax stripped:
+	// embedding "-main_consumption" verbatim would pull the excluded chunks
+	// towards the query instead of away from it. Hybrid applies the exclusions
+	// to the fused set; a bare `--mode vector` search cannot, and drops them.
+	if opts.Operators {
+		query = parseQuery(query, true).vectorText()
+		if query == "" {
+			return []SearchResult{}, nil
+		}
+	}
+
 	vecs, err := s.embedder.Embed(ctx, []string{query})
 	if err != nil {
 		return nil, err

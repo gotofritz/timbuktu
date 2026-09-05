@@ -330,6 +330,70 @@ func TestRunDoctorTo_searchTextColumnPresent(t *testing.T) {
 	}
 }
 
+// A knowledge base whose index predates issue #136 searches without error, but
+// '_' and '-' are separators in it, so an exact term, an exclusion and a phrase
+// all collapse to the same bag of words. Nothing fails; the answers are just
+// wrong, so doctor has to say so and name the script that fixes it.
+func TestRunDoctorTo_reportsStaleTokenizer(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+	useDefaultTokenizer(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "tokenizer") {
+		t.Errorf("expected the stale tokenizer to be reported, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "scripts/") {
+		t.Errorf("expected the report to name the script that fixes it, got:\n%s", out.String())
+	}
+}
+
+func TestRunDoctorTo_currentTokenizerNeedsNoScript(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "tokenizer") {
+		t.Errorf("expected a tokenizer line, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "scripts/") {
+		t.Errorf("a current database should need no migration script, got:\n%s", out.String())
+	}
+}
+
+// useDefaultTokenizer rebuilds the index the way it was before issue #136: the
+// same column, the FTS5 default tokenizer.
+func useDefaultTokenizer(t *testing.T, path string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, stmt := range []string{
+		`DROP TABLE chunks_fts`,
+		`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id')`,
+	} {
+		if _, err := db.DB().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+}
+
 // dropSearchText puts the schema back the way it was before search_text
 // existed: the index and its triggers over chunks.text, and no reduced column.
 func dropSearchText(t *testing.T, path string) {

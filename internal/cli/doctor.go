@@ -134,6 +134,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	// FTS5 health depends only on the database, not on any embedding server.
 	ftsStatus := "✓"
 	encodingMsg, encodingStatus := "search_text (reduced encoding)", "✓"
+	tokenizerMsg, tokenizerStatus := "unicode61 tokenchars '_-' (exact terms, phrases, exclusions)", "✓"
 	if dbOK {
 		if db2, err2 := storage.Open(cfg.Database.Path); err2 == nil {
 			if err3 := search.CheckFTS5(db2.DB()); err3 != nil {
@@ -143,11 +144,19 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 				encodingMsg = "chunks.search_text missing — run scripts/add-search-text/, then tbuk reindex"
 				encodingStatus = "✗"
 			}
+			// An index on the default tokenizer answers every query without
+			// error and gets the punctuation-sensitive ones wrong, so say it
+			// out loud rather than leave the user to notice.
+			if ok, err3 := storage.HasPunctuationTokenizer(db2.DB()); err3 == nil && !ok {
+				tokenizerMsg = "default unicode61 — '_' and '-' split terms; run scripts/retokenize-fts/"
+				tokenizerStatus = "✗"
+			}
 			_ = db2.Close()
 		}
 	}
 	printCheck(w, "fts5", "available", ftsStatus)
 	printCheck(w, "indexed", encodingMsg, encodingStatus)
+	printCheck(w, "tokenizer", tokenizerMsg, tokenizerStatus)
 	printCheck(w, "vector", "available (cosine, in-process)", "✓")
 	printCheck(w, "hybrid", "available (RRF)", "✓")
 

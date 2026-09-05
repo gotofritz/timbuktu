@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -29,7 +30,8 @@ type migration struct {
 // schemaSQL is therefore edited in place rather than followed by a versioned
 // migration (AGENTS.md, "proof of concept"): a new knowledge base gets the
 // current shape, and an existing one is brought to it by a throwaway script
-// under scripts/ — chunks.search_text was added that way.
+// under scripts/ — chunks.search_text was added that way, and the chunks_fts
+// tokenizer changed that way.
 const schemaVersion = 2
 
 var migrations = []migration{
@@ -79,10 +81,17 @@ CREATE TABLE IF NOT EXISTS metadata (
     PRIMARY KEY (document_id, key)
 );
 
+-- tokenchars '_-' keeps '_' and '-' inside a token, so main_consumption and
+-- check-ci index as one term each rather than as their parts. That is what lets
+-- a query tell an exact term from the same words written apart, and what makes
+-- an exclusion mean one form rather than both (issue #136). The split forms
+-- searchtext.Reduce emits alongside each identifier are what keeps the loose
+-- query reaching the code all the same.
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     search_text,
     content='chunks',
-    content_rowid='id'
+    content_rowid='id',
+    tokenize="unicode61 tokenchars '_-'"
 );
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
@@ -112,6 +121,28 @@ func HasSearchTextColumn(db *sql.DB) (bool, error) {
 		return false, fmt.Errorf("storage.HasSearchTextColumn: %w", err)
 	}
 	return n > 0, nil
+}
+
+// HasPunctuationTokenizer reports whether chunks_fts was created with the
+// tokenchars tokenizer the query semantics depend on.
+//
+// A knowledge base built before it searches and ingests fine, but '_' and '-'
+// are separators in its index, so an exact term, an exclusion and a phrase all
+// collapse to the same bag of words. Nothing fails; the answers are just
+// wrong, which is exactly the kind of thing doctor exists to say out loud. See
+// scripts/ for the script that rebuilds the index.
+func HasPunctuationTokenizer(db *sql.DB) (bool, error) {
+	var ddl string
+	err := db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'`,
+	).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("storage.HasPunctuationTokenizer: %w", err)
+	}
+	return strings.Contains(ddl, "tokenchars"), nil
 }
 
 // RunMigrations applies any pending schema migrations.

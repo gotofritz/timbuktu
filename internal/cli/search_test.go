@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,6 +214,111 @@ func TestTruncatePreview_multibyteStaysValid(t *testing.T) {
 	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "...")); n != 120 {
 		t.Errorf("truncated to %d runes, want 120", n)
 	}
+}
+
+// `tbuk search` reads its query as an expression (issue #136): the user typed
+// it, so the punctuation and the operators in it are meant. `tbuk ask` does
+// not — that path sends a natural-language question, which has no operators in
+// it and must stay lenient.
+func TestSearchCommand_readsOperators(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+	seedTwoForms(t, filepath.Join(home, ".tbuk", "tbuk.sqlite"))
+
+	out := captureStdout(t, func() {
+		if err := runCLI("--config", cfgPath, "search", "--mode", "keyword",
+			"register -main_consumption"); err != nil {
+			t.Fatalf("search: %v", err)
+		}
+	})
+	if strings.Contains(out, "/under.md") {
+		t.Errorf("the excluded form came back:\n%s", out)
+	}
+	if !strings.Contains(out, "/spaced.md") {
+		t.Errorf("want the space form, got:\n%s", out)
+	}
+}
+
+func TestSearchCommand_readsQuotedPhrases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := runCLI("init"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
+	seedTwoForms(t, filepath.Join(home, ".tbuk", "tbuk.sqlite"))
+
+	out := captureStdout(t, func() {
+		if err := runCLI("--config", cfgPath, "search", "--mode", "keyword",
+			`"main consumption"`); err != nil {
+			t.Fatalf("search: %v", err)
+		}
+	})
+	if strings.Contains(out, "/apart.md") {
+		t.Errorf("a phrase must not match the words apart:\n%s", out)
+	}
+	if !strings.Contains(out, "/spaced.md") {
+		t.Errorf("want the phrase as written, got:\n%s", out)
+	}
+}
+
+// seedTwoForms indexes the underscore form, the space form, and a chunk
+// carrying both words but not adjacent — enough for an exclusion and a phrase
+// to be told apart from the lenient reading of the same input.
+func seedTwoForms(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	docs := storage.NewDocumentRepo(db.DB())
+	chunks := storage.NewChunkRepo(db.DB())
+	for _, tc := range []struct{ path, text string }{
+		{"/under.md", "the main_consumption register is read hourly"},
+		{"/spaced.md", "the main consumption register is read hourly"},
+		{"/apart.md", "consumption of the main register"},
+	} {
+		doc := &storage.Document{Path: tc.path, SHA256: tc.path, Title: tc.path, MimeType: "text/plain"}
+		if err := docs.Create(ctx, doc); err != nil {
+			t.Fatalf("create doc: %v", err)
+		}
+		if err := chunks.BulkInsert(ctx, []*storage.Chunk{
+			{DocumentID: doc.ID, ChunkIndex: 0, Text: tc.text, SearchText: tc.text, TokenCount: 8},
+		}); err != nil {
+			t.Fatalf("insert chunk: %v", err)
+		}
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote.
+// printSearchResults writes to the process's stdout rather than the command's
+// output writer, so a pipe is the only way to read it back.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+
+	done := make(chan string, 1)
+	go func() {
+		var buf strings.Builder
+		_, _ = io.Copy(&buf, r)
+		done <- buf.String()
+	}()
+
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	return <-done
 }
 
 func TestDoctorCommand_showsSearch(t *testing.T) {

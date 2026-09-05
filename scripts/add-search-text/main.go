@@ -90,7 +90,8 @@ func addSearchText(db *sql.DB) (int, error) {
 		CREATE VIRTUAL TABLE chunks_fts USING fts5(
 		    search_text,
 		    content='chunks',
-		    content_rowid='id'
+		    content_rowid='id',
+		    tokenize="unicode61 tokenchars '_-'"
 		);
 
 		CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN

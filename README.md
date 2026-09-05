@@ -86,6 +86,7 @@ tbuk preprocess <path>   # extract text from document → save to ~/.tbuk/extrac
 tbuk ingest <path>       # read extracted text → chunk → embed → store in DB (--force, -v/--verbose, --no-raw)
                          #   copies each source into ~/.tbuk/raw unless --no-raw is passed
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
+                         #   query is an expression: "a phrase", -exclude, main_consumption as one term
                          #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
 tbuk meta set <path> k=v # attach metadata to a document (one value per key; distinct keys per call)
@@ -396,7 +397,7 @@ internal/
   embeddings/       Embedder interface; MLX, llama.cpp, Ollama, OpenAI adapters
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline; Reindex* — re-embed from raw/
   llm/              LLM interface; MLX, Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
-  search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
+  search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF); query parser (phrases, exclusions)
   searchtext/       Reduce — the encoding stored in chunks.search_text and handed to the embedder
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
@@ -412,7 +413,7 @@ Dependencies point inward. Providers depend only on shared interfaces defined in
 documents   — path, sha256, title, mime_type, raw_path, timestamps
 chunks      — document_id, chunk_index, text, search_text, token_count, embedding BLOB
 metadata    — document_id, key, value  (key/value per document)
-chunks_fts  — FTS5 virtual table over chunks.search_text (auto-synced via triggers)
+chunks_fts  — FTS5 virtual table over chunks.search_text, tokenize="unicode61 tokenchars '_-'" (auto-synced via triggers)
 ```
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
@@ -508,6 +509,33 @@ The embedding follows `search_text` too, which is the other half of the win: a
 code chunk embeds as what it is about rather than as a wall of syntax. Changing
 that changes the vectors, so `tbuk reindex` is what applies it to a knowledge
 base indexed by an earlier version.
+
+### Query semantics
+
+The FTS5 index keeps `_` and `-` inside a token, so `main_consumption` and
+`check-ci` are single terms rather than the words they are made of. `tbuk
+search` reads its query as an expression to match:
+
+```bash
+tbuk search 'main consumption'                    # either form
+tbuk search 'main_consumption'                    # that term only
+tbuk search 'main consumption -main_consumption'  # the words apart, not the identifier
+tbuk search '"main consumption"'                  # that phrase
+```
+
+A leading `-` excludes; anywhere else a dash is part of the term. An exclusion
+needs something to exclude from, so a query of nothing but exclusions returns
+nothing. Common English words are dropped from bare terms and kept inside a
+quoted phrase.
+
+`tbuk ask` does not read operators: it sends a natural-language question, and
+reading one as an expression is how its keyword leg comes back empty.
+
+A loose query reaches an identifier because `search_text` carries its split
+form, not because the index breaks the identifier apart — so it reaches one
+inside a fence or `` `backticks` ``, and not one written bare in prose. On a
+knowledge base built before this, `tbuk doctor` says so and names the script
+that rebuilds the index.
 
 ### Re-ingesting
 
