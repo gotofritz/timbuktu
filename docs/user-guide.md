@@ -1119,6 +1119,29 @@ Remember to set `embedding.dimension` in your config to the new model's value
 first; reindex writes what the model gives it, and the rest of Timbuktu reads
 that setting.
 
+### When you upgrade Timbuktu
+
+Sometimes a new version reads your files *better* than the one that indexed
+them. Documents already in your knowledge base keep the text they were indexed
+with, so the improvement does not reach them on its own:
+
+```bash
+tbuk reindex
+```
+
+That re-reads every document and rebuilds its chunks. As above, it works from
+the extracted text, the raw archive, or your original files, so the originals
+need not still be where you first ingested them.
+
+The Markdown reader is one of these. It used to mangle punctuation inside
+software terms: a note mentioning `main_consumption` and `total_output` on one
+line came back as `mainconsumption` and `totaloutput`, so the term you were
+searching for was not in the index under the name you knew it by. Text inside
+backticks — a fenced code block or an inline span — is now kept exactly as
+written, and identifiers such as `snake_case` or `__init__` survive in ordinary
+prose too. If you indexed notes before that fix, `tbuk reindex` is what applies
+it to them.
+
 ### Backing up or moving your knowledge base
 
 `tbuk export` bundles everything — your config plus every data folder
