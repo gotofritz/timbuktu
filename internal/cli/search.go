@@ -29,10 +29,10 @@ The query is read as an expression: bare words match any of them, a quoted run
 matches that phrase, and a leading '-' excludes. Punctuation inside a word is
 part of it, so main_consumption and check-ci are single terms.
 
-  tbuk search 'main consumption'                  either form
-  tbuk search 'main_consumption'                  that term only
-  tbuk search 'main consumption -main_consumption' the words apart, not the identifier
-  tbuk search '"main consumption"'                that phrase
+  tbuk search 'main consumption'                     either form
+  tbuk search 'main_consumption'                     that term only
+  tbuk search 'main consumption -main_consumption'   the words apart, not the identifier
+  tbuk search '"main consumption"'                   that phrase
 
 An exclusion needs something to exclude from: a query of nothing but exclusions
 returns no results. Quote a word to search for a leading dash literally.`,

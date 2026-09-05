@@ -34,6 +34,15 @@ tbuk ask --no-stream ...         buffer output (useful for redirecting to a file
 tbuk search "<query>"            return matching chunks without calling the LLM
 tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 
+Query syntax (tbuk search only; tbuk ask reads a question, not an expression):
+  main consumption               either form — any of the words
+  main_consumption               that term only; _ and - stay inside a term
+  main consumption -main_consumption   the words apart, not the identifier
+  "main consumption"             that phrase, stop words kept
+A leading - excludes; a query of only exclusions returns nothing.
+A loose query reaches an identifier via the split form in search_text, so it
+finds one in a fenced block or an inline code span, not one bare in prose.
+
 ## Knowledge base
 
 tbuk stats                       document and chunk counts, DB size
@@ -75,6 +84,9 @@ ingest.embed_concurrency  parallel embed requests per file (default 4)
 - tbuk ask answers from model general knowledge if retrieval finds nothing.
   Use --require-context to abort instead.
 - Claude provider: set ANTHROPIC_API_KEY; embedding must still be local (llama/ollama).
+- tbuk doctor "tokenizer: ✗ default unicode61": index predates the query syntax
+  above, so _ and - split terms. Fix: go run ./scripts/retokenize-fts <db path>.
+  No re-embedding — the index rebuilds from the stored column.
 `
 
 func newContextCmd() *cobra.Command {
