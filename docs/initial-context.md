@@ -106,7 +106,7 @@ SQLite, WAL mode, foreign keys ON. Pragmas are set in the DSN (`dsnFor`) so ever
 documents   — id, path (UNIQUE), sha256, title, mime_type, raw_path, created_at, updated_at
 chunks      — id, document_id (FK→documents CASCADE), chunk_index, text, search_text, token_count, embedding BLOB
 metadata    — document_id (FK→documents CASCADE), key, value  (PK: document_id+key)
-chunks_fts  — FTS5 virtual table over chunks.search_text (tokenize="unicode61 tokenchars '_-'"), auto-synced via INSERT/DELETE triggers
+chunks_fts  — FTS5 virtual table over chunks.search_text (tokenize="unicode61 tokenchars '_'"), auto-synced via INSERT/DELETE triggers
 ```
 
 `chunks` holds one segment in two encodings. `text` is the segment as written —
@@ -507,7 +507,8 @@ errors propagate.
 - **Operator-aware** (`tbuk search`) — a double-quoted run is one phrase term,
   and a `-` at the *start* of a field excludes. The dash counts only there, so
   `check-ci` is a term and `-draft` is an exclusion; a leading dash is searched
-  literally by quoting the word. Exclusions become the right-hand side of
+  literally by quoting the word. `check-ci` reaches the index as the phrase
+  `check ci`, since `-` is a separator there. Exclusions become the right-hand side of
   FTS5's binary `NOT`; an exclusion with no positive term beside it yields no
   expression at all, since FTS5 has no "everything except".
 
@@ -515,14 +516,27 @@ English stop words are dropped from bare positive terms (an all-stop-word query
 keeps them). They survive inside a quoted phrase, where dropping one breaks the
 phrase, and inside an exclusion, which is explicit enough to take at face value.
 
-Both readings depend on the index keeping `_` and `-` inside a token
-(`tokenize="unicode61 tokenchars '_-'"` on `chunks_fts`): under the FTS5 default
+Both readings depend on the index keeping `_` inside a token
+(`tokenize="unicode61 tokenchars '_'"` on `chunks_fts`): under the FTS5 default
 tokenizer `main_consumption` and `main consumption` are the same two tokens, and
 nothing downstream can tell an exact term from the words apart — `NOT
 main_consumption` excluded both. What keeps a loose query reaching an identifier
 is the split form `searchtext.Reduce` emits beside it, not the tokenizer, so the
 reach follows the encoding: an identifier in a fence or an inline span carries
 its split form, one written bare in prose does not.
+
+`-` is not in that list, and the asymmetry is deliberate. It was, briefly
+(#136), and a token character applies everywhere rather than only inside
+identifiers: `long-term`, `day-to-day`, `state-of-the-art` were each one token,
+reachable only by typing the hyphen. That fell on `tbuk ask` — a question is
+prose, nobody writes the hyphen back into it — and hyphenated English is far
+more of this corpus than kebab-case names are (#143). The price is that a
+kebab-case name can no longer be told from its words: `check-ci` and `check ci`
+are the same query, both reading as the phrase. `_` has no such cost, since
+underscores do not occur in English prose. The principled alternative — having
+`searchtext.Reduce` emit split forms for hyphenated prose the way it does for
+identifiers — keeps both, at the cost of a full `tbuk reindex`; it is the way
+back if kebab-case exactness ever earns it.
 
 Hybrid applies exclusions again after fusion (`excludedChunkIDs`): the keyword
 leg has already dropped them, but the vector leg knows nothing about `NOT` and

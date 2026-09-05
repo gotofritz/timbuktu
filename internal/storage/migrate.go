@@ -38,6 +38,12 @@ var migrations = []migration{
 	{schemaVersion, schemaSQL},
 }
 
+// FTSTokenizer is the tokenizer chunks_fts is created with. Exported so doctor
+// can tell a current index from one built under an earlier tokenizer, which
+// answers every query without error and gets the punctuation-sensitive ones
+// wrong.
+const FTSTokenizer = `unicode61 tokenchars '_'`
+
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INTEGER PRIMARY KEY,
@@ -81,17 +87,25 @@ CREATE TABLE IF NOT EXISTS metadata (
     PRIMARY KEY (document_id, key)
 );
 
--- tokenchars '_-' keeps '_' and '-' inside a token, so main_consumption and
--- check-ci index as one term each rather than as their parts. That is what lets
--- a query tell an exact term from the same words written apart, and what makes
--- an exclusion mean one form rather than both (issue #136). The split forms
--- searchtext.Reduce emits alongside each identifier are what keeps the loose
--- query reaching the code all the same.
+-- tokenchars '_' keeps '_' inside a token, so main_consumption indexes as one
+-- term rather than as its parts. That is what lets a query tell an exact term
+-- from the same words written apart, and what makes an exclusion mean one form
+-- rather than both (issue #136). The split forms searchtext.Reduce emits
+-- alongside each identifier are what keeps the loose query reaching the code
+-- all the same.
+--
+-- '-' is deliberately not in the list. It was, until it turned out to apply
+-- everywhere rather than only inside identifiers: hyphenated English is one
+-- token under it, so long-term stopped answering to "long" or to "long term",
+-- on the very path tbuk ask sends and in prose nobody types a hyphen back
+-- into (issue #143). A kebab-case identifier gives up being told apart from
+-- its words as the price — check-ci and check ci are one query now — which is
+-- the narrower loss of the two.
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     search_text,
     content='chunks',
     content_rowid='id',
-    tokenize="unicode61 tokenchars '_-'"
+    tokenize="` + FTSTokenizer + `"
 );
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
@@ -123,26 +137,48 @@ func HasSearchTextColumn(db *sql.DB) (bool, error) {
 	return n > 0, nil
 }
 
-// HasPunctuationTokenizer reports whether chunks_fts was created with the
-// tokenchars tokenizer the query semantics depend on.
+// ReadFTSTokenizer returns the tokenizer chunks_fts was created with, as the
+// DDL records it, or "" when the table carries no tokenize option (the FTS5
+// default) or does not exist.
 //
-// A knowledge base built before it searches and ingests fine, but '_' and '-'
-// are separators in its index, so an exact term, an exclusion and a phrase all
-// collapse to the same bag of words. Nothing fails; the answers are just
+// A knowledge base built under an earlier tokenizer searches and ingests fine;
+// the query semantics are just not the ones documented. Under the default,
+// '_' is a separator, so an exact term, an exclusion and a phrase all collapse
+// to the same bag of words. Under tokenchars '_-' (issue #136), '-' is part of
+// a token everywhere, so hyphenated prose answers only to itself written with
+// the hyphen (issue #143). Nothing fails either way; the answers are just
 // wrong, which is exactly the kind of thing doctor exists to say out loud. See
 // scripts/ for the script that rebuilds the index.
-func HasPunctuationTokenizer(db *sql.DB) (bool, error) {
+func ReadFTSTokenizer(db *sql.DB) (string, error) {
 	var ddl string
 	err := db.QueryRow(
 		`SELECT sql FROM sqlite_master WHERE type='table' AND name='chunks_fts'`,
 	).Scan(&ddl)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return "", nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("storage.HasPunctuationTokenizer: %w", err)
+		return "", fmt.Errorf("storage.ReadFTSTokenizer: %w", err)
 	}
-	return strings.Contains(ddl, "tokenchars"), nil
+	return tokenizeArg(ddl), nil
+}
+
+// tokenizeArg returns the quoted argument of the tokenize option in a CREATE
+// VIRTUAL TABLE statement, or "" when there is none to read.
+func tokenizeArg(ddl string) string {
+	i := strings.Index(strings.ToLower(ddl), "tokenize")
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ddl[i+len("tokenize"):]), "="))
+	if rest == "" || (rest[0] != '"' && rest[0] != '\'') {
+		return ""
+	}
+	end := strings.IndexByte(rest[1:], rest[0])
+	if end < 0 {
+		return ""
+	}
+	return rest[1 : 1+end]
 }
 
 // RunMigrations applies any pending schema migrations.

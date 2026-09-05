@@ -408,7 +408,7 @@ Preprocessing
 Search
   fts5:        ✓ available
   indexed:     ✓ search_text (reduced encoding)
-  tokenizer:   ✓ unicode61 tokenchars '_-' (exact terms, phrases, exclusions)
+  tokenizer:   ✓ unicode61 tokenchars '_' (exact terms, phrases, exclusions)
   vector:      ✓ available
   hybrid:      ✓ available
 
@@ -877,16 +877,22 @@ ranking, not a narrower filter.
 "any of these words". (`tbuk ask` does not — it takes a question, and a question
 has no operators in it.)
 
-**An exact term.** Punctuation inside a word is part of the word, so
-`main_consumption` and `check-ci` are single terms:
+**An exact term.** An underscore inside a word is part of the word, so
+`main_consumption` is a single term:
 
 ```bash
 tbuk search 'main_consumption'   # only notes with the underscore form
 tbuk search 'main consumption'   # notes with either form
 ```
 
-Typing the punctuation is how you say you meant it. Type the words apart and
-you get both.
+Typing the underscore is how you say you meant it. Type the words apart and you
+get both.
+
+A hyphen is not like that. `long-term` searches for `long term` next to each
+other, and finds the note whichever way it is written — which is the point:
+hyphenated English is ordinary writing, and `long-term` used to be a word of
+its own that neither `long` nor `long term` could reach. A kebab-case name goes
+the same way: `check-ci` and `check ci` are one query.
 
 **A phrase.** Wrap it in double quotes to require the words next to each other,
 in that order:
@@ -904,8 +910,10 @@ tbuk search 'meter -deprecated'
 ```
 
 The dash only means "exclude" at the start of a word, so `check-ci` still
-searches for that term. An exclusion needs something to exclude *from*: a query
-of nothing but exclusions returns no results.
+searches for those words together. An exclusion needs something to exclude
+*from*: a query of nothing but exclusions returns no results. And since a
+hyphen inside a word is not part of the word, `-check-ci` leaves out notes that
+say `check ci` either way round.
 
 Two things worth knowing:
 
@@ -1252,18 +1260,27 @@ re-reads and re-fingerprints your documents, which is what actually applies the
 new encoding. Until the first has run, `tbuk ingest` will fail on a missing
 column.
 
-How the search index splits words is the third. It used to break every word at
-`_` and `-`, which made `main_consumption` and `main consumption` the same
-thing: an exact term, a phrase and an exclusion all answered as if you had never
-typed the punctuation (see [Asking for exactly what you mean](#asking-for-exactly-what-you-mean)).
-Nothing failed — the answers were just wrong. `tbuk doctor` says so under
-**Search**:
+How the search index splits words is the third, and it has changed twice. It
+used to break every word at `_`, which made `main_consumption` and `main
+consumption` the same thing: an exact term, a phrase and an exclusion all
+answered as if you had never typed the punctuation (see [Asking for exactly
+what you mean](#asking-for-exactly-what-you-mean)). The fix for that briefly
+kept `-` inside a word too, which had the opposite problem — `long-term` became
+a word of its own, and asking about "long term costs" no longer found it.
+Neither failed; the answers were just wrong. `tbuk doctor` names whichever one
+your index has, under **Search**:
 
 ```
 Search
   fts5:      ✓ available
   indexed:   ✓ search_text (reduced encoding)
-  tokenizer: ✗ default unicode61 — '_' and '-' split terms; run scripts/retokenize-fts/
+  tokenizer: ✗ default unicode61 — '_' splits terms; run scripts/retokenize-fts/
+```
+
+or
+
+```
+  tokenizer: ✗ unicode61 tokenchars '_-' — '-' locks hyphenated words into one term; run scripts/retokenize-fts/
 ```
 
 From a checkout of the source:
@@ -1273,7 +1290,8 @@ go run ./scripts/retokenize-fts ~/.tbuk/tbuk.sqlite   # your database path
 ```
 
 That one takes seconds and needs no `tbuk reindex`: it rebuilds the index from
-what is already stored and leaves your documents and fingerprints alone.
+what is already stored and leaves your documents and fingerprints alone. It is
+the same command for either tokenizer, and running it twice does no harm.
 
 ### Backing up or moving your knowledge base
 

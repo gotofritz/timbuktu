@@ -355,6 +355,31 @@ func TestRunDoctorTo_reportsStaleTokenizer(t *testing.T) {
 	}
 }
 
+// The shape issue #136 left behind: '-' a token character as well, which locks
+// ordinary hyphenated English into one term, so the words it is made of stop
+// reaching it (issue #143). Nothing errors here either, so doctor names the
+// tokenizer it found and the script that replaces it.
+func TestRunDoctorTo_reportsHyphenTokenizer(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+	useHyphenTokenizer(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), `tokenchars '_-'`) {
+		t.Errorf("expected the report to name the tokenizer it found, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "scripts/retokenize-fts") {
+		t.Errorf("expected the report to name the script that fixes it, got:\n%s", out.String())
+	}
+}
+
 func TestRunDoctorTo_currentTokenizerNeedsNoScript(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "tbuk.sqlite")
@@ -387,6 +412,26 @@ func useDefaultTokenizer(t *testing.T, path string) {
 	for _, stmt := range []string{
 		`DROP TABLE chunks_fts`,
 		`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id')`,
+	} {
+		if _, err := db.DB().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+}
+
+// useHyphenTokenizer rebuilds the index the way issue #136 left it: '-' a
+// token character alongside '_'.
+func useHyphenTokenizer(t *testing.T, path string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, stmt := range []string{
+		`DROP TABLE chunks_fts`,
+		`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id', ` +
+			`tokenize="unicode61 tokenchars '_-'")`,
 	} {
 		if _, err := db.DB().Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)

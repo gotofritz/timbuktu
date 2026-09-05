@@ -413,7 +413,7 @@ Dependencies point inward. Providers depend only on shared interfaces defined in
 documents   — path, sha256, title, mime_type, raw_path, timestamps
 chunks      — document_id, chunk_index, text, search_text, token_count, embedding BLOB
 metadata    — document_id, key, value  (key/value per document)
-chunks_fts  — FTS5 virtual table over chunks.search_text, tokenize="unicode61 tokenchars '_-'" (auto-synced via triggers)
+chunks_fts  — FTS5 virtual table over chunks.search_text, tokenize="unicode61 tokenchars '_'" (auto-synced via triggers)
 ```
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
@@ -512,9 +512,13 @@ base indexed by an earlier version.
 
 ### Query semantics
 
-The FTS5 index keeps `_` and `-` inside a token, so `main_consumption` and
-`check-ci` are single terms rather than the words they are made of. `tbuk
-search` reads its query as an expression to match:
+The FTS5 index keeps `_` inside a token, so `main_consumption` is a single
+term rather than the words it is made of. `-` is a separator: it was a token
+character too, until that turned out to hold ordinary hyphenated English
+together as well, so `long-term` answered to neither `long` nor `long term`
+(issue #143). A kebab-case name is therefore indexed as its words, and
+`check-ci` matches them adjacent and in order. `tbuk search` reads its query as
+an expression to match:
 
 ```bash
 tbuk search 'main consumption'                    # either form
@@ -523,8 +527,9 @@ tbuk search 'main consumption -main_consumption'  # the words apart, not the ide
 tbuk search '"main consumption"'                  # that phrase
 ```
 
-A leading `-` excludes; anywhere else a dash is part of the term. An exclusion
-needs something to exclude from, so a query of nothing but exclusions returns
+A leading `-` excludes; anywhere else a dash is part of the term, which the
+index reads as the words it joins, next to each other. An exclusion needs
+something to exclude from, so a query of nothing but exclusions returns
 nothing. Common English words are dropped from bare terms and kept inside a
 quoted phrase.
 

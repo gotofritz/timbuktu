@@ -134,7 +134,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	// FTS5 health depends only on the database, not on any embedding server.
 	ftsStatus := "✓"
 	encodingMsg, encodingStatus := "search_text (reduced encoding)", "✓"
-	tokenizerMsg, tokenizerStatus := "unicode61 tokenchars '_-' (exact terms, phrases, exclusions)", "✓"
+	tokenizerMsg, tokenizerStatus := storage.FTSTokenizer+" (exact terms, phrases, exclusions)", "✓"
 	if dbOK {
 		if db2, err2 := storage.Open(cfg.Database.Path); err2 == nil {
 			if err3 := search.CheckFTS5(db2.DB()); err3 != nil {
@@ -144,12 +144,13 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 				encodingMsg = "chunks.search_text missing — run scripts/add-search-text/, then tbuk reindex"
 				encodingStatus = "✗"
 			}
-			// An index on the default tokenizer answers every query without
-			// error and gets the punctuation-sensitive ones wrong, so say it
-			// out loud rather than leave the user to notice.
-			if ok, err3 := storage.HasPunctuationTokenizer(db2.DB()); err3 == nil && !ok {
-				tokenizerMsg = "default unicode61 — '_' and '-' split terms; run scripts/retokenize-fts/"
-				tokenizerStatus = "✗"
+			// An index built under an earlier tokenizer answers every query
+			// without error and gets the punctuation-sensitive ones wrong, so
+			// say it out loud rather than leave the user to notice. Which
+			// earlier one it is decides what is wrong with the answers, so
+			// name it.
+			if tok, err3 := storage.ReadFTSTokenizer(db2.DB()); err3 == nil && tok != storage.FTSTokenizer {
+				tokenizerMsg, tokenizerStatus = staleTokenizerMsg(tok), "✗"
 			}
 			_ = db2.Close()
 		}
@@ -174,6 +175,20 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	}
 
 	return nil
+}
+
+// staleTokenizerMsg describes an index built under an earlier tokenizer and
+// names the script that rebuilds it. The FTS5 default splits every term at
+// '_'; tokenchars '_-' (issue #136) instead holds hyphenated English together
+// as one token, so the words it is made of stop reaching it (issue #143).
+func staleTokenizerMsg(tokenizer string) string {
+	what := "'_' splits terms"
+	if tokenizer == "" {
+		tokenizer = "default unicode61"
+	} else {
+		what = "'-' locks hyphenated words into one term"
+	}
+	return fmt.Sprintf("%s — %s; run scripts/retokenize-fts/", tokenizer, what)
 }
 
 // CheckLLMModel tries GET {baseURL}/v1/models and returns the first model ID.

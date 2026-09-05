@@ -2,14 +2,16 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	_ "modernc.org/sqlite"
 )
 
-// oldSchema is the chunks table and index as they were before #136: the
-// search_text column of #138, indexed with the FTS5 default tokenizer.
-const oldSchema = `
+// schemaWith is the chunks table and its triggers, with the index created by
+// the caller's DDL: the shapes a knowledge base can carry before this script
+// runs — the FTS5 default of before #136, or the tokenchars '_-' of #136.
+const schemaWith = `
 CREATE TABLE chunks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id  INTEGER NOT NULL,
@@ -20,7 +22,7 @@ CREATE TABLE chunks (
     embedding    BLOB,
     UNIQUE(document_id, chunk_index)
 );
-CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id');
+%s
 CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
     INSERT INTO chunks_fts(rowid, search_text) VALUES (new.id, new.search_text);
 END;
@@ -33,7 +35,21 @@ CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
 END;
 `
 
+// defaultIndex is the index as it was before #136: the FTS5 default tokenizer,
+// where '_' and '-' are separators.
+const defaultIndex = `CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id');`
+
+// hyphenIndex is the index #136 created: '-' a token character alongside '_',
+// which locks hyphenated English into one term (issue #143).
+const hyphenIndex = `CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', ` +
+	`content_rowid='id', tokenize="unicode61 tokenchars '_-'");`
+
 func openOldDB(t *testing.T, chunks ...string) *sql.DB {
+	t.Helper()
+	return openDB(t, defaultIndex, chunks...)
+}
+
+func openDB(t *testing.T, index string, chunks ...string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -41,8 +57,8 @@ func openOldDB(t *testing.T, chunks ...string) *sql.DB {
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.Exec(oldSchema); err != nil {
-		t.Fatalf("old schema: %v", err)
+	if _, err := db.Exec(fmt.Sprintf(schemaWith, index)); err != nil {
+		t.Fatalf("schema: %v", err)
 	}
 	for i, text := range chunks {
 		if _, err := db.Exec(
@@ -99,7 +115,36 @@ func TestRetokenize_triggersStillSyncTheIndex(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 	if got := matches(t, db, `"check-ci"`); got != 1 {
-		t.Errorf("want the new row indexed as one term, got %d matches", got)
+		t.Errorf("want the new row reachable, got %d matches", got)
+	}
+}
+
+// The index #136 left behind is the other input this script has to fix: '-'
+// was a token character in it, so hyphenated English was one token and the
+// words it is made of could not reach it (issue #143). After the rebuild they
+// can, and the underscore form is still told apart from the words apart.
+func TestRetokenize_freesHyphenatedProse(t *testing.T) {
+	db := openDB(t, hyphenIndex,
+		"we track long-term costs day-to-day",
+		"the main_consumption register is read hourly",
+		"the main consumption register is read hourly")
+
+	if got := matches(t, db, `"long" OR "term"`); got != 0 {
+		t.Fatalf("before: want the #136 index to hide the compound's words, got %d", got)
+	}
+
+	if err := retokenize(db); err != nil {
+		t.Fatalf("retokenize: %v", err)
+	}
+
+	if got := matches(t, db, `"long" OR "term"`); got != 1 {
+		t.Errorf("the compound's words matched %d rows, want 1", got)
+	}
+	if got := matches(t, db, `"long-term"`); got != 1 {
+		t.Errorf("the compound as written matched %d rows, want 1", got)
+	}
+	if got := matches(t, db, `"main_consumption"`); got != 1 {
+		t.Errorf("exact term matched %d rows, want 1 — '_' still holds a term together", got)
 	}
 }
 

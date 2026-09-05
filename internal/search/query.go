@@ -49,8 +49,9 @@ type parsedQuery struct {
 // With operators true the query is read as an expression: a double-quoted run
 // is one phrase term, and a '-' immediately before a term excludes it. The
 // dash counts as an operator only at the start of a field, so `check-ci` is a
-// term and `-draft` is an exclusion — which matters because the FTS5 tokenizer
-// treats '-' as a token character (see storage.schemaSQL).
+// term and `-draft` is an exclusion. The FTS5 tokenizer treats '-' as a
+// separator (see storage.FTSTokenizer), so `check-ci` reaches the index as the
+// phrase "check ci" — adjacent, in that order, however it was written.
 func parseQuery(query string, operators bool) parsedQuery {
 	if !operators {
 		fields := strings.Fields(query)

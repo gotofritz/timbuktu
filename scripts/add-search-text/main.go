@@ -91,7 +91,7 @@ func addSearchText(db *sql.DB) (int, error) {
 		    search_text,
 		    content='chunks',
 		    content_rowid='id',
-		    tokenize="unicode61 tokenchars '_-'"
+		    tokenize="unicode61 tokenchars '_'"
 		);
 
 		CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
