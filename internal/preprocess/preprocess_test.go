@@ -92,6 +92,111 @@ func TestMarkdownExtractor_strips_inline_markup(t *testing.T) {
 	}
 }
 
+// Software notes are full of terms whose punctuation is the term:
+// main_consumption, __init__, check-ci. Markdown's inline markup rules must not
+// eat them — the old `_(.+?)_` italic pass welded two snake_case identifiers
+// into one whenever a line held both (issue #134).
+func TestMarkdownExtractor_preserves_punctuation_in_terms(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "two inline code terms on one line",
+			input: "The `main_consumption` field and the `total_output` count.",
+			want:  "The main_consumption field and the total_output count.",
+		},
+		{
+			name:  "single inline code term",
+			input: "Set `main_consumption` to zero.",
+			want:  "Set main_consumption to zero.",
+		},
+		{
+			name:  "snake_case in the text flow, no backticks",
+			input: "snake_case_name in prose and another_one here.",
+			want:  "snake_case_name in prose and another_one here.",
+		},
+		{
+			name:  "dunder term",
+			input: "Call `__init__` first.",
+			want:  "Call __init__ first.",
+		},
+		{
+			name:  "inline code holding markup characters",
+			input: "Run `make check-ci` and `a**b**c`.",
+			want:  "Run make check-ci and a**b**c.",
+		},
+		{
+			name:  "fenced block keeps its identifiers",
+			input: "```go\nvar main_consumption, total_output int\n```",
+			want:  "var main_consumption, total_output int",
+		},
+		{
+			name:  "fenced block keeps emphasis characters",
+			input: "```\na = _b_ + c_d\n```",
+			want:  "a = _b_ + c_d",
+		},
+		{
+			name:  "fenced block keeps comment lines",
+			input: "```bash\n# install\nmake check-ci\n```",
+			want:  "# install\nmake check-ci",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := strings.TrimSpace(mustExtract(t, "text/markdown", tt.input))
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Protecting terms must not cost emphasis stripping: an underscore that sits at
+// a word boundary is still markup.
+func TestMarkdownExtractor_still_strips_underscore_emphasis(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"single run", "Hello _world_.", "Hello world."},
+		{"two runs on a line", "Hello _world_ and _there_.", "Hello world and there."},
+		{"emphasis beside an identifier", "The _real_ value_x is set.", "The real value_x is set."},
+		{"unclosed marker is left alone", "A _lone marker here.", "A _lone marker here."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := strings.TrimSpace(mustExtract(t, "text/markdown", tt.input))
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A whole note rather than one construct: the segments a document is cut into
+// have to come back together with its spacing intact.
+func TestMarkdownExtractor_document_round_trip(t *testing.T) {
+	input := "---\ntitle: Notes\n---\n\n" +
+		"# Metering\n\n" +
+		"The `main_consumption` register and the `total_output` register are **separate**.\n\n" +
+		"```go\nfunc read_meter() (main_consumption, total_output int) {\n" +
+		"\t// _both_ registers\n\treturn 0, 0\n}\n```\n\n" +
+		"See also snake_case_name and _emphasis_ in the flow.\n"
+	want := "Metering\n\n" +
+		"The main_consumption register and the total_output register are separate.\n\n" +
+		"func read_meter() (main_consumption, total_output int) {\n" +
+		"\t// _both_ registers\n\treturn 0, 0\n}\n\n" +
+		"See also snake_case_name and emphasis in the flow."
+
+	got := mustExtract(t, "text/markdown", input)
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 // ── HTMLExtractor ─────────────────────────────────────────────────────────────
 
 func TestHTMLExtractor_strips_tags(t *testing.T) {
