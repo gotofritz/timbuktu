@@ -53,28 +53,9 @@ scattered across it; the matrix above points at them by group.
 
 ## Quick Wins — high impact, low effort
 
-1. [#140](../../../../issues/140) **Database management / seamless switching.** *(user-requested)*
-   Today `database.path` is a single value in `config.yaml`. Add first-class
-   support for multiple knowledge bases ("collections" / "workspaces"): a
-   `--db <path>` global flag and/or `TBUK_DB` env var overriding config, plus
-   optional named collections resolved from config so `tbuk --db work ask ...`
-   just works. No schema change — each DB is already self-contained.
-   *Partially delivered (#95):* the global `--root DIR` flag switches the whole
-   data directory (db + cache + raw + prompts + config) at once, which covers
-   the common "separate collection" case. Still open: switching **only** the DB
-   while sharing one prompt/cache root (`--db`/`TBUK_DB`) and named collections
-   resolved from config.
+1. 🚫 [#140](../../../../issues/140) **Database management / seamless switching.** *(user-requested)* Today `database.path` is a single value in `config.yaml`. Add first-class support for multiple knowledge bases ("collections" / "workspaces"): a `--db <path>` global flag and/or `TBUK_DB` env var overriding config, plus optional named collections resolved from config so `tbuk --db work ask ...` just works. No schema change — each DB is already self-contained. *Partially delivered (#95):* the global `--root DIR` flag switches the whole data directory (db + cache + raw + prompts + config) at once, which covers the common "separate collection" case. Still open: switching **only** the DB while sharing one prompt/cache root (`--db`/`TBUK_DB`) and named collections resolved from config.
 
-2. ✅ [#141](../../../../issues/141) **Context-window budget guard on `ask`.** *(user-requested: context management)*
-   `retrieval.max_tokens` already trims retrieved chunks, but nothing bounds
-   the *whole* prompt (system + template + chunks + question) against the
-   model's context window. Add a single budget check that trims/warns before
-   the call so `ask` never fails with "context length exceeded". Low effort,
-   removes a sharp edge. *Shipped:* `llm.context_tokens` (with a per-template
-   `context_tokens` override) bounds the rendered prompt; over budget `ask`
-   compacts the retrieved text (`internal/squeeze`), then drops the
-   lowest-ranked chunks, then fails locally. Subplan:
-   [`2026-09-05-2317-c9baa8f-33-context-guard.md`](../archive/2026-09-05-2317-c9baa8f-33-context-guard.md).
+2. ✅ [#141](../../../../issues/141) **Context-window budget guard on `ask`.** *(user-requested: context management)* `retrieval.max_tokens` already trims retrieved chunks, but nothing bounds the *whole* prompt (system + template + chunks + question) against the model's context window. Add a single budget check that trims/warns before the call so `ask` never fails with "context length exceeded". Low effort, removes a sharp edge. *Shipped:* `llm.context_tokens` (with a per-template `context_tokens` override) bounds the rendered prompt; over budget `ask` compacts the retrieved text (`internal/squeeze`), then drops the lowest-ranked chunks, then fails locally. Subplan: [`2026-09-05-2317-c9baa8f-33-context-guard.md`](../archive/2026-09-05-2317-c9baa8f-33-context-guard.md).
 
 3. ✅ **Export / import / backup.** `tbuk export <file>` and `tbuk import <file>` to snapshot a knowledge base (DB + extracted cache, or a portable dump). High value for a local-first tool; mostly plumbing over existing repos.
 
