@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gotofritz/timbuktu/internal/config"
+	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/search"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
@@ -109,6 +110,8 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		printCheck(w, "model", CheckLLMModel(cfg.LLM.BaseURL, cfg.LLM.Model, client), "")
 	}
 	printCheck(w, "max_tokens", fmt.Sprintf("%d", cfg.LLM.MaxTokens), "")
+	ctxMsg, ctxStatus := contextBudgetMsg(cfg.LLM)
+	printCheck(w, "context", ctxMsg, ctxStatus)
 
 	printSection(w, "Embedding ("+cfg.Embedding.Provider+")")
 	printCheck(w, "url", cfg.Embedding.BaseURL, "")
@@ -172,9 +175,55 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 			names[i] = m.Name
 		}
 		printCheck(w, "templates", strings.Join(names, ", "), "✓")
+		budgetMsg, budgetStatus := templateBudgetsMsg(manifests, cfg.LLM)
+		printCheck(w, "budgets", budgetMsg, budgetStatus)
 	}
 
 	return nil
+}
+
+// contextBudgetMsg describes the context window and what it leaves for the
+// prompt once the reply's max_tokens are held back. A window of 0 means the
+// guard is off — legal, but worth saying, since an oversized prompt is then
+// only caught by the provider.
+func contextBudgetMsg(cfg config.LLMConfig) (msg, status string) {
+	if cfg.ContextTokens <= 0 {
+		return "0 — budget guard off; an oversized prompt is only caught by the provider", ""
+	}
+	if cfg.ContextTokens <= cfg.MaxTokens {
+		return fmt.Sprintf(
+			"%d ≤ max_tokens %d — no tokens left for the prompt; raise llm.context_tokens",
+			cfg.ContextTokens, cfg.MaxTokens), "✗"
+	}
+	return fmt.Sprintf("%d (%d for the prompt after max_tokens %d)",
+		cfg.ContextTokens, cfg.ContextTokens-cfg.MaxTokens, cfg.MaxTokens), "✓"
+}
+
+// templateBudgetsMsg names the templates whose own max_tokens swallows the
+// window they run in — every ask on one fails the budget check, so it is worth
+// hearing before the first ask does.
+func templateBudgetsMsg(manifests []prompts.Manifest, cfg config.LLMConfig) (msg, status string) {
+	var over []string
+	for _, m := range manifests {
+		window := m.ContextTokens
+		if window <= 0 {
+			window = cfg.ContextTokens
+		}
+		reserve := m.MaxTokens
+		if reserve <= 0 {
+			reserve = cfg.MaxTokens
+		}
+		if window > 0 && reserve >= window {
+			over = append(over, fmt.Sprintf("%s: max_tokens %d ≥ window %d", m.Name, reserve, window))
+		}
+	}
+	if len(over) > 0 {
+		return strings.Join(over, "; ") + " — no room for a prompt; lower max_tokens or raise context_tokens", "✗"
+	}
+	if cfg.ContextTokens <= 0 {
+		return "not checked (context guard off)", ""
+	}
+	return "every template leaves room for a prompt", "✓"
 }
 
 // staleTokenizerMsg describes an index built under an earlier tokenizer and
