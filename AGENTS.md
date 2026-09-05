@@ -1,5 +1,21 @@
 # AGENTS.md
 
+## Status: proof of concept
+
+This project is a proof of concept with one user and no installs to keep
+working. Backwards compatibility is not a goal, so do not spend design effort
+on upgrade paths.
+
+When a change breaks an existing local database, index or cache, do not add a
+versioned migration for it. Write a throwaway script under `scripts/`, say in
+the PR how to run it, and delete it once it has done its job. The migration
+framework in `internal/storage/migrate.go` stays for the schema it already
+records; it is not a reason to hold back a change or to carry compatibility
+code. Re-extracting, re-indexing or rebuilding from scratch is an acceptable
+answer, and so is telling the user to delete the data root and start again.
+
+Revisit this section once the project has users other than its author.
+
 ## Read First
 
 - `README.md` — project overview
