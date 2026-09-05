@@ -65,22 +65,18 @@ scattered across it; the matrix above points at them by group.
    while sharing one prompt/cache root (`--db`/`TBUK_DB`) and named collections
    resolved from config.
 
-2. **Context-window budget guard on `ask`.** *(user-requested: context management)*
+2. [#141](../../../../issues/141) **Context-window budget guard on `ask`.** *(user-requested: context management)*
    `retrieval.max_tokens` already trims retrieved chunks, but nothing bounds
    the *whole* prompt (system + template + chunks + question) against the
    model's context window. Add a single budget check that trims/warns before
    the call so `ask` never fails with "context length exceeded". Low effort,
    removes a sharp edge.
 
-3. **Export / import / backup.** `tbuk export <file>` and `tbuk import <file>`
-   to snapshot a knowledge base (DB + extracted cache, or a portable dump).
-   High value for a local-first tool; mostly plumbing over existing repos.
+3. ✅ **Export / import / backup.** `tbuk export <file>` and `tbuk import <file>` to snapshot a knowledge base (DB + extracted cache, or a portable dump). High value for a local-first tool; mostly plumbing over existing repos.
 
-4. **More extractors.** Add `docx`, `epub`, and source-code files to the
-   `Extractor` backends. The interface already exists — each backend is small
-   and independently testable.
+4. [#124](../../../../issues/124) **More extractors.** Add `docx`, `epub`, and source-code files to the `Extractor` backends. The interface already exists — each backend is small and independently testable.
 
-32. **Topics (tags).** *(user-requested)* Tag documents at ingest
+32. [#115](../../../../issues/115),  [#116](../../../../issues/116), *[#117](../../../../issues/117)*Topics (tags).** *(user-requested)* Tag documents at ingest
     (`--topic x,y`) or later (`tbuk topic add`); scope `search`/`ask` with
     `--topic`; manage with `tbuk topic list/show/rename/delete`;
     `tbuk topic digest <x>` synthesizes everything under a topic via the LLM;
@@ -93,23 +89,11 @@ scattered across it; the matrix above points at them by group.
 
 ## Big Bets — high impact, high effort
 
-5. **Conversational context / multi-turn `ask`.** *(user-requested: context management)*
-   `ask` is single-shot today. Introduce a session concept: keep a bounded
-   conversation history, feed prior turns back into the prompt within the
-   context budget, and let retrieval consider the running thread. This is the
-   deep version of "context management" and touches `cli`, `retrieval`,
-   `prompts`, and possibly storage (session persistence).
+5. [#145](../../../../issues/145) **Conversational context / multi-turn `ask`.** *(user-requested: context management)* `ask` is single-shot today. Introduce a session concept: keep a bounded conversation history, feed prior turns back into the prompt within the context budget, and let retrieval consider the running thread. This is the deep version of "context management" and touches `cli`, `retrieval`, `prompts`, and possibly storage (session persistence).
 
-6. **`sqlite-vec` ANN index.** Vector search is a full table scan (fine below
-   ~100k chunks). Swapping in `sqlite-vec` for approximate nearest-neighbour
-   keeps search fast at scale. The `Searcher` interface was designed for this
-   swap, but it's still real integration + benchmarking work.
+6. [#127](../../../../issues/127) **`sqlite-vec` ANN index.** Vector search is a full table scan (fine below ~100k chunks). Swapping in `sqlite-vec` for approximate nearest-neighbour keeps search fast at scale. The `Searcher` interface was designed for this swap, but it's still real integration + benchmarking work.
 
-7. **Retrieval evaluation harness.** A repeatable way to measure retrieval
-   quality (labelled query→chunk sets, recall/MRR/nDCG). Unlocks confident
-   tuning of chunking, hybrid weights, and re-ranking instead of guessing.
-   Expanded as **#30** (retrieval eval split from generation eval); it gates
-   the whole **Retrieval Quality** cluster below.
+7. [#126](../../../../issues/126) **Retrieval evaluation harness.** A repeatable way to measure retrieval quality (labelled query→chunk sets, recall/MRR/nDCG). Unlocks confident tuning of chunking, hybrid weights, and re-ranking instead of guessing. Expanded as **#30** (retrieval eval split from generation eval); it gates the whole **Retrieval Quality** cluster below.
 
 8. **Re-ranking stage.** Insert an optional cross-encoder / LLM re-rank between
    hybrid retrieval and prompt assembly to lift top-k precision. Pairs
