@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -477,6 +478,236 @@ func TestHybridSearch_keywordLegSurvivesAQuestion(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("want /ppas.md fused in from the keyword leg, got %+v", paths(results))
+	}
+}
+
+// ── Query semantics (issue #136) ───────────────────────────────────────────────
+
+// seedForms indexes the two chunks the query-semantics rules are stated
+// against: the identifier written with an underscore, and the same words
+// written apart. Both are plain prose, so searchtext.Reduce passes them
+// through and what separates them in the index is the tokenizer alone.
+func seedForms(t *testing.T, db *sql.DB, emb []float32) {
+	t.Helper()
+	under := seedDoc(t, db, "/under.md", "Underscore")
+	seedChunk(t, db, under, 0, "the main_consumption register is read hourly", emb)
+	spaced := seedDoc(t, db, "/spaced.md", "Spaced")
+	seedChunk(t, db, spaced, 0, "the main consumption register is read hourly", emb)
+}
+
+// The rules of issue #136 on the keyword leg. Typing the punctuation is a
+// signal of intent: someone who goes to the trouble of typing
+// `main_consumption` wants that string, and someone who types the words apart
+// is happy with either form.
+func TestKeywordSearch_operatorSemantics(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"exact term matches the underscore form only", "main_consumption", []string{"/under.md"}},
+		{"negation excludes the underscore form", "main consumption -main_consumption", []string{"/spaced.md"}},
+		{"a quoted phrase matches the words as written", `"main consumption"`, []string{"/spaced.md"}},
+		{"stop words survive inside a phrase", `"the main consumption"`, []string{"/spaced.md"}},
+		{"an inner dash is part of the term, not an exclusion", "read-hourly", nil},
+		{"an exclusion with nothing to exclude from matches nothing", "-main_consumption", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openTestDB(t)
+			seedForms(t, db, nil)
+
+			s := search.New(db, nil)
+			results, err := s.Keyword(context.Background(), tt.query, search.Options{TopK: 5, Operators: true})
+			if err != nil {
+				t.Fatalf("Keyword: %v", err)
+			}
+			assertPaths(t, results, tt.want)
+		})
+	}
+}
+
+// The loose query reaches an identifier because searchtext.Reduce emitted its
+// split form into the indexed text (issue #138) — not because the tokenizer
+// took the identifier apart, which is exactly what it no longer does. So the
+// reach depends on the encoding: an identifier inside a fence or an inline
+// span carries its split form, one written bare in prose does not.
+func TestKeywordSearch_looseQueryReachesSplitForms(t *testing.T) {
+	db := openTestDB(t)
+	code := seedDoc(t, db, "/code.md", "Code")
+	seedChunk(t, db, code, 0, "```go\nfunc readMeter() { main_consumption++ }\n```", nil)
+	prose := seedDoc(t, db, "/prose.md", "Prose")
+	seedChunk(t, db, prose, 0, "the main consumption register is read hourly", nil)
+	span := seedDoc(t, db, "/span.md", "Span")
+	seedChunk(t, db, span, 0, "the `main_consumption` register is read hourly", nil)
+	bare := seedDoc(t, db, "/bare.md", "Bare prose")
+	seedChunk(t, db, bare, 0, "the main_consumption register is read hourly", nil)
+
+	tests := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"exact term reaches every encoding of it", "main_consumption",
+			[]string{"/bare.md", "/code.md", "/span.md"}},
+		{"loose words reach the split forms, but not a bare prose identifier", "main consumption",
+			[]string{"/code.md", "/prose.md", "/span.md"}},
+		{"negation leaves the prose behind", "main consumption -main_consumption",
+			[]string{"/prose.md"}},
+		{"camelCase identifier", "readMeter", []string{"/code.md"}},
+		{"a word only the split form carries", "meter", []string{"/code.md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := search.New(db, nil)
+			results, err := s.Keyword(context.Background(), tt.query, search.Options{TopK: 10, Operators: true})
+			if err != nil {
+				t.Fatalf("Keyword: %v", err)
+			}
+			assertPaths(t, results, tt.want)
+		})
+	}
+}
+
+// The goal of the encoding working end to end: a prose query finds the code
+// that defines the thing. Every chunk here contains "read", so an OR-combined
+// query reaches them all — what matters is that the split form of readMeter
+// puts the code chunk on top.
+func TestKeywordSearch_proseQueryRanksTheCodeFirst(t *testing.T) {
+	db := openTestDB(t)
+	code := seedDoc(t, db, "/code.md", "Code")
+	seedChunk(t, db, code, 0, "```go\nfunc readMeter() { main_consumption++ }\n```", nil)
+	prose := seedDoc(t, db, "/prose.md", "Prose")
+	seedChunk(t, db, prose, 0, "the main consumption register is read hourly", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "read meter", search.Options{TopK: 5, Operators: true})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	if len(results) == 0 || results[0].Path != "/code.md" {
+		t.Errorf("want /code.md ranked first, got %v", paths(results))
+	}
+}
+
+// A phrase matches the words adjacent in the *indexed* text, and the split
+// form searchtext.Reduce emits sits right beside the identifier it came from —
+// so a phrase alone cannot separate the two forms once an identifier is in a
+// code span. Combining it with an exclusion can, which is the composition the
+// user guide points at.
+func TestKeywordSearch_phraseAgainstASplitForm(t *testing.T) {
+	db := openTestDB(t)
+	span := seedDoc(t, db, "/span.md", "Span")
+	seedChunk(t, db, span, 0, "the `main_consumption` register is read hourly", nil)
+	prose := seedDoc(t, db, "/prose.md", "Prose")
+	seedChunk(t, db, prose, 0, "the main consumption register is read hourly", nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), `"main consumption"`, search.Options{TopK: 5, Operators: true})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	assertPaths(t, results, []string{"/prose.md", "/span.md"})
+
+	results, err = s.Keyword(context.Background(), `"main consumption" -main_consumption`,
+		search.Options{TopK: 5, Operators: true})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	assertPaths(t, results, []string{"/prose.md"})
+}
+
+// Without Operators the same input is a bag of words, which is what `tbuk ask`
+// sends: a question is not an expression, and reading one as an expression is
+// how its keyword leg comes back empty.
+func TestKeywordSearch_lenientPathIgnoresOperators(t *testing.T) {
+	db := openTestDB(t)
+	seedForms(t, db, nil)
+
+	s := search.New(db, nil)
+	results, err := s.Keyword(context.Background(), "consumption -main_consumption", search.Options{TopK: 5})
+	if err != nil {
+		t.Fatalf("Keyword: %v", err)
+	}
+	assertPaths(t, results, []string{"/spaced.md"})
+}
+
+// An exclusion has to survive fusion. The keyword leg drops the excluded chunk,
+// but the vector leg knows nothing about NOT and would hand it straight back.
+func TestHybridSearch_honoursExclusions(t *testing.T) {
+	db := openTestDB(t)
+	seedForms(t, db, []float32{1, 0, 0})
+
+	s := search.New(db, &stubEmbedder{vec: []float32{1, 0, 0}, dim: 3})
+	results, err := s.Hybrid(context.Background(), "main consumption -main_consumption",
+		search.Options{TopK: 5, Operators: true})
+	if err != nil {
+		t.Fatalf("Hybrid: %v", err)
+	}
+	assertPaths(t, results, []string{"/spaced.md"})
+}
+
+// The vector leg embeds the positive half of the query. Embedding the operator
+// syntax verbatim would pull the excluded chunks towards the query.
+func TestVectorSearch_embedsPositiveTermsOnly(t *testing.T) {
+	db := openTestDB(t)
+	seedForms(t, db, []float32{1, 0, 0})
+
+	emb := &recordingEmbedder{stubEmbedder: stubEmbedder{vec: []float32{1, 0, 0}, dim: 3}}
+	s := search.New(db, emb)
+	if _, err := s.Vector(context.Background(), `"main consumption" register -main_consumption`,
+		search.Options{TopK: 5, Operators: true}); err != nil {
+		t.Fatalf("Vector: %v", err)
+	}
+	if want := "main consumption register"; emb.last != want {
+		t.Errorf("want embedded text %q, got %q", want, emb.last)
+	}
+}
+
+// A query with nothing left to embed never reaches the embedder.
+func TestVectorSearch_exclusionOnlyQueryReturnsNothing(t *testing.T) {
+	db := openTestDB(t)
+	seedForms(t, db, []float32{1, 0, 0})
+
+	emb := &recordingEmbedder{stubEmbedder: stubEmbedder{vec: []float32{1, 0, 0}, dim: 3}}
+	s := search.New(db, emb)
+	results, err := s.Vector(context.Background(), "-main_consumption", search.Options{TopK: 5, Operators: true})
+	if err != nil {
+		t.Fatalf("Vector: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("want no results, got %v", paths(results))
+	}
+	if emb.last != "" {
+		t.Errorf("want the embedder left alone, got %q", emb.last)
+	}
+}
+
+// recordingEmbedder remembers the last text it was asked to embed.
+type recordingEmbedder struct {
+	stubEmbedder
+	last string
+}
+
+func (r *recordingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) > 0 {
+		r.last = texts[0]
+	}
+	return r.stubEmbedder.Embed(ctx, texts)
+}
+
+// assertPaths compares the paths of results with want, order-insensitively.
+func assertPaths(t *testing.T, results []search.SearchResult, want []string) {
+	t.Helper()
+	got := paths(results)
+	sort.Strings(got)
+	if len(got) != len(want) {
+		t.Fatalf("want %v, got %v", want, got)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, got)
+		}
 	}
 }
 

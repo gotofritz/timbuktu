@@ -25,6 +25,13 @@ type Options struct {
 	TopK     int               // default 5
 	MinScore float64           // skip results below this threshold
 	Metadata map[string]string // AND-combined metadata pre-filter, applied by Vector/Keyword/Hybrid
+
+	// Operators reads the query as an expression rather than as a bag of
+	// words: a quoted run is a phrase, and a leading '-' excludes. `tbuk
+	// search` sets it, because a person typing punctuation means it. `tbuk
+	// ask` does not: it sends a natural-language question, where the lenient
+	// reading is what keeps the keyword leg from coming back empty.
+	Operators bool
 }
 
 func (o *Options) topK() int {

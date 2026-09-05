@@ -151,3 +151,94 @@ func TestRunMigrations_acceptsADatabaseFromTheTwoStepBuild(t *testing.T) {
 		t.Fatalf("reopening a two-step knowledge base: %v", err)
 	}
 }
+
+// The index has to keep '_' and '-' inside a token, or nothing downstream can
+// tell main_consumption from the same words written apart (issue #136).
+func TestRunMigrations_indexKeepsPunctuationInsideTokens(t *testing.T) {
+	db := openRawDB(t)
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+	seed := func(id int, text string) {
+		t.Helper()
+		if _, err := db.Exec(
+			`INSERT INTO documents(id,path,sha256,title,mime_type,created_at,updated_at)
+			 VALUES(?,?, 'x','t','text/markdown','t','t')`, id, text); err != nil {
+			t.Fatalf("insert document: %v", err)
+		}
+		if _, err := db.Exec(
+			`INSERT INTO chunks(document_id,chunk_index,text,search_text) VALUES(?,0,?,?)`,
+			id, text, text); err != nil {
+			t.Fatalf("insert chunk: %v", err)
+		}
+	}
+	seed(1, "the main_consumption register")
+	seed(2, "the main consumption register")
+
+	matches := func(match string) []string {
+		t.Helper()
+		rows, err := db.Query(`SELECT search_text FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rowid`, match)
+		if err != nil {
+			t.Fatalf("match %s: %v", match, err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+
+	if got := matches(`"main_consumption"`); len(got) != 1 || !strings.Contains(got[0], "main_consumption") {
+		t.Errorf(`"main_consumption" matched %v, want the underscore form only`, got)
+	}
+	if got := matches(`("main" OR "consumption") NOT ("main_consumption")`); len(got) != 1 ||
+		strings.Contains(got[0], "main_consumption") {
+		t.Errorf("negation matched %v, want the space form only", got)
+	}
+}
+
+func TestHasPunctuationTokenizer(t *testing.T) {
+	db := openRawDB(t)
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+	ok, err := HasPunctuationTokenizer(db)
+	if err != nil {
+		t.Fatalf("HasPunctuationTokenizer: %v", err)
+	}
+	if !ok {
+		t.Error("a current schema must report the tokenchars tokenizer")
+	}
+
+	// The shape a knowledge base built before issue #136 has.
+	for _, stmt := range []string{
+		`DROP TABLE chunks_fts`,
+		`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	ok, err = HasPunctuationTokenizer(db)
+	if err != nil {
+		t.Fatalf("HasPunctuationTokenizer: %v", err)
+	}
+	if ok {
+		t.Error("the default tokenizer must be reported as stale")
+	}
+}
+
+func TestHasPunctuationTokenizer_noIndex(t *testing.T) {
+	ok, err := HasPunctuationTokenizer(openRawDB(t))
+	if err != nil {
+		t.Fatalf("HasPunctuationTokenizer: %v", err)
+	}
+	if ok {
+		t.Error("a database with no index cannot have the tokenizer")
+	}
+}
