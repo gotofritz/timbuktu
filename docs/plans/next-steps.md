@@ -74,7 +74,7 @@ scattered across it; the matrix above points at them by group.
    `context_tokens` override) bounds the rendered prompt; over budget `ask`
    compacts the retrieved text (`internal/squeeze`), then drops the
    lowest-ranked chunks, then fails locally. Subplan:
-   **`33-context-guard.md`**.
+   [`2026-09-05-2317-c9baa8f-33-context-guard.md`](../archive/2026-09-05-2317-c9baa8f-33-context-guard.md).
 
 3. ✅ **Export / import / backup.** `tbuk export <file>` and `tbuk import <file>` to snapshot a knowledge base (DB + extracted cache, or a portable dump). High value for a local-first tool; mostly plumbing over existing repos.
 
