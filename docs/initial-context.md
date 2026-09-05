@@ -137,7 +137,9 @@ type Extractor interface {
 
 `preprocess.NewExtractor(mime)` returns the right backend. `DetectMIME(path)` maps extension → MIME.
 
-Backends: markdownExtractor (strips fences/headings), htmlExtractor (golang.org/x/net), plainTextExtractor, pdfExtractor (ledongthuc/pdf).
+Backends: markdownExtractor, htmlExtractor (golang.org/x/net), plainTextExtractor, pdfExtractor (ledongthuc/pdf).
+
+The markdown backend cuts a document into code and prose before touching anything: whatever sits inside backticks — a fenced block or an inline span — is copied out verbatim, and only the prose between gets its fences, headings, bold and emphasis markers stripped. Punctuation is part of a software term, so `main_consumption` and `__init__` survive extraction intact. In prose, underscore emphasis is only stripped at word boundaries, which leaves an unbackticked snake_case identifier alone too.
 
 SHA256: `preprocess.HashFile(path)` and `HashReader(r)`.
 
