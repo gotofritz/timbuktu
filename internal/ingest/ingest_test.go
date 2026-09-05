@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
@@ -798,3 +799,124 @@ func computeSHA(path string) (string, error) {
 
 // silence unused import
 var _ = fmt.Sprintf
+
+// ── search text (issue #138) ─────────────────────────────────────────────────
+
+// recordingEmbedder keeps every text it was asked to embed, so a test can
+// assert on the encoding the embedder was shown rather than on the vectors.
+type recordingEmbedder struct {
+	mu    sync.Mutex
+	dim   int
+	texts []string
+}
+
+func (m *recordingEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	m.mu.Lock()
+	m.texts = append(m.texts, texts...)
+	m.mu.Unlock()
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		out[i] = make([]float32, m.dim)
+	}
+	return out, nil
+}
+
+func (m *recordingEmbedder) Dimension() int { return m.dim }
+
+func (m *recordingEmbedder) joined() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return strings.Join(m.texts, "\n")
+}
+
+const codeNote = "The poll loop.\n\n```go\n// read the meter\nfunc readMeter(id int) error {\n\treturn nil\n}\n```\n"
+
+// A code chunk should embed as what it is about — its comments and names — not
+// as a wall of syntax.
+func TestIngester_embedsTheReducedEncoding(t *testing.T) {
+	db := openTestDB(t)
+	emb := &recordingEmbedder{dim: 4}
+	ing := newIngester(t, db, &mockExtractor{text: codeNote}, emb, t.TempDir())
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "note.md", codeNote)
+	if res := ing.IngestFile(context.Background(), path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("IngestFile: %v", res.Err)
+	}
+
+	sent := emb.joined()
+	if strings.Contains(sent, "func") || strings.Contains(sent, "```") {
+		t.Errorf("embedder was shown the syntax: %q", sent)
+	}
+	for _, want := range []string{"readMeter", "read", "meter"} {
+		if !strings.Contains(sent, want) {
+			t.Errorf("embedder was not shown %q: %q", want, sent)
+		}
+	}
+}
+
+// The faithful text survives alongside it: that is what search prints and what
+// the model is given.
+func TestIngester_storesBothEncodings(t *testing.T) {
+	db := openTestDB(t)
+	ing := newIngester(t, db, &mockExtractor{text: codeNote}, &mockEmbedder{dim: 4}, t.TempDir())
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "note.md", codeNote)
+	ctx := context.Background()
+	if res := ing.IngestFile(ctx, path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("IngestFile: %v", res.Err)
+	}
+
+	doc, err := storage.NewDocumentRepo(db.DB()).GetByPath(ctx, path)
+	if err != nil {
+		t.Fatalf("GetByPath: %v", err)
+	}
+	chunks, err := storage.NewChunkRepo(db.DB()).ListByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("ListByDocument: %v", err)
+	}
+	if len(chunks) == 0 {
+		t.Fatal("no chunks stored")
+	}
+	if !strings.Contains(chunks[0].Text, "func readMeter") {
+		t.Errorf("faithful text lost: %q", chunks[0].Text)
+	}
+	if strings.Contains(chunks[0].SearchText, "func readMeter") {
+		t.Errorf("search text was not reduced: %q", chunks[0].SearchText)
+	}
+	if !strings.Contains(chunks[0].SearchText, "readMeter") {
+		t.Errorf("search text lost the identifier: %q", chunks[0].SearchText)
+	}
+}
+
+// A chunk that reduces to nothing — all syntax, no names — must still be
+// embedded and indexed as something, or it drops out of the knowledge base.
+func TestIngester_fallsBackToTheFaithfulTextWhenReducedIsEmpty(t *testing.T) {
+	const pureSyntax = "```\n{ } ( ) ;\n```"
+	db := openTestDB(t)
+	emb := &recordingEmbedder{dim: 4}
+	ing := newIngester(t, db, &mockExtractor{text: pureSyntax}, emb, t.TempDir())
+
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "syntax.md", pureSyntax)
+	ctx := context.Background()
+	if res := ing.IngestFile(ctx, path, ingest.Options{}); res.Err != nil {
+		t.Fatalf("IngestFile: %v", res.Err)
+	}
+
+	if sent := emb.joined(); strings.TrimSpace(sent) == "" {
+		t.Error("embedder was sent an empty text")
+	}
+	doc, err := storage.NewDocumentRepo(db.DB()).GetByPath(ctx, path)
+	if err != nil {
+		t.Fatalf("GetByPath: %v", err)
+	}
+	chunks, err := storage.NewChunkRepo(db.DB()).ListByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("ListByDocument: %v", err)
+	}
+	if len(chunks) == 0 || strings.TrimSpace(chunks[0].SearchText) == "" {
+		t.Errorf("chunk stored with empty search_text: %+v", chunks)
+	}
+}

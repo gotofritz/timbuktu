@@ -25,6 +25,11 @@ type migration struct {
 // starts here. Nothing in the wild predates that, so there is no upgrade path
 // to carry: a knowledge base either does not exist yet or already has this
 // schema.
+//
+// schemaSQL is therefore edited in place rather than followed by a versioned
+// migration (AGENTS.md, "proof of concept"): a new knowledge base gets the
+// current shape, and an existing one is brought to it by a throwaway script
+// under scripts/ — chunks.search_text was added that way.
 const schemaVersion = 2
 
 var migrations = []migration{
@@ -55,7 +60,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index  INTEGER NOT NULL,
+    -- The chunk as written: what tbuk search prints and what tbuk ask feeds the
+    -- model. Code is readable here, fences and all.
     text         TEXT    NOT NULL,
+    -- The same chunk reduced for retrieval (internal/searchtext): prose as it
+    -- stands, code as its comments, identifiers and split forms. This is what
+    -- the FTS5 index below is built from and what the embedder is shown.
+    search_text  TEXT    NOT NULL DEFAULT '',
     token_count  INTEGER NOT NULL DEFAULT 0,
     embedding    BLOB,
     UNIQUE(document_id, chunk_index)
@@ -69,24 +80,39 @@ CREATE TABLE IF NOT EXISTS metadata (
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-    text,
+    search_text,
     content='chunks',
     content_rowid='id'
 );
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+    INSERT INTO chunks_fts(rowid, search_text) VALUES (new.id, new.search_text);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO chunks_fts(chunks_fts, rowid, search_text) VALUES ('delete', old.id, old.search_text);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
-    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+    INSERT INTO chunks_fts(chunks_fts, rowid, search_text) VALUES ('delete', old.id, old.search_text);
+    INSERT INTO chunks_fts(rowid, search_text) VALUES (new.id, new.search_text);
 END;
 `
+
+// HasSearchTextColumn reports whether chunks carries the search_text column.
+//
+// A knowledge base created before it existed opens and reads fine — its index
+// is still there — but every ingest into it fails on the missing column, so
+// something has to be able to ask. See scripts/ for the script that adds it.
+func HasSearchTextColumn(db *sql.DB) (bool, error) {
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('chunks') WHERE name='search_text'`,
+	).Scan(&n); err != nil {
+		return false, fmt.Errorf("storage.HasSearchTextColumn: %w", err)
+	}
+	return n > 0, nil
+}
 
 // RunMigrations applies any pending schema migrations.
 func RunMigrations(db *sql.DB) error {

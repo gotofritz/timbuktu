@@ -133,15 +133,21 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	printSection(w, "Search")
 	// FTS5 health depends only on the database, not on any embedding server.
 	ftsStatus := "✓"
+	encodingMsg, encodingStatus := "search_text (reduced encoding)", "✓"
 	if dbOK {
 		if db2, err2 := storage.Open(cfg.Database.Path); err2 == nil {
 			if err3 := search.CheckFTS5(db2.DB()); err3 != nil {
 				ftsStatus = "✗"
 			}
+			if ok, err3 := storage.HasSearchTextColumn(db2.DB()); err3 == nil && !ok {
+				encodingMsg = "chunks.search_text missing — run scripts/add-search-text/, then tbuk reindex"
+				encodingStatus = "✗"
+			}
 			_ = db2.Close()
 		}
 	}
 	printCheck(w, "fts5", "available", ftsStatus)
+	printCheck(w, "indexed", encodingMsg, encodingStatus)
 	printCheck(w, "vector", "available (cosine, in-process)", "✓")
 	printCheck(w, "hybrid", "available (RRF)", "✓")
 

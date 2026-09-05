@@ -11,8 +11,8 @@ import (
 var (
 	reFrontmatter = regexp.MustCompile(`(?s)^---\n.*?\n---\n?`)
 	// A fenced block runs from its opening fence to the matching closing fence,
-	// or to the end of the document when the fence was never closed. The capture
-	// is the code itself, which is kept verbatim.
+	// or to the end of the document when the fence was never closed. The whole
+	// match — markers included — is kept verbatim.
 	reFencedBlock = regexp.MustCompile("(?ms)^```[^\n]*\n(.*?)(?:\n?```[^\n]*$|\\z)")
 	reInlineCode  = regexp.MustCompile("`([^`\n]+)`")
 	reBold        = regexp.MustCompile(`\*\*(.+?)\*\*`)
@@ -22,9 +22,16 @@ var (
 type markdownExtractor struct{}
 
 // Extract strips markdown markup and keeps the text. Anything inside backticks
-// — a fenced block or an inline span — is code, so it is copied out untouched:
-// the punctuation in `main_consumption` or `__init__` is part of the term, and
-// rewriting it makes the term unfindable in the index and wrong on the page.
+// — a fenced block or an inline span — is code, so it is copied out untouched,
+// backticks and fences included: the punctuation in `main_consumption` or
+// `__init__` is part of the term, and rewriting it makes the term unfindable in
+// the index and wrong on the page.
+//
+// The markers are kept because they are the only record of which bytes are
+// code. internal/searchtext reduces a code region to its comments and
+// identifiers for the index and the embedding, and without the fence it cannot
+// tell code from the prose around it. They read as code on the page too, which
+// is what a reader and the model want anyway.
 func (e *markdownExtractor) Extract(_ context.Context, r io.Reader) (string, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -56,9 +63,9 @@ type segment struct {
 	isCode bool
 }
 
-// splitCode cuts text on every match of re, marking each match's captured group
-// as code and the text between matches as prose. The fence and backtick markers
-// themselves fall outside the capture, so they are dropped.
+// splitCode cuts text on every match of re, marking each match as code and the
+// text between matches as prose. The match includes the fence or backtick
+// markers, so they are carried through with the code they delimit.
 func splitCode(text string, re *regexp.Regexp) []segment {
 	var segs []segment
 	last := 0
@@ -66,7 +73,7 @@ func splitCode(text string, re *regexp.Regexp) []segment {
 		if m[0] > last {
 			segs = append(segs, segment{text: text[last:m[0]]})
 		}
-		segs = append(segs, segment{text: text[m[2]:m[3]], isCode: true})
+		segs = append(segs, segment{text: text[m[0]:m[1]], isCode: true})
 		last = m[1]
 	}
 	if last < len(text) {

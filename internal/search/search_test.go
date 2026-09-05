@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/gotofritz/timbuktu/internal/search"
+	"github.com/gotofritz/timbuktu/internal/searchtext"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
@@ -45,7 +46,9 @@ func seedDoc(t *testing.T, db *sql.DB, path, title string) int64 {
 	return id
 }
 
-// seedChunk inserts a chunk with optional embedding.
+// seedChunk inserts a chunk with optional embedding. search_text carries the
+// reduced encoding the FTS5 index is built from; for the prose these tests use
+// it is the text itself, which is what ingest stores too.
 func seedChunk(t *testing.T, db *sql.DB, docID int64, idx int, text string, emb []float32) int64 {
 	t.Helper()
 	var blob []byte
@@ -53,8 +56,8 @@ func seedChunk(t *testing.T, db *sql.DB, docID int64, idx int, text string, emb 
 		blob = storage.Float32SliceToBlob(emb)
 	}
 	res, err := db.Exec(
-		`INSERT INTO chunks(document_id,chunk_index,text,token_count,embedding) VALUES(?,?,?,?,?)`,
-		docID, idx, text, len(text)/4, blob,
+		`INSERT INTO chunks(document_id,chunk_index,text,search_text,token_count,embedding) VALUES(?,?,?,?,?,?)`,
+		docID, idx, text, searchtext.Reduce(text), len(text)/4, blob,
 	)
 	if err != nil {
 		t.Fatalf("seedChunk: %v", err)

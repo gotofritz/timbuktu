@@ -869,6 +869,33 @@ results are ranked by BM25 — so a document using a rare word you asked for bea
 one that only shares the ordinary ones. Ask for more words to get a better
 ranking, not a narrower filter.
 
+### Finding notes that contain code
+
+Notes about software are half prose and half code, and the code is mostly
+punctuation. Timbuktu does not search code as code — it is not a code search
+tool. What it answers is *which of my notes talks about this*, and in a code
+block that is carried by the comments, the names, and the strings.
+
+So a fenced block is indexed as those, and its syntax is thrown away. Each name
+is indexed twice over: as you wrote it, and as the words it is made of. A block
+containing
+
+```go
+// read the meter
+func readMeter(id int) error {
+    return fmt.Errorf("read holding: %w", err)
+}
+```
+
+is found by `readMeter`, by `read meter`, by `read the meter` (the comment), and
+by `read holding` (the error string) — but not by `func` or `return`. The same
+goes for an identifier in an inline span in ordinary prose: a note mentioning
+`` `main_consumption` `` answers both `main_consumption` and `main consumption`.
+
+What you get *back* is the chunk as you wrote it, code fences and all. Only the
+index and the meaning-fingerprints see the reduced form; nothing is lost from
+your notes, and nothing changes about what `tbuk ask` shows the model.
+
 ### Semantic (meaning) search
 
 ```bash
@@ -1141,6 +1168,34 @@ backticks — a fenced code block or an inline span — is now kept exactly as
 written, and identifiers such as `snake_case` or `__init__` survive in ordinary
 prose too. If you indexed notes before that fix, `tbuk reindex` is what applies
 it to them.
+
+How code is indexed is another. Notes with code blocks used to be indexed and
+fingerprinted as their raw syntax; they are now indexed as their comments,
+names and strings, with each name also broken into words (see [Finding notes
+that contain code](#finding-notes-that-contain-code)). This changes the
+fingerprints as well as the index, so `tbuk reindex` is again what applies it.
+
+If your knowledge base was built before that change, one step comes first.
+`tbuk doctor` will say so under **Search**:
+
+```
+Search
+  fts5:      ✓ available
+  indexed:   ✗ chunks.search_text missing — run scripts/add-search-text/, then tbuk reindex
+```
+
+From a checkout of the source:
+
+```bash
+go run ./scripts/add-search-text ~/.tbuk/tbuk.sqlite   # your database path
+tbuk reindex
+```
+
+The first command adds the new column, fills it in from what is already stored,
+and rebuilds the search index, so search keeps working straight away. The second
+re-reads and re-fingerprints your documents, which is what actually applies the
+new encoding. Until the first has run, `tbuk ingest` will fail on a missing
+column.
 
 ### Backing up or moving your knowledge base
 

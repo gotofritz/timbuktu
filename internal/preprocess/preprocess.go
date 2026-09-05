@@ -49,7 +49,7 @@ func Extract(ctx context.Context, path string) (text, mime, sha string, err erro
 // not silently reused for content that has not changed. Bump it whenever
 // extraction output can differ for the same bytes: a backend swapped, a parser
 // upgraded, cleaning rules changed.
-const ExtractorVersion = 3
+const ExtractorVersion = 4
 
 // CacheName is the extracted-text filename for content with the given SHA256,
 // under the current extractor version.

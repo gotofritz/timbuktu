@@ -289,6 +289,73 @@ func TestRunDoctorTo_fts5CheckedWhenEmbedderDown(t *testing.T) {
 	}
 }
 
+// A knowledge base built before chunks.search_text existed still opens and
+// still answers queries, but every ingest into it fails on the missing column.
+// Doctor has to say so, and name the script that fixes it (issue #138).
+func TestRunDoctorTo_reportsMissingSearchTextColumn(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+	dropSearchText(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "search_text") {
+		t.Errorf("expected the missing column to be reported, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "scripts/") {
+		t.Errorf("expected the report to name the script that fixes it, got:\n%s", out.String())
+	}
+}
+
+func TestRunDoctorTo_searchTextColumnPresent(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if strings.Contains(out.String(), "scripts/") {
+		t.Errorf("a current database should need no migration script, got:\n%s", out.String())
+	}
+}
+
+// dropSearchText puts the schema back the way it was before search_text
+// existed: the index and its triggers over chunks.text, and no reduced column.
+func dropSearchText(t *testing.T, path string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, stmt := range []string{
+		`DROP TRIGGER chunks_ai`,
+		`DROP TRIGGER chunks_ad`,
+		`DROP TRIGGER chunks_au`,
+		`DROP TABLE chunks_fts`,
+		`ALTER TABLE chunks DROP COLUMN search_text`,
+		`CREATE VIRTUAL TABLE chunks_fts USING fts5(text, content='chunks', content_rowid='id')`,
+		`CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+		    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+		 END`,
+	} {
+		if _, err := db.DB().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+}
+
 // ── CheckEmbeddingDimension ───────────────────────────────────────────────────
 
 func seedEmbeddedChunk(t *testing.T, path string, dim int) {
