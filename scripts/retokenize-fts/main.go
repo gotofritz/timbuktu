@@ -1,16 +1,21 @@
-// Command retokenize-fts brings a knowledge base built before issue #136 up to
-// the current schema: it drops chunks_fts and recreates it with the
-// unicode61 tokenchars '_-' tokenizer, then rebuilds the index.
+// Command retokenize-fts brings a knowledge base built under an earlier
+// tokenizer up to the current schema: it drops chunks_fts and recreates it
+// with the unicode61 tokenchars '_' tokenizer, then rebuilds the index.
 //
-// Without it, '_' and '-' are separators in the stored index, so
-// main_consumption and the same words written apart are one and the same term:
-// an exact-term query, an exclusion and a phrase all answer as if the
-// punctuation had never been typed. Nothing errors — the answers are just
-// wrong.
+// Two shapes need it. An index from before issue #136 has '_' as a separator,
+// so main_consumption and the same words written apart are one and the same
+// term: an exact-term query, an exclusion and a phrase all answer as if the
+// punctuation had never been typed. An index from #136 itself has '-' as a
+// token character on top, which was meant for kebab-case identifiers but
+// applies to every hyphen: long-term is one token there, so it answers to
+// neither "long" nor "long term" (issue #143). Nothing errors either way — the
+// answers are just wrong.
 //
 // This is a throwaway (AGENTS.md, "proof of concept"): there is no versioned
 // migration for the change, and this script exists only until the one
-// knowledge base that needs it has been converted. Delete it then.
+// knowledge base that needs it has been converted. Delete it then. It is the
+// same script #136 shipped, pointed at the tokenizer #143 settled on, so a
+// knowledge base already converted once needs converting again.
 //
 // Usage:
 //
@@ -52,7 +57,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "retokenize-fts: %v\n", err) //nolint:errcheck
 		os.Exit(1)
 	}
-	fmt.Println("index rebuilt with tokenize=\"unicode61 tokenchars '_-'\"") //nolint:errcheck
+	fmt.Println("index rebuilt with tokenize=\"unicode61 tokenchars '_'\"") //nolint:errcheck
 }
 
 // retokenize recreates chunks_fts under the new tokenizer and rebuilds it from
@@ -71,7 +76,7 @@ func retokenize(db *sql.DB) error {
 		    search_text,
 		    content='chunks',
 		    content_rowid='id',
-		    tokenize="unicode61 tokenchars '_-'"
+		    tokenize="unicode61 tokenchars '_'"
 		)`); err != nil {
 		return fmt.Errorf("recreate index: %w", err)
 	}

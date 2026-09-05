@@ -509,7 +509,8 @@ func TestKeywordSearch_operatorSemantics(t *testing.T) {
 		{"negation excludes the underscore form", "main consumption -main_consumption", []string{"/spaced.md"}},
 		{"a quoted phrase matches the words as written", `"main consumption"`, []string{"/spaced.md"}},
 		{"stop words survive inside a phrase", `"the main consumption"`, []string{"/spaced.md"}},
-		{"an inner dash is part of the term, not an exclusion", "read-hourly", nil},
+		{"an inner dash is not an exclusion; it reads as a phrase", "read-hourly",
+			[]string{"/spaced.md", "/under.md"}},
 		{"an exclusion with nothing to exclude from matches nothing", "-main_consumption", nil},
 	}
 	for _, tt := range tests {
@@ -524,6 +525,50 @@ func TestKeywordSearch_operatorSemantics(t *testing.T) {
 			}
 			assertPaths(t, results, tt.want)
 		})
+	}
+}
+
+// Issue #143. The tokenizer of #136 made '-' a token character everywhere, not
+// only inside identifiers, so hyphenated English was one token and the words it
+// is made of no longer reached it. Nobody types the hyphen in a question, and
+// hyphenated prose is ordinary writing rather than a code affectation, so the
+// loss landed on the lenient `tbuk ask` path across the whole corpus. '-' is a
+// separator again: a compound answers to its words, to the words apart, and to
+// itself as written.
+func TestKeywordSearch_hyphenatedProseReachesItsWords(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"one word of the compound", "long", []string{"/compounds.md"}},
+		{"its other word", "term", []string{"/compounds.md"}},
+		{"the words apart", "long term", []string{"/compounds.md"}},
+		{"the compound as written", "long-term", []string{"/compounds.md"}},
+		{"a word buried in a longer compound", "art", []string{"/more.md"}},
+		{"a question naming neither hyphen", "what do we track day to day",
+			[]string{"/compounds.md"}},
+	}
+	for _, tt := range tests {
+		// Both readings: `tbuk ask` sends the lenient one, `tbuk search` the
+		// operator-aware one, and a hyphen is a separator under either.
+		for _, operators := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s (operators=%v)", tt.name, operators), func(t *testing.T) {
+				db := openTestDB(t)
+				compounds := seedDoc(t, db, "/compounds.md", "Compounds")
+				seedChunk(t, db, compounds, 0, "we track long-term costs day-to-day", nil)
+				more := seedDoc(t, db, "/more.md", "More compounds")
+				seedChunk(t, db, more, 0, "a state-of-the-art well-known approach", nil)
+
+				s := search.New(db, nil)
+				results, err := s.Keyword(context.Background(), tt.query,
+					search.Options{TopK: 5, Operators: operators})
+				if err != nil {
+					t.Fatalf("Keyword: %v", err)
+				}
+				assertPaths(t, results, tt.want)
+			})
+		}
 	}
 }
 
@@ -619,7 +664,9 @@ func TestKeywordSearch_phraseAgainstASplitForm(t *testing.T) {
 
 // Without Operators the same input is a bag of words, which is what `tbuk ask`
 // sends: a question is not an expression, and reading one as an expression is
-// how its keyword leg comes back empty.
+// how its keyword leg comes back empty. The dash excludes nothing here — it is
+// punctuation the tokenizer drops, so the field searches for the word it is
+// stuck to rather than for a term no document can contain.
 func TestKeywordSearch_lenientPathIgnoresOperators(t *testing.T) {
 	db := openTestDB(t)
 	seedForms(t, db, nil)
@@ -629,7 +676,7 @@ func TestKeywordSearch_lenientPathIgnoresOperators(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Keyword: %v", err)
 	}
-	assertPaths(t, results, []string{"/spaced.md"})
+	assertPaths(t, results, []string{"/spaced.md", "/under.md"})
 }
 
 // An exclusion has to survive fusion. The keyword leg drops the excluded chunk,

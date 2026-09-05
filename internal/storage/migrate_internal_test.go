@@ -202,43 +202,63 @@ func TestRunMigrations_indexKeepsPunctuationInsideTokens(t *testing.T) {
 	}
 }
 
-func TestHasPunctuationTokenizer(t *testing.T) {
+// The tokenizer is what an exact term, a phrase and an exclusion mean, so
+// doctor has to be able to tell the current one from every shape an older
+// knowledge base can carry.
+func TestReadFTSTokenizer(t *testing.T) {
 	db := openRawDB(t)
 	if err := runMigrations(db, migrations); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
-	ok, err := HasPunctuationTokenizer(db)
+	got, err := ReadFTSTokenizer(db)
 	if err != nil {
-		t.Fatalf("HasPunctuationTokenizer: %v", err)
+		t.Fatalf("ReadFTSTokenizer: %v", err)
 	}
-	if !ok {
-		t.Error("a current schema must report the tokenchars tokenizer")
+	if got != FTSTokenizer {
+		t.Errorf("a current schema reports %q, want %q", got, FTSTokenizer)
 	}
 
-	// The shape a knowledge base built before issue #136 has.
-	for _, stmt := range []string{
-		`DROP TABLE chunks_fts`,
-		`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id')`,
-	} {
-		if _, err := db.Exec(stmt); err != nil {
-			t.Fatalf("%s: %v", stmt, err)
-		}
+	tests := []struct {
+		name string
+		ddl  string
+		want string
+	}{
+		{
+			"before #136: the FTS5 default, no tokenize clause",
+			`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id')`,
+			"",
+		},
+		{
+			"#136: '-' a token character too, hyphenated prose locked in one term",
+			`CREATE VIRTUAL TABLE chunks_fts USING fts5(search_text, content='chunks', content_rowid='id', ` +
+				`tokenize="unicode61 tokenchars '_-'")`,
+			`unicode61 tokenchars '_-'`,
+		},
 	}
-	ok, err = HasPunctuationTokenizer(db)
-	if err != nil {
-		t.Fatalf("HasPunctuationTokenizer: %v", err)
-	}
-	if ok {
-		t.Error("the default tokenizer must be reported as stale")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, stmt := range []string{`DROP TABLE chunks_fts`, tt.ddl} {
+				if _, err := db.Exec(stmt); err != nil {
+					t.Fatalf("%s: %v", stmt, err)
+				}
+			}
+			got, err := ReadFTSTokenizer(db)
+			if err != nil {
+				t.Fatalf("ReadFTSTokenizer: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("reported %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestHasPunctuationTokenizer_noIndex(t *testing.T) {
-	ok, err := HasPunctuationTokenizer(openRawDB(t))
+func TestReadFTSTokenizer_noIndex(t *testing.T) {
+	got, err := ReadFTSTokenizer(openRawDB(t))
 	if err != nil {
-		t.Fatalf("HasPunctuationTokenizer: %v", err)
+		t.Fatalf("ReadFTSTokenizer: %v", err)
 	}
-	if ok {
-		t.Error("a database with no index cannot have the tokenizer")
+	if got != "" {
+		t.Errorf("a database with no index reported %q, want no tokenizer", got)
 	}
 }
