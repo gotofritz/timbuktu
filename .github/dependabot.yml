@@ -7,7 +7,7 @@ updates:
     open-pull-requests-limit: 10
     groups:
       # modernc.org/* (pure-Go SQLite stack) release together; group their
-      # bumps into one PR to avoid churn.
+      # bumps into one PR to avoid churn
       modernc:
         patterns:
           - "modernc.org/*"
