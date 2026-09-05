@@ -341,3 +341,38 @@ func TestLoad_rejectsUnknownNormalizeFilter(t *testing.T) {
 		t.Errorf("error should name the unknown filter, got %q", err)
 	}
 }
+
+// A template pinned to its own model needs its own context window: manifest
+// context_tokens overrides llm.context_tokens for that template (#141).
+// Absent means "inherit the config", which is the zero value.
+func TestManifest_contextTokens(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "wide", map[string]string{
+		"manifest.yaml": "name: wide\ndescription: \"wide window\"\nmax_tokens: 4096\ncontext_tokens: 131072\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+	writeTemplate(t, dir, "inherits", map[string]string{
+		"manifest.yaml": "name: inherits\ndescription: \"no window of its own\"\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+
+	td := prompts.NewTemplateDir(dir)
+
+	wide, err := td.Load("wide")
+	if err != nil {
+		t.Fatalf("Load(wide): %v", err)
+	}
+	if got := wide.Manifest().ContextTokens; got != 131072 {
+		t.Errorf("context_tokens: want 131072, got %d", got)
+	}
+
+	inherits, err := td.Load("inherits")
+	if err != nil {
+		t.Fatalf("Load(inherits): %v", err)
+	}
+	if got := inherits.Manifest().ContextTokens; got != 0 {
+		t.Errorf("context_tokens default: want 0 (inherit config), got %d", got)
+	}
+}

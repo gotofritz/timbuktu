@@ -22,14 +22,17 @@ type VariableDefault struct {
 
 // Manifest is the parsed manifest.yaml for a prompt template.
 type Manifest struct {
-	Name        string                     `yaml:"name"`
-	Description string                     `yaml:"description"`
-	Model       string                     `yaml:"model"`
-	Temperature *float64                   `yaml:"temperature"` // nil = unset (provider default)
-	MaxTokens   int                        `yaml:"max_tokens"`
-	Retrieval   RetrievalConfig            `yaml:"retrieval"`
-	Variables   map[string]VariableDefault `yaml:"variables"`
-	Output      string                     `yaml:"output"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Model       string   `yaml:"model"`
+	Temperature *float64 `yaml:"temperature"` // nil = unset (provider default)
+	MaxTokens   int      `yaml:"max_tokens"`
+	// ContextTokens overrides llm.context_tokens for this template — the whole
+	// window of the model it pins, prompt and reply together. 0 = inherit.
+	ContextTokens int                        `yaml:"context_tokens"`
+	Retrieval     RetrievalConfig            `yaml:"retrieval"`
+	Variables     map[string]VariableDefault `yaml:"variables"`
+	Output        string                     `yaml:"output"`
 	// Normalize repairs model output that drifted from the shape system.tmpl
 	// asked for. Empty means the completion is passed through untouched.
 	Normalize normalize.Config `yaml:"normalize"`

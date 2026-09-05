@@ -42,6 +42,17 @@ func (c Config) Validate() error {
 	if c.LLM.MaxTokens <= 0 {
 		return fmt.Errorf("config: llm max_tokens must be positive, got %d", c.LLM.MaxTokens)
 	}
+	if c.LLM.ContextTokens < 0 {
+		return fmt.Errorf("config: llm context_tokens must not be negative, got %d", c.LLM.ContextTokens)
+	}
+	// The window has to hold the prompt *and* the reply. A window no larger
+	// than the output budget leaves nothing for the question, so every ask
+	// would fail the budget check — say so once, at load.
+	if c.LLM.ContextTokens > 0 && c.LLM.ContextTokens <= c.LLM.MaxTokens {
+		return fmt.Errorf(
+			"config: llm context_tokens (%d) must exceed max_tokens (%d), otherwise no tokens are left for the prompt",
+			c.LLM.ContextTokens, c.LLM.MaxTokens)
+	}
 	if c.Embedding.Dimension <= 0 {
 		return fmt.Errorf("config: embedding dimension must be positive, got %d", c.Embedding.Dimension)
 	}
@@ -99,6 +110,11 @@ type LLMConfig struct {
 	Model     string `yaml:"model"`
 	MaxTokens int    `yaml:"max_tokens"`
 	BaseURL   string `yaml:"base_url"`
+	// ContextTokens is the model's whole context window — prompt plus reply.
+	// `tbuk ask` fits the rendered prompt into what is left of it after
+	// MaxTokens, so an oversized prompt is caught here instead of by the
+	// provider. 0 turns the guard off.
+	ContextTokens int `yaml:"context_tokens"`
 }
 
 type EmbeddingConfig struct {
@@ -159,6 +175,11 @@ func relativeDefaults() Config {
 			// :11434, claude → api.anthropic.com, openai → api.openai.com), so
 			// switching provider doesn't silently target a stale localhost URL.
 			BaseURL: "",
+			// 8192 is the smallest window a current local model is usually
+			// served with, so the guard never trims a prompt the server would
+			// have accepted on a default setup. Raise it to the window your
+			// model actually has.
+			ContextTokens: 8192,
 		},
 		Embedding: EmbeddingConfig{
 			Provider:  "mlx",
@@ -279,6 +300,11 @@ func defaultConfigNode() (*yaml.Node, error) {
 		"  ollama                        → http://localhost:11434\n" +
 		"  claude                        → https://api.anthropic.com\n" +
 		"  openai                        → https://api.openai.com"
+
+	mapKey(mapValue(&node, "llm"), "context_tokens").HeadComment =
+		"context_tokens: the model's whole window (prompt + reply). tbuk ask fits\n" +
+			"the prompt into what is left after max_tokens, compacting and then\n" +
+			"dropping retrieved chunks; 0 disables the guard. Must exceed max_tokens."
 
 	mapKey(mapValue(&node, "embedding"), "base_url").HeadComment =
 		"base_url: leave empty to use the provider default (see llm above)"
