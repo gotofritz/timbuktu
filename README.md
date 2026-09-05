@@ -237,12 +237,15 @@ llm:
   provider: mlx      # mlx | llama | ollama | claude | openai
   model: ""          # provider default when empty; mlx: HF repo id served
   max_tokens: 4096   # output budget for one answer
+  base_url: ""       # empty = provider default: mlx/llama http://localhost:8080,
+                     # ollama :11434, claude api.anthropic.com, openai api.openai.com
   context_tokens: 8192   # the model's whole window (prompt + reply); 0 disables the ask budget guard
 
 embedding:
   provider: mlx      # mlx | llama | ollama | openai
   model: ""
   dimension: 768
+  base_url: ""       # empty = provider default (see llm above)
 
 chunking:
   size: 400          # tokens (approximated as chars/4); keep ≤ llama.cpp batch size (default 512)
@@ -638,7 +641,7 @@ text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `tbuk` command not found after install | Go bin dir not in PATH | Add `export PATH="$PATH:$(go env GOPATH)/bin"` to shell profile and restart terminal |
-| `tbuk doctor` shows LLM or embedding unreachable | Local server (MLX or llama.cpp) not running, or wrong port | Start your MLX server / llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` |
+| `tbuk doctor` shows LLM or embedding unreachable | Local server (MLX or llama.cpp) not running, or wrong port | Start your MLX server / llama.cpp; verify `llm.base_url` / `embedding.base_url` in `~/.tbuk/config.yaml` (every key is in the sample under [Configuration](#configuration)) |
 | `tbuk doctor` shows `hosted API — not probed` | Provider is `claude`/`openai` (no `/health` endpoint) | Expected — hosted APIs aren't probed; set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and use `tbuk ask` to verify connectivity |
 | `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, rate limit; a too-long prompt is normally caught locally first) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens`. If it *is* a context-length rejection, `llm.context_tokens` is set higher than the model's real window (or `0`) |
 | `tbuk ask` warns `compacted the retrieved text` or `dropped N of M retrieved chunks` | The rendered prompt exceeded `llm.context_tokens` minus the answer's `max_tokens` | Expected when the budget is tight — raise `llm.context_tokens` to your model's real window, lower `--top`, or lower the template's `max_tokens` |

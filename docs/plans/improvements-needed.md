@@ -43,8 +43,10 @@ Cobra generates bash/zsh/fish completions nearly for free. Expose `tbuk completi
 ### C2. More extractors (docx, epub, source code) [#124](../../../../issues/124)
 Supported inputs stop at `.md`/`.txt`/`.pdf`/`.html`. docx and epub are common personal-knowledge formats; both have small pure-Go parsing paths. Fits the existing `Extractor` interface without architectural change. (Roadmap Quick Win; sequencing after the in-flight Source abstraction, subplan 18, may be natural.)
 
-### C3. Document base_url and max_tokens in the sample config [#125](../../../../issues/125)
+### C3. Document base_url and max_tokens in the sample config [#125](../../../../issues/125) — ✅ DONE
 The README's sample `config.yaml` omits `llm.base_url`, `llm.max_tokens`, and `embedding.base_url`, though troubleshooting refers to them. Add them (commented) to the sample and the `tbuk init` default YAML so users don't have to discover keys from docs prose.
+
+**Shipped:** all three keys are in the README sample, commented with their defaults, and the troubleshooting row that names `base_url` points back at it. The `tbuk init` default YAML already emitted them (`defaultConfigNode` head comments), so only the README was behind.
 
 ### C4. Retrieval quality evaluation harness [#126](../../../../issues/126)
 A tiny eval command (fixed query→expected-doc pairs over a fixture corpus, reporting hit-rate/MRR) would let chunking/RRF/estimator changes (e.g. S1) be tuned with evidence instead of anecdote. Deliberately small; the full retrieval-quality cluster stays in `next-steps.md`.
