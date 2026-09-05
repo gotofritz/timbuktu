@@ -15,6 +15,7 @@ import (
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
 	"github.com/gotofritz/timbuktu/internal/search"
+	"github.com/gotofritz/timbuktu/internal/squeeze"
 )
 
 // retrieverFn is the signature used for testable dependency injection.
@@ -77,6 +78,7 @@ func newAskCmd() *cobra.Command {
 				noStream,
 				WithErrOut(cmd.ErrOrStderr()),
 				WithRequireContext(requireContext),
+				WithContextBudget(cfg.LLM.ContextTokens, cfg.LLM.MaxTokens),
 			)
 		},
 	}
@@ -112,6 +114,8 @@ type AskOption func(*askConfig)
 type askConfig struct {
 	errOut         io.Writer
 	requireContext bool
+	contextWindow  int // model context window (prompt + reply); 0 = guard off
+	outputReserve  int // tokens held back for the reply when the template sets none
 }
 
 // WithErrOut sets the writer for diagnostics such as the empty-context
@@ -121,6 +125,89 @@ func WithErrOut(w io.Writer) AskOption { return func(c *askConfig) { c.errOut = 
 // WithRequireContext makes RunAsk abort (instead of calling the LLM) when
 // retrieval returns no chunks.
 func WithRequireContext(b bool) AskOption { return func(c *askConfig) { c.requireContext = b } }
+
+// WithContextBudget bounds the rendered prompt against the model's context
+// window: window is the whole window (prompt + reply), outputReserve the tokens
+// held back for the reply when the template declares no max_tokens of its own.
+// A window of 0 disables the guard.
+func WithContextBudget(window, outputReserve int) AskOption {
+	return func(c *askConfig) {
+		c.contextWindow = window
+		c.outputReserve = outputReserve
+	}
+}
+
+// renderFn renders the prompt for a set of chunks.
+type renderFn func([]retrieval.RetrievedChunk) (system, user string, err error)
+
+// fittedPrompt is the prompt that survived the context budget, with whatever
+// had to be done to it to make it fit.
+type fittedPrompt struct {
+	chunks   []retrieval.RetrievedChunk
+	system   string
+	user     string
+	warnings []string
+}
+
+// promptTokens approximates what the rendered prompt costs, using the same
+// estimator (chars/4) as the chunker and the retrieval.max_tokens trim.
+func promptTokens(system, user string) int {
+	return chunking.CountTokens(system) + chunking.CountTokens(user)
+}
+
+// fitToContext renders the prompt and, when the estimate exceeds budget,
+// compacts the retrieved text and then drops the lowest-ranked chunks until it
+// fits. Compaction comes first because text the model can still read beats a
+// passage it can no longer cite. A prompt that overflows with no chunks left is
+// an error: the provider would reject it, and it can say so less usefully.
+func fitToContext(render renderFn, chunks []retrieval.RetrievedChunk, budget int) (fittedPrompt, error) {
+	system, user, err := render(chunks)
+	if err != nil {
+		return fittedPrompt{}, err
+	}
+	if budget > 0 && promptTokens(system, user) <= budget {
+		return fittedPrompt{chunks: chunks, system: system, user: user}, nil
+	}
+
+	if len(chunks) > 0 {
+		squeezed := squeeze.Chunks(chunks)
+		system, user, err = render(squeezed)
+		if err != nil {
+			return fittedPrompt{}, err
+		}
+		warnings := []string{
+			"warning: the prompt exceeds the model's context budget — compacted the retrieved " +
+				"text (whitespace and filler words) to make it fit",
+		}
+		if budget > 0 && promptTokens(system, user) <= budget {
+			return fittedPrompt{chunks: squeezed, system: system, user: user, warnings: warnings}, nil
+		}
+
+		// Trailing chunks rank lowest, so they are the cheapest to lose.
+		for kept := len(squeezed) - 1; kept >= 0; kept-- {
+			system, user, err = render(squeezed[:kept])
+			if err != nil {
+				return fittedPrompt{}, err
+			}
+			if budget > 0 && promptTokens(system, user) <= budget {
+				return fittedPrompt{
+					chunks: squeezed[:kept],
+					system: system,
+					user:   user,
+					warnings: append(warnings, fmt.Sprintf(
+						"warning: still over the context budget after compacting — dropped %d of %d "+
+							"retrieved chunks; raise llm.context_tokens if your model's window is larger",
+						len(squeezed)-kept, len(squeezed))),
+				}, nil
+			}
+		}
+	}
+
+	return fittedPrompt{}, fmt.Errorf(
+		"prompt needs ~%d tokens but only %d are available for it, even with no retrieved context: "+
+			"shorten the question, or raise llm.context_tokens (or lower the template's max_tokens)",
+		promptTokens(system, user), budget)
+}
 
 // RunAsk is the testable core of the ask command. It runs retrieval and the
 // LLM call under a cancellable context derived from ctx, cancelled on return so
@@ -192,20 +279,53 @@ func RunAsk(
 				"knowledge; the response may not reflect your documents")
 	}
 
-	data := prompts.TemplateData{
-		Question:  question,
-		Chunks:    chunks,
-		Variables: variables,
+	render := func(cs []retrieval.RetrievedChunk) (string, string, error) {
+		system, user, err := tmpl.Render(prompts.TemplateData{
+			Question:  question,
+			Chunks:    cs,
+			Variables: variables,
+		})
+		if err != nil {
+			return "", "", fmt.Errorf("render template: %w", err)
+		}
+		return system, user, nil
 	}
 
-	systemPrompt, userPrompt, err := tmpl.Render(data)
-	if err != nil {
-		return fmt.Errorf("render template: %w", err)
+	// The whole prompt — system + template + chunks + question — has to fit the
+	// model's window alongside the reply it has to leave room for. The template
+	// speaks for the model it pins; the config for everything else.
+	window := manifest.ContextTokens
+	if window <= 0 {
+		window = cfg.contextWindow
 	}
+	reserve := manifest.MaxTokens
+	if reserve <= 0 {
+		reserve = cfg.outputReserve
+	}
+
+	fitted := fittedPrompt{chunks: chunks}
+	if window > 0 {
+		fitted, err = fitToContext(render, chunks, window-reserve)
+	} else {
+		fitted.system, fitted.user, err = render(chunks)
+	}
+	if err != nil {
+		return err
+	}
+	for _, w := range fitted.warnings {
+		_, _ = fmt.Fprintln(cfg.errOut, w)
+	}
+	// Everything retrieved was dropped to make the prompt fit, so the answer
+	// would come from the model's priors after all.
+	if cfg.requireContext && len(fitted.chunks) == 0 && len(chunks) > 0 {
+		return fmt.Errorf("the retrieved context does not fit the model's context window; " +
+			"aborting because --require-context is set")
+	}
+	chunks = fitted.chunks
 
 	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: systemPrompt},
-		{Role: llm.RoleUser, Content: userPrompt},
+		{Role: llm.RoleSystem, Content: fitted.system},
+		{Role: llm.RoleUser, Content: fitted.user},
 	}
 
 	callOpts := llm.CallOptions{
