@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/config"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/search"
@@ -132,6 +133,15 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 
 	printSection(w, "Preprocessing")
 	printCheck(w, "extractors", "markdown, text, html, pdf", "✓")
+
+	printSection(w, "Chunking")
+	printCheck(w, "size", fmt.Sprintf("%d tokens (keep ≤ the embedding server's batch)", cfg.Chunking.Size), "")
+	printCheck(w, "overlap", fmt.Sprintf("%d tokens", cfg.Chunking.Overlap), "")
+	printCheck(w, "estimator", "script-aware (~4 ASCII chars, ~1 CJK rune, ~2 Latin accents per token)", "")
+	if dbOK {
+		budgetMsg, budgetStatus := CheckChunkBudget(cfg.Database.Path, cfg.Chunking.Size)
+		printCheck(w, "stored", budgetMsg, budgetStatus)
+	}
 
 	printSection(w, "Search")
 	// FTS5 health depends only on the database, not on any embedding server.
@@ -290,6 +300,59 @@ func CheckEmbeddingDimension(dbPath string, cfgDim int) (msg, status string) {
 				"run `tbuk reindex` or restore embedding.dimension", dim, cfgDim), "✗"
 	}
 	return fmt.Sprintf("%d (matches config)", dim), "✓"
+}
+
+// chunkBudgetSample bounds what CheckChunkBudget re-measures. The longest
+// chunks are the only ones that can overrun a batch, so a sample of them
+// answers the question without reading the whole knowledge base.
+const chunkBudgetSample = 20
+
+// CheckChunkBudget re-measures the largest stored chunks against the
+// configured chunking.size with the current estimator. Chunks written before
+// the estimator became script-aware (issue #120) were sized in bytes, so a CJK
+// chunk holds roughly three times the tokens the budget allowed — which is
+// what makes an embedding server answer HTTP 500 on a re-embed. Nothing else
+// in the report would say so, and re-chunking is the only fix.
+func CheckChunkBudget(dbPath string, size int) (msg, status string) {
+	if size <= 0 {
+		return fmt.Sprintf("chunking.size is %d — text is not split at all", size), "✗"
+	}
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		return fmt.Sprintf("cannot open: %v", err), ""
+	}
+	defer func() { _ = db.Close() }()
+
+	texts, err := storage.NewChunkRepo(db.DB()).LongestChunkTexts(context.Background(), chunkBudgetSample)
+	if err != nil {
+		return fmt.Sprintf("cannot measure: %v", err), ""
+	}
+	if len(texts) == 0 {
+		return "no chunks stored yet", ""
+	}
+
+	over, largest := 0, 0
+	for _, text := range texts {
+		n := chunking.CountTokens(text)
+		if n > size {
+			over++
+		}
+		if n > largest {
+			largest = n
+		}
+	}
+	if over > 0 {
+		subject := "chunks are"
+		if over == 1 {
+			subject = "chunk is"
+		}
+		return fmt.Sprintf(
+			"%d of %d sampled %s over chunking.size %d (largest %d) — indexed under an "+
+				"older estimator or a larger size; re-chunk with `tbuk reindex`",
+			over, len(texts), subject, size, largest), "✗"
+	}
+	return fmt.Sprintf("largest of %d sampled: %d tokens (within chunking.size %d)",
+		len(texts), largest, size), "✓"
 }
 
 // CheckConfig verifies the config file exists and contains valid YAML.

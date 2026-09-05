@@ -764,3 +764,115 @@ func TestRunDoctorTo_templateBudgetsOK(t *testing.T) {
 		t.Errorf("want a template budget line:\n%s", out.String())
 	}
 }
+
+// ── CheckChunkBudget ──────────────────────────────────────────────────────────
+
+// seedChunkTexts stores one chunk per text under a single document.
+func seedChunkTexts(t *testing.T, path string, texts ...string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := t.Context()
+	doc := &storage.Document{Path: "/budget.txt", SHA256: "s", Title: "t", MimeType: "text/plain"}
+	if err := storage.NewDocumentRepo(db.DB()).Create(ctx, doc); err != nil {
+		t.Fatalf("create doc: %v", err)
+	}
+	chunks := make([]*storage.Chunk, len(texts))
+	for i, s := range texts {
+		chunks[i] = &storage.Chunk{DocumentID: doc.ID, ChunkIndex: i, Text: s, SearchText: s}
+	}
+	if err := storage.NewChunkRepo(db.DB()).BulkInsert(ctx, chunks); err != nil {
+		t.Fatalf("bulk insert: %v", err)
+	}
+}
+
+func TestCheckChunkBudget_withinBudget(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+	seedChunkTexts(t, dbPath, strings.Repeat("a", 200), strings.Repeat("世", 40))
+
+	msg, status := cli.CheckChunkBudget(dbPath, 100)
+	if status != "✓" {
+		t.Errorf("status = %q, want ✓ (msg %q)", status, msg)
+	}
+}
+
+// An index built under the byte estimator holds CJK chunks of Size*4 *bytes* —
+// far more than Size tokens once they are measured per rune. That is what makes
+// llama.cpp answer HTTP 500, and nothing else in the report would say so.
+func TestCheckChunkBudget_flagsChunksIndexedUnderByteEstimator(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+	// 400 han runes: 1200 bytes, which the old estimator read as 300 tokens.
+	seedChunkTexts(t, dbPath, strings.Repeat("世", 400), strings.Repeat("a", 100))
+
+	msg, status := cli.CheckChunkBudget(dbPath, 100)
+	if status != "✗" {
+		t.Fatalf("status = %q, want ✗ (msg %q)", status, msg)
+	}
+	if !strings.Contains(msg, "reindex") {
+		t.Errorf("msg = %q, want it to name the remedy (tbuk reindex)", msg)
+	}
+	if !strings.Contains(msg, "400") {
+		t.Errorf("msg = %q, want it to report the largest measured count (400)", msg)
+	}
+	if !strings.Contains(msg, "1 of 2 sampled chunk is") {
+		t.Errorf("msg = %q, want the singular reading for one offending chunk", msg)
+	}
+}
+
+func TestCheckChunkBudget_pluralisesSeveralOffenders(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+	seedChunkTexts(t, dbPath, strings.Repeat("世", 400), strings.Repeat("界", 300))
+
+	msg, status := cli.CheckChunkBudget(dbPath, 100)
+	if status != "✗" {
+		t.Fatalf("status = %q, want ✗ (msg %q)", status, msg)
+	}
+	if !strings.Contains(msg, "2 of 2 sampled chunks are") {
+		t.Errorf("msg = %q, want the plural reading for two offending chunks", msg)
+	}
+}
+
+func TestCheckChunkBudget_emptyKnowledgeBase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	msg, status := cli.CheckChunkBudget(dbPath, 400)
+	if status == "✗" {
+		t.Errorf("an empty KB should not report a failure, got ✗ (msg %q)", msg)
+	}
+}
+
+func TestCheckChunkBudget_unreadableDB(t *testing.T) {
+	msg, status := cli.CheckChunkBudget(filepath.Join(t.TempDir(), "nope", "tbuk.sqlite"), 400)
+	if status == "✓" {
+		t.Errorf("status = %q, want no success marker for an unopenable DB (msg %q)", status, msg)
+	}
+}
+
+func TestRunDoctorTo_reportsChunkingSection(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tbuk.sqlite")
+	seedDB(t, dbPath)
+	seedChunkTexts(t, dbPath, strings.Repeat("世", 400))
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+	cfg.Chunking.Size = 100
+	cfg.Chunking.Overlap = 10
+
+	var buf bytes.Buffer
+	if err := cli.RunDoctorTo(&buf, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Chunking", "size", "estimator", "script-aware", "reindex"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor output missing %q:\n%s", want, out)
+		}
+	}
+}

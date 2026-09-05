@@ -158,6 +158,35 @@ func (r *ChunkRepo) DeleteByDocument(ctx context.Context, documentID int64) erro
 	return nil
 }
 
+// LongestChunkTexts returns the text of the limit longest chunks in the
+// database, longest first. Length is SQLite's character count, which tracks a
+// token estimate more closely than a byte count does. Diagnostics use it to
+// re-measure stored chunks against the current token estimator without reading
+// the whole knowledge base: the longest chunks are the ones at risk of
+// overrunning an embedding server's batch, so a sample of them answers the
+// question.
+func (r *ChunkRepo) LongestChunkTexts(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT text FROM chunks ORDER BY length(text) DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ChunkRepo.LongestChunkTexts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var texts []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			return nil, fmt.Errorf("ChunkRepo.LongestChunkTexts scan: %w", err)
+		}
+		texts = append(texts, text)
+	}
+	return texts, rows.Err()
+}
+
 // ListByDocument returns all chunks for a document ordered by chunk_index.
 func (r *ChunkRepo) ListByDocument(ctx context.Context, documentID int64) ([]*Chunk, error) {
 	rows, err := r.db.QueryContext(ctx,

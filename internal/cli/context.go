@@ -76,12 +76,20 @@ embedding.base_url     embedding server URL
 embedding.dimension    must match the loaded model (default 768)
 chunking.size          target chunk size in tokens (default 400; keep ≤ server ubatch)
 chunking.overlap       overlap between consecutive chunks (default 50)
+                       Both are counted with a script-aware estimator: 4 ASCII
+                       chars per token, 2 accented/Cyrillic/Greek chars per
+                       token, 1 CJK rune per token, 2 tokens per emoji. A CJK
+                       chunk therefore holds fewer bytes than an English one at
+                       the same size.
 ingest.embed_concurrency  parallel embed requests per file (default 4)
 
 ## Gotchas
 
 - HTTP 500 "input too large": chunk exceeds server ubatch (default 512 tokens).
   Fix: restart embedding server with -b 1024 -ub 1024, or lower chunking.size.
+  On a non-Latin corpus indexed before the estimator became script-aware, the
+  stored chunks are oversized whatever the config says: tbuk doctor's
+  "Chunking / stored" line reports it; tbuk reindex re-chunks and re-embeds.
 - SHA256 dedup: unchanged files are skipped. Use --force to re-index.
 - "query embedding has N dimensions but stored vectors have M": embedding.provider
   or embedding.model changed. Fix: tbuk reindex (re-embeds from raw/, no originals needed).

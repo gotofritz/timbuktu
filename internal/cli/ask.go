@@ -150,7 +150,7 @@ type fittedPrompt struct {
 }
 
 // promptTokens approximates what the rendered prompt costs, using the same
-// estimator (chars/4) as the chunker and the retrieval.max_tokens trim.
+// script-aware estimator as the chunker and the retrieval.max_tokens trim.
 func promptTokens(system, user string) int {
 	return chunking.CountTokens(system) + chunking.CountTokens(user)
 }
