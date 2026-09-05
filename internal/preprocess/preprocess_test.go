@@ -60,11 +60,18 @@ func TestMarkdownExtractor_strips_frontmatter(t *testing.T) {
 	}
 }
 
-func TestMarkdownExtractor_strips_code_fence_markers(t *testing.T) {
+// The fence is the only mark saying which bytes are code. Search text is
+// derived from a chunk downstream (internal/searchtext), and without the fence
+// it cannot tell a poll loop from a paragraph — so extraction keeps the marker
+// instead of handing on an undifferentiated wall of text.
+func TestMarkdownExtractor_keeps_code_fence_markers(t *testing.T) {
 	input := "Text.\n\n```go\nfmt.Println(\"hello\")\n```\n\nMore text."
 	got := mustExtract(t, "text/markdown", input)
-	if strings.Contains(got, "```") {
-		t.Errorf("code fence markers not stripped; got %q", got)
+	if !strings.Contains(got, "```go") {
+		t.Errorf("opening fence and its language tag not kept; got %q", got)
+	}
+	if strings.Count(got, "```") != 2 {
+		t.Errorf("both fences should survive; got %q", got)
 	}
 	if !strings.Contains(got, `fmt.Println("hello")`) {
 		t.Errorf("code content missing; got %q", got)
@@ -79,7 +86,7 @@ func TestMarkdownExtractor_strips_inline_markup(t *testing.T) {
 	}{
 		{"bold_asterisk", "Hello **world**.", "Hello world."},
 		{"italic_underscore", "Hello _world_.", "Hello world."},
-		{"inline_code", "Hello `world`.", "Hello world."},
+		{"inline_code", "Hello `world`.", "Hello `world`."},
 		{"heading", "# Hello World", "Hello World"},
 	}
 	for _, tt := range tests {
@@ -105,12 +112,12 @@ func TestMarkdownExtractor_preserves_punctuation_in_terms(t *testing.T) {
 		{
 			name:  "two inline code terms on one line",
 			input: "The `main_consumption` field and the `total_output` count.",
-			want:  "The main_consumption field and the total_output count.",
+			want:  "The `main_consumption` field and the `total_output` count.",
 		},
 		{
 			name:  "single inline code term",
 			input: "Set `main_consumption` to zero.",
-			want:  "Set main_consumption to zero.",
+			want:  "Set `main_consumption` to zero.",
 		},
 		{
 			name:  "snake_case in the text flow, no backticks",
@@ -120,27 +127,27 @@ func TestMarkdownExtractor_preserves_punctuation_in_terms(t *testing.T) {
 		{
 			name:  "dunder term",
 			input: "Call `__init__` first.",
-			want:  "Call __init__ first.",
+			want:  "Call `__init__` first.",
 		},
 		{
 			name:  "inline code holding markup characters",
 			input: "Run `make check-ci` and `a**b**c`.",
-			want:  "Run make check-ci and a**b**c.",
+			want:  "Run `make check-ci` and `a**b**c`.",
 		},
 		{
 			name:  "fenced block keeps its identifiers",
 			input: "```go\nvar main_consumption, total_output int\n```",
-			want:  "var main_consumption, total_output int",
+			want:  "```go\nvar main_consumption, total_output int\n```",
 		},
 		{
 			name:  "fenced block keeps emphasis characters",
 			input: "```\na = _b_ + c_d\n```",
-			want:  "a = _b_ + c_d",
+			want:  "```\na = _b_ + c_d\n```",
 		},
 		{
 			name:  "fenced block keeps comment lines",
 			input: "```bash\n# install\nmake check-ci\n```",
-			want:  "# install\nmake check-ci",
+			want:  "```bash\n# install\nmake check-ci\n```",
 		},
 	}
 	for _, tt := range tests {
@@ -186,9 +193,9 @@ func TestMarkdownExtractor_document_round_trip(t *testing.T) {
 		"\t// _both_ registers\n\treturn 0, 0\n}\n```\n\n" +
 		"See also snake_case_name and _emphasis_ in the flow.\n"
 	want := "Metering\n\n" +
-		"The main_consumption register and the total_output register are separate.\n\n" +
-		"func read_meter() (main_consumption, total_output int) {\n" +
-		"\t// _both_ registers\n\treturn 0, 0\n}\n\n" +
+		"The `main_consumption` register and the `total_output` register are separate.\n\n" +
+		"```go\nfunc read_meter() (main_consumption, total_output int) {\n" +
+		"\t// _both_ registers\n\treturn 0, 0\n}\n```\n\n" +
 		"See also snake_case_name and emphasis in the flow."
 
 	got := mustExtract(t, "text/markdown", input)

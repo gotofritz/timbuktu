@@ -23,6 +23,7 @@ internal/
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5
+  searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
   export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract() — a tar snapshot's raw sources + its database as a manifest; ignores config, cache, prompts
 ```
@@ -103,15 +104,27 @@ SQLite, WAL mode, foreign keys ON. Pragmas are set in the DSN (`dsnFor`) so ever
 
 ```sql
 documents   — id, path (UNIQUE), sha256, title, mime_type, raw_path, created_at, updated_at
-chunks      — id, document_id (FK→documents CASCADE), chunk_index, text, token_count, embedding BLOB
+chunks      — id, document_id (FK→documents CASCADE), chunk_index, text, search_text, token_count, embedding BLOB
 metadata    — document_id (FK→documents CASCADE), key, value  (PK: document_id+key)
-chunks_fts  — FTS5 virtual table over chunks.text, auto-synced via INSERT/DELETE triggers
+chunks_fts  — FTS5 virtual table over chunks.search_text, auto-synced via INSERT/DELETE triggers
 ```
+
+`chunks` holds one segment in two encodings. `text` is the segment as written —
+what `tbuk search` prints and what `tbuk ask` feeds the model. `search_text` is
+the same segment reduced for retrieval (see **Search encoding** below): it is
+what `chunks_fts` indexes and what the stored `embedding` was taken of. Prose is
+carried through the reduction unchanged, so for most of a corpus the two columns
+agree and the duplication costs little; a code chunk is where they diverge, and
+that divergence is the point.
 
 Schema versioned in the `schema_migrations` table. `storage/migrate.go` holds a
 single migration — `schemaSQL` at `schemaVersion` — that creates the whole
 schema: a knowledge base either does not exist yet or already has this shape,
-so there is no upgrade path to carry. (`schemaVersion` is 2 because an earlier
+so there is no upgrade path to carry. `schemaSQL` is therefore edited in place
+rather than followed by a versioned migration, and an existing knowledge base is
+brought forward by a throwaway script under `scripts/` (AGENTS.md, "proof of
+concept"); `search_text` was added that way, and `storage.HasSearchTextColumn`
+is how `tbuk doctor` spots a knowledge base that has not had it run. (`schemaVersion` is 2 because an earlier
 build created the same schema in two steps and recorded 2; keeping the number
 lets those knowledge bases open untouched.) Future changes append to the
 `migrations` slice. Each migration's SQL and its version record are applied in
@@ -139,7 +152,9 @@ type Extractor interface {
 
 Backends: markdownExtractor, htmlExtractor (golang.org/x/net), plainTextExtractor, pdfExtractor (ledongthuc/pdf).
 
-The markdown backend cuts a document into code and prose before touching anything: whatever sits inside backticks — a fenced block or an inline span — is copied out verbatim, and only the prose between gets its fences, headings, bold and emphasis markers stripped. Punctuation is part of a software term, so `main_consumption` and `__init__` survive extraction intact. In prose, underscore emphasis is only stripped at word boundaries, which leaves an unbackticked snake_case identifier alone too.
+The markdown backend cuts a document into code and prose before touching anything: whatever sits inside backticks — a fenced block or an inline span — is copied out verbatim, **markers included**, and only the prose between gets its headings, bold and emphasis markers stripped. Punctuation is part of a software term, so `main_consumption` and `__init__` survive extraction intact. In prose, underscore emphasis is only stripped at word boundaries, which leaves an unbackticked snake_case identifier alone too.
+
+The fences and backticks are kept because they are the only record of which bytes are code, and the search encoding downstream cannot reduce a code region it cannot find. They also read as code on the page, which is what the reader and the model want anyway.
 
 SHA256: `preprocess.HashFile(path)` and `HashReader(r)`.
 
@@ -280,7 +295,7 @@ func (ing *Ingester) IngestFile(ctx, path, opts) Result
 func (ing *Ingester) IngestDir(ctx, dir, opts) []Result
 ```
 
-Pipeline per file: SHA256 → dedup check → raw archive (see below) → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → embed (batch 16) → upsert doc → `ChunkRepo.ReplaceForDocument` → write automatic metadata.
+Pipeline per file: SHA256 → dedup check → raw archive (see below) → read `extractedDir/<sha256>.txt` (auto-preprocess if missing) → chunk → reduce (`searchtext.Reduce`) → embed the reduced form (batch 16) → upsert doc → `ChunkRepo.ReplaceForDocument` (storing both encodings) → write automatic metadata.
 
 Raw archive: when a raw dir is configured (`ingest.raw_dir`, default `~/.tbuk/raw`; `WithRawDir` option) and `Options.NoRaw` is false, the untouched source is copied to `rawDir/<sha256><ext>` — content-addressed like the extracted store, written via temp-file + rename (crash-safe), `0o600`, and idempotent (an existing copy is left as-is). The copy runs *before* extraction/embedding so a copy failure aborts the whole ingest and is retried, never stranding an indexed document without its raw backup. `tbuk ingest --no-raw` suppresses it for one run.
 Embed batches within a file run through a bounded worker pool (`ingest.embed_concurrency`, default 4; `WithEmbedConcurrency` option) so embedder round-trips — the latency bottleneck — overlap. Results are reassembled in chunk order and the per-file DB write stays serial, so `ReplaceForDocument` atomicity is untouched; the first batch error cancels the rest.
@@ -378,6 +393,49 @@ provider (`statusProbeURL`): `llama`/`ollama` hit `/health`, `mlx` hits
 
 ---
 
+## Search encoding
+
+```go
+func searchtext.Reduce(text string) string
+```
+
+The retrieval encoding of a chunk, stored in `chunks.search_text` and handed to
+the embedder. The requirement is *this topic is referenced in that bit of code*,
+not code search: what carries that signal is comments, identifiers and strings,
+and syntax is noise. One string cannot serve display, the model and the index at
+once, so the faithful text and the reduced form are stored side by side.
+
+- **Prose** — passed through unchanged. An inline `` `span` `` gets the
+  identifier treatment below, with the backticks dropped.
+- **Code region** (a fenced block; an unclosed fence, which is what a chunk
+  boundary through a block leaves, runs to the end of the chunk) — comments and
+  the contents of string literals keep their words; identifiers are emitted as
+  written and then split; keywords, operators, punctuation and numeric literals
+  are dropped. The fence's language tag is emitted as a term of its own and
+  selects extra stop words; nothing depends on it being there.
+- **Identifier split** — `main_consumption` → `main_consumption main
+  consumption`, `readMeter` → `readMeter read meter`. Terms split on `_ - . /`
+  and at camelCase boundaries (an acronym run splits once: `HTTPServer` → `http
+  server`). Emitting the term *before* its split forms is what lets an exact
+  query and a loose word query reach the same chunk from one index.
+- **Dropped whole** — a term that reduces to nothing: a keyword, a numeric
+  literal, a single character (loop variables, format verbs).
+
+No AST, no parser, no per-language analysis. `stopwords.go` holds a short
+cross-language keyword list plus small per-language extras (go, python,
+javascript, sql, shell, c) reached through the fence tag and its aliases.
+
+A chunk that reduces to nothing — all syntax, no names — keeps its text as
+written (`ingest.reduceForSearch`), since an unembedded chunk drops out of the
+knowledge base entirely.
+
+Known limitation: a chunk boundary that cuts a fenced block leaves the tail
+chunks with no opening fence, and those are treated as prose — the chunker
+defects tracked separately (a block cut mid-line, overlap starting mid-word) are
+what make this reachable.
+
+---
+
 ## Search
 
 ```go
@@ -412,7 +470,9 @@ Vector: O(n) embedding scan acceptable for < 100k chunks; swap sqlite-vec later 
 Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK then fuses.
 `Options.MinScore` filters the fused RRF sums (a different scale from vector cosine),
 applied before truncating to TopK.
-Keyword: user input is sanitized for FTS5 — each whitespace-separated term becomes a
+Keyword: matches `chunks.search_text` (the reduced encoding) and returns `chunks.text`
+(the chunk as written), so a code chunk is *found* by its names and comments but
+*shown* as it was written. User input is sanitized for FTS5 — each whitespace-separated term becomes a
 double-quoted phrase, neutralizing operators/special chars; real query errors propagate.
 Terms are OR-combined, not left to FTS5's implicit AND, and English stop words are dropped
 first (all-stop-word queries keep them). AND required every word of a question to appear in

@@ -7,11 +7,17 @@ import (
 )
 
 // Chunk is one text segment of a document.
+//
+// Text and SearchText are the same segment in two encodings: Text as written,
+// which is what a reader and the model see, and SearchText reduced for
+// retrieval (internal/searchtext), which is what the FTS5 index is built from
+// and what the embedding was taken of.
 type Chunk struct {
 	ID         int64
 	DocumentID int64
 	ChunkIndex int
 	Text       string
+	SearchText string
 	TokenCount int
 	Embedding  []float32 // nil if not yet embedded
 }
@@ -38,8 +44,8 @@ func (r *ChunkRepo) BulkInsert(ctx context.Context, chunks []*Chunk) error {
 		return fmt.Errorf("ChunkRepo.BulkInsert begin: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO chunks(document_id,chunk_index,text,token_count,embedding)
-         VALUES(?,?,?,?,?)`)
+		`INSERT INTO chunks(document_id,chunk_index,text,search_text,token_count,embedding)
+         VALUES(?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("ChunkRepo.BulkInsert prepare: %w", err)
@@ -51,7 +57,7 @@ func (r *ChunkRepo) BulkInsert(ctx context.Context, chunks []*Chunk) error {
 		if c.Embedding != nil {
 			blob = Float32SliceToBlob(c.Embedding)
 		}
-		res, err := stmt.ExecContext(ctx, c.DocumentID, c.ChunkIndex, c.Text, c.TokenCount, blob)
+		res, err := stmt.ExecContext(ctx, c.DocumentID, c.ChunkIndex, c.Text, c.SearchText, c.TokenCount, blob)
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("ChunkRepo.BulkInsert exec: %w", err)
@@ -78,8 +84,8 @@ func (r *ChunkRepo) ReplaceForDocument(ctx context.Context, documentID int64, ch
 	}
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO chunks(document_id,chunk_index,text,token_count,embedding)
-         VALUES(?,?,?,?,?)`)
+		`INSERT INTO chunks(document_id,chunk_index,text,search_text,token_count,embedding)
+         VALUES(?,?,?,?,?,?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("ChunkRepo.ReplaceForDocument prepare: %w", err)
@@ -91,7 +97,7 @@ func (r *ChunkRepo) ReplaceForDocument(ctx context.Context, documentID int64, ch
 		if c.Embedding != nil {
 			blob = Float32SliceToBlob(c.Embedding)
 		}
-		res, err := stmt.ExecContext(ctx, c.DocumentID, c.ChunkIndex, c.Text, c.TokenCount, blob)
+		res, err := stmt.ExecContext(ctx, c.DocumentID, c.ChunkIndex, c.Text, c.SearchText, c.TokenCount, blob)
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("ChunkRepo.ReplaceForDocument exec: %w", err)
@@ -155,7 +161,7 @@ func (r *ChunkRepo) DeleteByDocument(ctx context.Context, documentID int64) erro
 // ListByDocument returns all chunks for a document ordered by chunk_index.
 func (r *ChunkRepo) ListByDocument(ctx context.Context, documentID int64) ([]*Chunk, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id,document_id,chunk_index,text,token_count,embedding
+		`SELECT id,document_id,chunk_index,text,search_text,token_count,embedding
          FROM chunks WHERE document_id=? ORDER BY chunk_index`, documentID)
 	if err != nil {
 		return nil, fmt.Errorf("ChunkRepo.ListByDocument: %w", err)
@@ -166,7 +172,7 @@ func (r *ChunkRepo) ListByDocument(ctx context.Context, documentID int64) ([]*Ch
 	for rows.Next() {
 		var c Chunk
 		var blob []byte
-		if err := rows.Scan(&c.ID, &c.DocumentID, &c.ChunkIndex, &c.Text, &c.TokenCount, &blob); err != nil {
+		if err := rows.Scan(&c.ID, &c.DocumentID, &c.ChunkIndex, &c.Text, &c.SearchText, &c.TokenCount, &blob); err != nil {
 			return nil, fmt.Errorf("ChunkRepo scan: %w", err)
 		}
 		if blob != nil {

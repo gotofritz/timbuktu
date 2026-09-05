@@ -397,6 +397,7 @@ internal/
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline; Reindex* — re-embed from raw/
   llm/              LLM interface; MLX, Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF)
+  searchtext/       Reduce — the encoding stored in chunks.search_text and handed to the embedder
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
@@ -409,12 +410,18 @@ Dependencies point inward. Providers depend only on shared interfaces defined in
 
 ```sql
 documents   — path, sha256, title, mime_type, raw_path, timestamps
-chunks      — document_id, chunk_index, text, token_count, embedding BLOB
+chunks      — document_id, chunk_index, text, search_text, token_count, embedding BLOB
 metadata    — document_id, key, value  (key/value per document)
-chunks_fts  — FTS5 virtual table over chunks.text (auto-synced via triggers)
+chunks_fts  — FTS5 virtual table over chunks.search_text (auto-synced via triggers)
 ```
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
+
+A chunk is stored in two encodings. `text` is the chunk as written — what
+`tbuk search` prints and what `tbuk ask` gives the model, code fences and all.
+`search_text` is the same chunk reduced for retrieval, and it is what the FTS5
+index is built from and what the embedding was taken of. See
+[Encoding code for search](#encoding-code-for-search).
 
 `raw_path` records where a document's archived copy lives, relative to
 `ingest.raw_dir` (e.g. `<sha256>.md`). Relative, so a knowledge base stays
@@ -476,6 +483,31 @@ When a template declares `records`, its output is meant for another program, so
 `tbuk ask` keeps stdout to the records alone — the `Sources:` footer is printed
 on stderr instead of being dropped, which means `tbuk ask -t anki … > cards.txt`
 gives a clean file while the citations still show up in the terminal.
+
+### Encoding code for search
+
+Timbuktu is not a code search tool. What it has to answer about a fenced block
+is *this topic is referenced in that bit of code*, and what carries that is the
+comments, the identifiers, and the strings — not the syntax.
+
+One string cannot serve the reader, the model and the index at once, so a chunk
+is stored twice. `chunks.text` stays faithful. `chunks.search_text` holds a
+reduced encoding (`internal/searchtext`): prose passes through as it stands,
+and a code region becomes its comments, its identifiers, and the contents of
+its string literals, with keywords, operators, punctuation and numeric literals
+dropped. Every identifier is emitted alongside its split words —
+`main_consumption main consumption`, `readMeter read meter` — so the exact term
+and the words it is made of both reach the chunk. An inline `` `span` `` in
+ordinary prose gets the same treatment.
+
+There is no parser and no per-language support: terms split on `_ - . /` and at
+camelCase boundaries, and a small cross-language keyword list is dropped, which
+a fence's language tag extends when it carries one.
+
+The embedding follows `search_text` too, which is the other half of the win: a
+code chunk embeds as what it is about rather than as a wall of syntax. Changing
+that changes the vectors, so `tbuk reindex` is what applies it to a knowledge
+base indexed by an earlier version.
 
 ### Re-ingesting
 

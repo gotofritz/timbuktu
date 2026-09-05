@@ -13,6 +13,7 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/preprocess"
+	"github.com/gotofritz/timbuktu/internal/searchtext"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
@@ -278,20 +279,23 @@ func (ing *Ingester) embedChunks(ctx context.Context, path string, rawChunks []c
 				return
 			}
 			slice := rawChunks[b.start:b.end]
-			texts := make([]string, len(slice))
+			// The embedder is shown the reduced encoding, not the chunk as
+			// written: a code chunk then embeds as its comments and names —
+			// what it is about — rather than as a wall of syntax.
+			reduced := make([]string, len(slice))
 			for j, c := range slice {
-				texts[j] = c.Text
+				reduced[j] = reduceForSearch(c.Text)
 			}
-			vecs, err := ing.embedder.Embed(ctx, texts)
+			vecs, err := ing.embedder.Embed(ctx, reduced)
 			if err != nil {
 				fail(fmt.Errorf("ingest: embed batch %d: %w", bi, err))
 				return
 			}
-			if len(vecs) != len(texts) {
+			if len(vecs) != len(reduced) {
 				fail(fmt.Errorf(
 					"ingest: %s: embedding count mismatch: sent %d texts but embedder "+
 						"returned %d vectors (partial or malformed response)",
-					path, len(texts), len(vecs)))
+					path, len(reduced), len(vecs)))
 				return
 			}
 			out := make([]*storage.Chunk, len(slice))
@@ -299,6 +303,7 @@ func (ing *Ingester) embedChunks(ctx context.Context, path string, rawChunks []c
 				out[j] = &storage.Chunk{
 					ChunkIndex: c.Index,
 					Text:       c.Text,
+					SearchText: reduced[j],
 					TokenCount: c.TokenCount,
 					Embedding:  vecs[j],
 				}
@@ -316,6 +321,18 @@ func (ing *Ingester) embedChunks(ctx context.Context, path string, rawChunks []c
 		storageChunks = append(storageChunks, b...)
 	}
 	return storageChunks, nil
+}
+
+// reduceForSearch is the encoding stored in search_text and handed to the
+// embedder. A chunk of pure syntax reduces to nothing, which would leave it
+// unembedded and unfindable, so it keeps its text as written — worse to index
+// than a reduction, better than dropping the chunk out of the knowledge base.
+func reduceForSearch(text string) string {
+	reduced := searchtext.Reduce(text)
+	if strings.TrimSpace(reduced) == "" {
+		return text
+	}
+	return reduced
 }
 
 // firstEmbeddingDim returns the length of the first non-empty embedding, or 0

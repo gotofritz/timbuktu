@@ -86,11 +86,23 @@ func TestForeignKeyCascade_AcrossPooledConnections(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	chunks := []*storage.Chunk{
-		{DocumentID: doc.ID, ChunkIndex: 0, Text: "orphanme alpha", TokenCount: 2},
-		{DocumentID: doc.ID, ChunkIndex: 1, Text: "orphanme beta", TokenCount: 2},
+		{DocumentID: doc.ID, ChunkIndex: 0, Text: "orphanme alpha", SearchText: "orphanme alpha", TokenCount: 2},
+		{DocumentID: doc.ID, ChunkIndex: 1, Text: "orphanme beta", SearchText: "orphanme beta", TokenCount: 2},
 	}
 	if err := chunkRepo.BulkInsert(ctx, chunks); err != nil {
 		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	// The cascade assertion below is only worth anything if the rows were in the
+	// index to begin with.
+	var indexed int
+	if err := sqldb.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, "orphanme").
+		Scan(&indexed); err != nil {
+		t.Fatalf("count fts before delete: %v", err)
+	}
+	if indexed != 2 {
+		t.Fatalf("expected 2 indexed chunks before delete, got %d", indexed)
 	}
 
 	// Occupy other pooled connections so the DELETE is served by one that never
@@ -133,6 +145,156 @@ func TestForeignKeyCascade_AcrossPooledConnections(t *testing.T) {
 	}
 	if stale != 0 {
 		t.Fatalf("expected 0 stale FTS rows after cascade delete, got %d", stale)
+	}
+}
+
+// ── search_text ───────────────────────────────────────────────────────────────
+
+// One string cannot serve three readers. chunks.text is what a person and the
+// model are shown; chunks.search_text is the reduced encoding the FTS5 index is
+// built from. The index must follow search_text, or code chunks keep being
+// found by their syntax and missed by their names (issue #138).
+func TestChunkRepo_FTSIndexesSearchTextNotText(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	sqldb := db.DB()
+
+	doc := makeDoc("/tmp/encoded.md")
+	if err := storage.NewDocumentRepo(sqldb).Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := storage.NewChunkRepo(sqldb).BulkInsert(ctx, []*storage.Chunk{{
+		DocumentID: doc.ID,
+		ChunkIndex: 0,
+		Text:       "func readMeter() { return syntaxonly }",
+		SearchText: "readMeter read meter",
+		TokenCount: 6,
+	}}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	count := func(match string) int {
+		t.Helper()
+		var n int
+		if err := sqldb.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, match).Scan(&n); err != nil {
+			t.Fatalf("MATCH %q: %v", match, err)
+		}
+		return n
+	}
+	if got := count("meter"); got != 1 {
+		t.Errorf("split form not indexed: MATCH meter returned %d rows, want 1", got)
+	}
+	if got := count("syntaxonly"); got != 0 {
+		t.Errorf("faithful text was indexed: MATCH syntaxonly returned %d rows, want 0", got)
+	}
+}
+
+func TestChunkRepo_RoundTripsSearchText(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	sqldb := db.DB()
+
+	doc := makeDoc("/tmp/roundtrip.md")
+	if err := storage.NewDocumentRepo(sqldb).Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	repo := storage.NewChunkRepo(sqldb)
+	if err := repo.ReplaceForDocument(ctx, doc.ID, []*storage.Chunk{{
+		DocumentID: doc.ID, ChunkIndex: 0, Text: "text as written", SearchText: "reduced form", TokenCount: 3,
+	}}); err != nil {
+		t.Fatalf("ReplaceForDocument: %v", err)
+	}
+
+	got, err := repo.ListByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("ListByDocument: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d chunks, want 1", len(got))
+	}
+	if got[0].Text != "text as written" || got[0].SearchText != "reduced form" {
+		t.Errorf("got text=%q search_text=%q", got[0].Text, got[0].SearchText)
+	}
+}
+
+// A re-ingest replaces a document's chunks; the index has to follow, or a
+// stale encoding keeps answering queries.
+func TestChunkRepo_ReplaceForDocumentUpdatesTheIndex(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	sqldb := db.DB()
+
+	doc := makeDoc("/tmp/replaced.md")
+	if err := storage.NewDocumentRepo(sqldb).Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	repo := storage.NewChunkRepo(sqldb)
+	if err := repo.ReplaceForDocument(ctx, doc.ID, []*storage.Chunk{{
+		DocumentID: doc.ID, ChunkIndex: 0, Text: "before", SearchText: "beforeterm", TokenCount: 1,
+	}}); err != nil {
+		t.Fatalf("first ReplaceForDocument: %v", err)
+	}
+	if err := repo.ReplaceForDocument(ctx, doc.ID, []*storage.Chunk{{
+		DocumentID: doc.ID, ChunkIndex: 0, Text: "after", SearchText: "afterterm", TokenCount: 1,
+	}}); err != nil {
+		t.Fatalf("second ReplaceForDocument: %v", err)
+	}
+
+	for match, want := range map[string]int{"beforeterm": 0, "afterterm": 1} {
+		var n int
+		if err := sqldb.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, match).Scan(&n); err != nil {
+			t.Fatalf("MATCH %q: %v", match, err)
+		}
+		if n != want {
+			t.Errorf("MATCH %q returned %d rows, want %d", match, n, want)
+		}
+	}
+}
+
+// A knowledge base built before search_text existed opens and reads fine, so
+// nothing else notices; this is how tbuk doctor finds out (issue #138).
+func TestHasSearchTextColumn(t *testing.T) {
+	db := openTestDB(t)
+	ok, err := storage.HasSearchTextColumn(db.DB())
+	if err != nil {
+		t.Fatalf("HasSearchTextColumn: %v", err)
+	}
+	if !ok {
+		t.Error("current schema reported as missing search_text")
+	}
+
+	for _, stmt := range []string{
+		`DROP TRIGGER chunks_ai`,
+		`DROP TRIGGER chunks_ad`,
+		`DROP TRIGGER chunks_au`,
+		`DROP TABLE chunks_fts`,
+		`ALTER TABLE chunks DROP COLUMN search_text`,
+	} {
+		if _, err := db.DB().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	ok, err = storage.HasSearchTextColumn(db.DB())
+	if err != nil {
+		t.Fatalf("HasSearchTextColumn after drop: %v", err)
+	}
+	if ok {
+		t.Error("dropped column still reported as present")
+	}
+}
+
+func TestHasSearchTextColumn_closedDB(t *testing.T) {
+	db, err := storage.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	sqldb := db.DB()
+	_ = db.Close()
+
+	if _, err := storage.HasSearchTextColumn(sqldb); err == nil {
+		t.Error("want an error from a closed database, got nil")
 	}
 }
 
