@@ -170,15 +170,19 @@ func TestLoadForRoot_missingFileUsesRootDefaults(t *testing.T) {
 func TestLoadForRoot_fileOverridesRootDefaults(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "kb")
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("database:\n  path: /explicit/db.sqlite\n"), 0o644); err != nil {
+	// Absolute for this platform: only an absolute path in the file overrides
+	// the root, and "/explicit/..." is not one on Windows (no drive letter).
+	// YAML plain scalars take a backslash literally, so it needs no quoting.
+	explicit := filepath.Join(t.TempDir(), "explicit", "db.sqlite")
+	if err := os.WriteFile(path, []byte("database:\n  path: "+explicit+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.LoadForRoot(path, root)
 	if err != nil {
 		t.Fatalf("LoadForRoot: %v", err)
 	}
-	if cfg.Database.Path != "/explicit/db.sqlite" {
-		t.Errorf("database.path = %q, want the file's explicit value", cfg.Database.Path)
+	if cfg.Database.Path != explicit {
+		t.Errorf("database.path = %q, want the file's explicit value %q", cfg.Database.Path, explicit)
 	}
 	if cfg.Ingest.RawDir != filepath.Join(root, "raw") {
 		t.Errorf("ingest.raw_dir = %q, want root-derived default under %q", cfg.Ingest.RawDir, root)
@@ -448,8 +452,9 @@ func TestLoad_fullYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
+	dbPath := filepath.Join(dir, "test.sqlite")
 	content := `database:
-  path: /tmp/test.sqlite
+  path: ` + dbPath + `
 llm:
   provider: claude
   model: claude-haiku-4-5
@@ -471,8 +476,8 @@ chunking:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Database.Path != "/tmp/test.sqlite" {
-		t.Errorf("db path: want /tmp/test.sqlite, got %s", cfg.Database.Path)
+	if cfg.Database.Path != dbPath {
+		t.Errorf("db path: want %s, got %s", dbPath, cfg.Database.Path)
 	}
 	if cfg.LLM.Provider != "claude" {
 		t.Errorf("llm.provider: want claude, got %s", cfg.LLM.Provider)
@@ -560,7 +565,8 @@ func TestValidateKeyedBaseURL(t *testing.T) {
 }
 
 func TestExportYAML_commentsOutDataFolderPaths(t *testing.T) {
-	cfg := config.DefaultsForRoot("/home/alice/.tbuk")
+	root := filepath.Join("/home", "alice", ".tbuk")
+	cfg := config.DefaultsForRoot(root)
 	out, err := config.ExportYAML(cfg)
 	if err != nil {
 		t.Fatalf("ExportYAML: %v", err)
@@ -570,10 +576,10 @@ func TestExportYAML_commentsOutDataFolderPaths(t *testing.T) {
 	// re-homes each component under the target root instead of pinning it to
 	// the exporting machine's absolute paths.
 	for _, frag := range []string{
-		"# path: /home/alice/.tbuk/tbuk.sqlite",
-		"# output_dir: /home/alice/.tbuk/extracted",
-		"# raw_dir: /home/alice/.tbuk/raw",
-		"# dir: /home/alice/.tbuk/prompts",
+		"# path: " + filepath.Join(root, "tbuk.sqlite"),
+		"# output_dir: " + filepath.Join(root, "extracted"),
+		"# raw_dir: " + filepath.Join(root, "raw"),
+		"# dir: " + filepath.Join(root, "prompts"),
 	} {
 		if !strings.Contains(out, frag) {
 			t.Errorf("exported config missing commented line %q\n---\n%s", frag, out)

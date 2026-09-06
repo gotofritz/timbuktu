@@ -164,12 +164,24 @@ CI runs the full suite on `ubuntu-latest`, `macos-latest` and `windows-latest` �
 every platform a release binary is published for. The store is keyed by absolute
 path, so separators, drive letters and home-directory resolution are only ever
 wrong on Windows, and cross-compiling alone would never catch it. Tests must
-therefore stay platform-neutral: build paths with `filepath.Join`, take a
-"not found" message from the OS rather than hardcoding one, and set a fake home
-with the `setHome` helper (it sets `HOME` *and* `USERPROFILE`). Where a
-guarantee genuinely is Unix-only — the `0o600`/`0o700` file modes — the
-assertion lives in a `_unix_test.go` helper with a non-unix counterpart, so the
-test still runs everywhere instead of being skipped.
+therefore stay platform-neutral:
+
+- Build paths with `filepath.Join`, never by concatenating `/`.
+- A document path in a fixture goes through the `docPath` helper. Commands
+  normalise their path argument with `filepath.Abs`, which on Windows resolves
+  `/tmp/a.md` against the current drive — a row seeded with the bare literal is
+  then never found.
+- Set a fake home with `setHome`, which sets `HOME` *and* `USERPROFILE`.
+- Take a "not found" message from the OS (`notFoundText`) rather than hardcoding
+  one platform's wording.
+- Only a path with a drive letter is absolute on Windows, so a config fixture
+  asserting that an absolute path overrides the data root has to build one.
+- POSIX-only assertions — the `0o600`/`0o700` modes — go through `wantPerm`,
+  which still checks the path exists off Unix. A test is build-tagged out only
+  when the case it covers cannot exist on the platform at all: the two
+  `export` tests turning on an ENOTDIR stat error live in `export_unix_test.go`,
+  because Windows answers the same stat with `ERROR_PATH_NOT_FOUND`, which Go
+  maps to `fs.ErrNotExist`.
 
 ## Releasing
 

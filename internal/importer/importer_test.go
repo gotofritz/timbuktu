@@ -261,13 +261,7 @@ func TestExtract_writesOwnerOnlyPerms(t *testing.T) {
 		t.Fatalf("Extract: %v", err)
 	}
 	for _, p := range []string{filepath.Join(d.rawDir, "abc.pdf"), d.manifest} {
-		info, err := os.Stat(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if perm := info.Mode().Perm(); perm != 0o600 {
-			t.Errorf("%s perm = %o, want 600", p, perm)
-		}
+		wantPerm(t, p, 0o600)
 	}
 }
 

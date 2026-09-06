@@ -199,32 +199,6 @@ func TestCreate_writerErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestCreate_dbPathStatErrorPropagates(t *testing.T) {
-	root := t.TempDir()
-	file := filepath.Join(root, "afile")
-	writeFile(t, file, []byte("x"))
-	cfg := config.DefaultsForRoot(root)
-	cfg.Database.Path = filepath.Join(file, "nested.sqlite") // parent is a file → ENOTDIR
-
-	var buf bytes.Buffer
-	if err := export.Create(&buf, cfg, root); err == nil {
-		t.Fatal("expected error when a component path cannot be stat'd")
-	}
-}
-
-func TestCreate_dirComponentStatErrorPropagates(t *testing.T) {
-	root := t.TempDir()
-	file := filepath.Join(root, "notadir")
-	writeFile(t, file, []byte("x"))
-	cfg := config.DefaultsForRoot(root)
-	cfg.Prompts.Dir = filepath.Join(file, "sub") // parent is a file → ENOTDIR
-
-	var buf bytes.Buffer
-	if err := export.Create(&buf, cfg, root); err == nil {
-		t.Fatal("expected error when a directory component cannot be stat'd")
-	}
-}
-
 func TestCreate_fileWhereDirExpectedIsArchived(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.DefaultsForRoot(root)

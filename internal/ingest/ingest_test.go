@@ -713,13 +713,7 @@ func TestIngester_copiesSourceToRaw(t *testing.T) {
 	if string(got) != content {
 		t.Errorf("raw copy content = %q, want %q", got, content)
 	}
-	info, err := os.Stat(rawPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("raw copy perms = %o, want 600", perm)
-	}
+	wantPerm(t, rawPath, 0o600)
 }
 
 // Options.NoRaw suppresses the raw archive copy for that ingest.
