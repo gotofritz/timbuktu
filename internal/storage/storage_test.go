@@ -1190,3 +1190,69 @@ func TestDocumentRepo_setRawPathLeavesUpdatedAtAlone(t *testing.T) {
 			before.UpdatedAt, after.UpdatedAt)
 	}
 }
+
+// ── LongestChunkTexts ─────────────────────────────────────────────────────────
+
+func TestChunkRepo_LongestChunkTexts(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	sqldb := db.DB()
+
+	doc := makeDoc("/tmp/longest.txt")
+	if err := storage.NewDocumentRepo(sqldb).Create(ctx, doc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	repo := storage.NewChunkRepo(sqldb)
+	texts := []string{"tiny", "medium length text", "the longest text of the three by some margin"}
+	chunks := make([]*storage.Chunk, len(texts))
+	for i, s := range texts {
+		chunks[i] = &storage.Chunk{DocumentID: doc.ID, ChunkIndex: i, Text: s, SearchText: s, TokenCount: 1}
+	}
+	if err := repo.BulkInsert(ctx, chunks); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	got, err := repo.LongestChunkTexts(ctx, 2)
+	if err != nil {
+		t.Fatalf("LongestChunkTexts: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d texts, want 2", len(got))
+	}
+	if got[0] != texts[2] {
+		t.Errorf("got[0] = %q, want the longest %q", got[0], texts[2])
+	}
+	if got[1] != texts[1] {
+		t.Errorf("got[1] = %q, want the second longest %q", got[1], texts[1])
+	}
+}
+
+func TestChunkRepo_LongestChunkTexts_emptyAndNonPositiveLimit(t *testing.T) {
+	ctx := context.Background()
+	repo := storage.NewChunkRepo(openTestDB(t).DB())
+
+	got, err := repo.LongestChunkTexts(ctx, 5)
+	if err != nil {
+		t.Fatalf("LongestChunkTexts on an empty KB: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d texts from an empty KB, want 0", len(got))
+	}
+
+	if got, err = repo.LongestChunkTexts(ctx, 0); err != nil || len(got) != 0 {
+		t.Errorf("LongestChunkTexts(0) = %v, %v; want no texts and no error", got, err)
+	}
+}
+
+func TestChunkRepo_LongestChunkTexts_closedDB(t *testing.T) {
+	db, err := storage.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	sqldb := db.DB()
+	_ = db.Close()
+
+	if _, err := storage.NewChunkRepo(sqldb).LongestChunkTexts(context.Background(), 5); err == nil {
+		t.Error("want an error from a closed database, got nil")
+	}
+}

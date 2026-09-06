@@ -405,6 +405,12 @@ Embedding (mlx)
 Preprocessing
   extractors:  markdown, text, html, pdf
 
+Chunking
+  size:        400 tokens (keep ≤ the embedding server's batch)
+  overlap:     50 tokens
+  estimator:   script-aware (~4 ASCII chars, ~1 CJK rune, ~2 Latin accents per token)
+  stored:      no chunks stored yet
+
 Search
   fts5:        ✓ available
   indexed:     ✓ search_text (reduced encoding)
@@ -502,8 +508,8 @@ embedding:
   dimension: 768
 
 chunking:
-  size: 400          # how large each chunk is (measured in approximate word-equivalents)
-  overlap: 50        # how much consecutive chunks overlap
+  size: 400          # how large each chunk is, in estimated tokens
+  overlap: 50        # how much consecutive chunks overlap, same units
 
 ingest:
   embed_concurrency: 4   # embed batches sent to the server at once per file
@@ -1348,6 +1354,35 @@ That one takes seconds and needs no `tbuk reindex`: it rebuilds the index from
 what is already stored and leaves your documents and fingerprints alone. It is
 the same command for either tokenizer, and running it twice does no harm.
 
+How chunk size is counted is the fourth, and it only ever mattered outside
+English. `chunking.size` is a token budget, and Timbuktu used to guess it by
+dividing the byte length by four — which is about right for English and wrong
+by roughly a factor of three for Chinese, Japanese, Korean, and anything else
+written in multi-byte characters. Chunks of those came out about three times
+larger than the setting allowed, which is what made a local embedding server
+answer `HTTP 500` on a corpus that was fine in English. Counting is now per
+character and weighted by writing system, so a chunk holds the budget it says
+it does whatever the language.
+
+Only chunks already stored are affected, and `tbuk doctor` re-measures the
+largest of them for you, under **Chunking**:
+
+```
+Chunking
+  size:      400 tokens (keep ≤ the embedding server's batch)
+  overlap:   50 tokens
+  estimator: script-aware (~4 ASCII chars, ~1 CJK rune, ~2 Latin accents per token)
+  stored:    ✗ 14 of 20 sampled chunks are over chunking.size 400 (largest 533) — indexed under an older estimator or a larger size; re-chunk with `tbuk reindex`
+```
+
+```bash
+tbuk reindex
+```
+
+That re-chunks and re-embeds, so the new counting reaches documents you already
+have. An all-English knowledge base will not see this line: its chunks were
+counted the same way all along.
+
 ### Backing up or moving your knowledge base
 
 `tbuk export` bundles everything — your config plus every data folder
@@ -1638,6 +1673,15 @@ chunking:
 |------------|--------|
 | Smaller (200–300) | More precise retrieval; less context per chunk |
 | Larger (400–500) | More context per chunk; retrieval slightly less precise |
+
+The unit is a **token** — roughly a word-piece, which is what the model actually
+counts. Timbuktu estimates it per character, weighted by writing system: about
+four characters of English to a token, two of accented Latin, Greek or Cyrillic,
+and one of Chinese, Japanese or Korean. So `size: 400` is roughly 1600 English
+characters but only about 400 Chinese ones — the same budget for the model,
+different amounts of text. It is an estimate, not the model's own tokenizer, so
+leave the margin the defaults already have rather than tuning to the exact
+limit.
 
 > **llama.cpp note:** the server's `-ub` (ubatch) flag sets the maximum input
 > size per embedding request (default 512 tokens). Keep `chunking.size` below

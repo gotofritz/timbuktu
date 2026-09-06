@@ -248,7 +248,7 @@ embedding:
   base_url: ""       # empty = provider default (see llm above)
 
 chunking:
-  size: 400          # tokens (approximated as chars/4); keep ≤ llama.cpp batch size (default 512)
+  size: 400          # tokens (script-aware estimate, see Paths & Unicode); keep ≤ llama.cpp batch size (default 512)
   overlap: 50
 
 ingest:
@@ -504,9 +504,9 @@ The window is `llm.context_tokens` (default `8192`; `0` turns the guard off),
 overridable per template by a top-level `context_tokens` in `manifest.yaml`.
 What is left for the prompt is the window minus the answer's budget — the
 template's `max_tokens`, else `llm.max_tokens` — so the reply always has room.
-Token counts are the same chars/4 estimate the chunker uses: approximate, so
-leave a little headroom rather than setting the window to the model's exact
-maximum.
+Token counts come from the same script-aware estimate the chunker uses:
+approximate, so leave a little headroom rather than setting the window to the
+model's exact maximum.
 
 Over budget, `ask` climbs a ladder and says on stderr what it did:
 
@@ -636,6 +636,30 @@ by their original relative path; re-ingest to re-key them absolutely.)
 Chunk and search-preview boundaries snap to UTF-8 rune starts, so non-ASCII
 text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 
+Token counts are estimated per rune, weighted by script, rather than by dividing
+the byte length by four. A byte count reads multi-byte text as *cheaper* per
+character than it is — a han ideograph is three bytes and roughly one token — so
+`chunking.size` used to buy about three times the intended tokens on a CJK
+corpus, overrunning the embedding server's batch (HTTP 500) and leaving
+`retrieval.max_tokens` under-trimmed. The weights, per rune:
+
+| Text | Estimate |
+|------|----------|
+| ASCII | 4 characters per token — the original calibration, unchanged |
+| Accented Latin, Greek, Cyrillic, Hebrew, Arabic, Devanagari, Thai | 2 characters per token |
+| Han, kana, hangul; non-ASCII punctuation and symbols | 1 token per character |
+| Emoji and other runes beyond the BMP | 2 tokens per character |
+
+This is a heuristic, not a tokenizer: no vocabulary, no allocation, and any real
+BPE model will differ. The point is to stop being wrong by a factor of three on
+dense scripts. `chunking.size` and `chunking.overlap`, `retrieval.max_tokens`,
+and the `ask` context guard all measure with it, so a CJK chunk holds fewer
+bytes than an English one at the same token budget.
+
+A knowledge base indexed before this change still holds chunks sized in bytes.
+`tbuk doctor` re-measures the largest of them and says so under **Chunking**;
+`tbuk reindex` re-chunks and re-embeds from `raw/`.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -647,6 +671,7 @@ text (accents, CJK) is never sliced mid-rune into invalid UTF-8.
 | `tbuk ask` warns `compacted the retrieved text` or `dropped N of M retrieved chunks` | The rendered prompt exceeded `llm.context_tokens` minus the answer's `max_tokens` | Expected when the budget is tight — raise `llm.context_tokens` to your model's real window, lower `--top`, or lower the template's `max_tokens` |
 | `tbuk ask` fails with `prompt needs ~N tokens but only M are available` | Even a prompt with no retrieved context does not fit the budget | Shorten the question, raise `llm.context_tokens`, or lower the template's `max_tokens`; `tbuk doctor` shows both numbers |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
+| Embedding server returns `HTTP 500` on a CJK/non-Latin corpus | Chunks stored before token estimation became script-aware are sized in bytes, so they hold ~3× the tokens `chunking.size` allowed | `tbuk doctor` reports it on the **Chunking / stored** line; run `tbuk reindex` to re-chunk and re-embed. If freshly indexed chunks still overrun, the server's batch is smaller than `chunking.size` — raise it (`-b 1024 -ub 1024`) or lower the size |
 | `tbuk ask` returns irrelevant or vague answers | Low retrieval quality or document not ingested | Run `tbuk search <query>` to inspect retrieved chunks; run `tbuk update <path>` if the file changed |
 | `tbuk ask` is very slow | Large `--top` value, slow model, or large chunks | Reduce `--top`; use a faster LLM model; reduce `chunking.size` in config. Press `Ctrl-C` to cancel — retrieval and streaming are interrupted cleanly |
 | Database error on start | DB file missing or corrupted | Check `database.path` in config; run `tbuk init` to recreate missing dirs (does not overwrite existing DB) |

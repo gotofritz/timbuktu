@@ -166,15 +166,36 @@ SHA256: `preprocess.HashFile(path)` and `HashReader(r)`.
 ## Chunking
 
 ```go
-type Chunker struct { Size, Overlap int }  // tokens (approx chars/4)
+type Chunker struct { Size, Overlap int }  // tokens (script-aware estimate)
 type Chunk    struct { Index, TokenCount, StartByte, EndByte int; Text string }
 func (c *Chunker) Split(text string) []Chunk
 ```
 
-Token approximation: `CountTokens(s) = len(s) / 4`.
+Token approximation (`token.go`): `CountTokens` sums a per-rune weight held in
+quarter-tokens — ASCII 1 (four characters to a token, the original calibration),
+non-ASCII alphabetic 2, han/kana/hangul and non-ASCII punctuation 4, runes
+beyond the BMP 8. Byte counting read multi-byte text as cheaper per character
+than it is, so CJK chunks overran the embedding server's batch and
+`retrieval.max_tokens` under-trimmed (#120). No tokenizer, no vocabulary, no
+allocation; deliberately coarse.
+
+`tokenEnd`/`tokenStart` walk that same weighting forward and backwards to find
+the byte offsets where `Size` and `Overlap` tokens run out, replacing the old
+`Size * 4` byte arithmetic — so a chunk of dense text holds the token budget it
+claims. Both stop before the rune that would exceed the budget and land on rune
+starts; `tokenEnd` takes one rune anyway when a single rune costs more than the
+whole budget, so `Split` always advances.
+
+Chunks written before this change are sized in bytes, so on a non-Latin corpus
+they hold roughly three times `chunking.size` — the reason a local embedding
+server answers HTTP 500. No migration carries them forward (AGENTS.md, "proof
+of concept"): `cli.CheckChunkBudget` re-measures the longest stored chunks
+(`storage.ChunkRepo.LongestChunkTexts`, a bounded sample) and `tbuk doctor`
+names `tbuk reindex`, which re-chunks and re-embeds.
+
 Boundary search: walks backwards from target end looking for `. `, `\n\n`, `! `, `? `.
-Boundary and overlap byte offsets snap back to a UTF-8 rune start
-(`snapRuneStart`) so non-ASCII text is never sliced mid-rune.
+Boundary offsets snap back to a UTF-8 rune start (`snapRuneStart`) so non-ASCII
+text is never sliced mid-rune.
 
 CLI paths (`ingest`/`update`/`delete`) are resolved to absolute+cleaned form
 via `cli.NormalizePath` (`filepath.Abs`) so a document is keyed by one
@@ -615,8 +636,8 @@ func WithContextBudget(window, outputReserve int) AskOption
 func fitToContext(render renderFn, chunks []retrieval.RetrievedChunk, budget int) (fittedPrompt, error)
 ```
 
-`fitToContext` renders, measures with `chunking.CountTokens` (chars/4, the same
-estimator as the chunker — approximate by design, see #120), and climbs a
+`fitToContext` renders, measures with `chunking.CountTokens` (the same
+script-aware estimator as the chunker — approximate by design), and climbs a
 ladder while over budget: **compact** the retrieved text via `internal/squeeze`
 (whitespace and filler words out, fenced/indented code byte-exact), then
 **drop** trailing — lowest-ranked — chunks one at a time. Compaction comes

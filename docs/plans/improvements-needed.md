@@ -24,8 +24,10 @@ The items below are therefore refinements, not repairs.
 
 ## Should have
 
-### S1. Better token estimation for non-ASCII text [#120](../../../../issues/120)
+### S1. Better token estimation for non-ASCII text [#120](../../../../issues/120) — ✅ DONE
 `CountTokens = len(s)/4` counts **bytes**, and is calibrated for English. For CJK and other multi-byte scripts the real token count is far higher per byte, so chunks can exceed the embedding server's batch size (llama.cpp HTTP 500s) and `retrieval.max_tokens` under-trims. Replace with a cheap script-aware estimator (e.g. runes with a per-script weight) behind the existing `CountTokens` seam; a full tokenizer is not needed.
+
+**Shipped:** `CountTokens` weighs each rune by script in quarter-tokens — ASCII 1 (the old four-characters-a-token calibration, unchanged), non-ASCII alphabetic 2, han/kana/hangul and non-ASCII punctuation 4, astral runes 8 — with no tokenizer, vocabulary or allocation. `Chunker.Split` now measures `Size` and `Overlap` with the same weights instead of assuming four bytes a token, so a chunk of dense text holds the token budget it claims. Every caller of the seam (`retrieval.max_tokens` trimming, the `ask` context guard) follows for free. `tbuk doctor` gained a **Chunking** section that re-measures the largest stored chunks and names `tbuk reindex` when they were written under the old byte estimator.
 
 ### S2. Run tests on Windows in CI [#121](../../../../issues/121)
 Windows binaries are shipped, but CI only cross-compiles for Windows — tests never run there (`os.UserHomeDir` reads `USERPROFILE`, which the HOME-based fixtures don't set, per the comment in `ci.yml`). Make the test fixtures set `USERPROFILE` alongside `HOME` and add `windows-latest` to the test matrix, so path handling (a classic Windows-breakage area for a path-keyed document store) is actually exercised on the platform users get binaries for.

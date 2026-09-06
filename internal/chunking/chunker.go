@@ -49,14 +49,14 @@ func (c *Chunker) Split(text string) []Chunk {
 		}}
 	}
 
-	sizeBytes := c.Size * 4
-	overlapBytes := c.Overlap * 4
-
 	var chunks []Chunk
 	start := 0 // byte offset into text where the current chunk begins
 
 	for start < len(text) {
-		end := start + sizeBytes
+		// Where Size tokens run out, weighed per rune by script rather than
+		// assumed at four bytes each, so a chunk of dense text holds the same
+		// token budget as one of English (issue #120).
+		end := tokenEnd(text, start, c.Size)
 		if end >= len(text) {
 			// Last chunk: take everything remaining.
 			ch := Chunk{
@@ -83,9 +83,9 @@ func (c *Chunker) Split(text string) []Chunk {
 		}
 		chunks = append(chunks, ch)
 
-		// Next chunk starts overlapBytes before the boundary, snapped to a
-		// rune start so overlap never begins mid-rune.
-		next := snapRuneStart(text, boundary-overlapBytes)
+		// Next chunk starts Overlap tokens back from the boundary, weighed the
+		// same way.
+		next := tokenStart(text, boundary, c.Overlap)
 		if next <= start {
 			next = boundary // no progress guard
 		}

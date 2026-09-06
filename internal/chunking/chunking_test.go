@@ -26,6 +26,93 @@ func TestCountTokens_empty(t *testing.T) {
 	}
 }
 
+func TestCountTokens_scriptAware(t *testing.T) {
+	// The estimator has no tokenizer to check itself against, so each case
+	// states the bound that matters: ASCII keeps the chars/4 calibration it
+	// has always had, and every denser script must cost more per rune than
+	// that, because under-counting is what lets a chunk overrun the embedding
+	// server's batch (issue #120).
+	cases := []struct {
+		name string
+		text string
+		want int
+	}{
+		{"ascii keeps chars/4", strings.Repeat("a", 400), 100},
+		{"han is a token per rune", strings.Repeat("世", 100), 100},
+		{"hiragana is a token per rune", strings.Repeat("あ", 100), 100},
+		{"katakana is a token per rune", strings.Repeat("カ", 100), 100},
+		{"hangul is a token per rune", strings.Repeat("한", 100), 100},
+		{"accented latin is half a token per rune", strings.Repeat("é", 100), 50},
+		{"cyrillic is half a token per rune", strings.Repeat("д", 100), 50},
+		{"greek is half a token per rune", strings.Repeat("λ", 100), 50},
+		{"arabic is half a token per rune", strings.Repeat("م", 100), 50},
+		{"non-ascii punctuation is a token per rune", strings.Repeat("—", 100), 100},
+		{"emoji is two tokens per rune", strings.Repeat("🙂", 100), 200},
+		{"empty", "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := chunking.CountTokens(tc.text); got != tc.want {
+				t.Errorf("CountTokens(%q...) = %d, want %d", firstRunes(tc.text, 3), got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountTokens_nonASCIIBeatsByteHeuristic(t *testing.T) {
+	// The bug in #120: len(s)/4 reads multi-byte text as *cheaper* per rune
+	// than it is. Every dense script must now come out above that byte count.
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"han", strings.Repeat("世界你好乾坤", 50)},
+		{"hangul", strings.Repeat("안녕하세요", 50)},
+		{"kana", strings.Repeat("こんにちは", 50)},
+		{"emoji", strings.Repeat("🙂🚀", 50)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bytesOver4 := len(tc.text) / 4
+			got := chunking.CountTokens(tc.text)
+			if got <= bytesOver4 {
+				t.Errorf("CountTokens = %d, want > the old byte heuristic %d", got, bytesOver4)
+			}
+		})
+	}
+}
+
+func TestCountTokens_mixedScriptIsTheSumOfItsParts(t *testing.T) {
+	// A mixed-script document must not be estimated by whichever script it
+	// starts with: the count is per rune, so the parts add up.
+	latin := "The report says: "
+	han := strings.Repeat("世界你好", 25)
+	mixed := latin + han
+
+	want := chunking.CountTokens(latin) + chunking.CountTokens(han)
+	if got := chunking.CountTokens(mixed); got != want {
+		t.Errorf("CountTokens(mixed) = %d, want %d (latin %d + han %d)",
+			got, want, chunking.CountTokens(latin), chunking.CountTokens(han))
+	}
+}
+
+func TestCountTokens_invalidUTF8DoesNotUndercount(t *testing.T) {
+	// Extracted PDF text is not guaranteed to be valid UTF-8. A replacement
+	// rune must still cost something, or a corrupt document reads as free.
+	if got := chunking.CountTokens(strings.Repeat("\xff", 100)); got <= 0 {
+		t.Errorf("CountTokens(invalid utf-8) = %d, want > 0", got)
+	}
+}
+
+// firstRunes shortens a repeated-text case for an error message.
+func firstRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n])
+}
+
 // ── Chunker.Split ─────────────────────────────────────────────────────────────
 
 func TestChunker_basic_single_chunk(t *testing.T) {
@@ -237,5 +324,148 @@ func TestChunker_last_chunk_covers_remainder(t *testing.T) {
 	last := chunks[len(chunks)-1]
 	if last.EndByte != len(text) {
 		t.Errorf("last chunk EndByte = %d, want %d", last.EndByte, len(text))
+	}
+}
+
+// ── Chunker.Split: token budget across scripts ────────────────────────────────
+
+func TestChunker_respectsTokenBudgetAcrossScripts(t *testing.T) {
+	// The acceptance criterion from #120: a chunk must not exceed the
+	// configured token size whatever script it is written in, because
+	// chunking.size is what keeps an embedding request inside the server's
+	// batch (llama.cpp answers HTTP 500 when it does not).
+	const size = 100
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"ascii", strings.Repeat("word ", 2000)},
+		{"ascii sentences", strings.Repeat("This is a normal sentence. ", 400)},
+		{"han", strings.Repeat("世界你好乾坤", 400)},
+		{"hangul", strings.Repeat("안녕하세요", 400)},
+		{"kana", strings.Repeat("こんにちは世界", 400)},
+		{"cyrillic", strings.Repeat("привет мир ", 400)},
+		{"accented latin", strings.Repeat("café résumé naïve ", 300)},
+		{"mixed", strings.Repeat("The 世界 says café. ", 400)},
+		{"emoji", strings.Repeat("🙂🚀 ok ", 400)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &chunking.Chunker{Size: size, Overlap: 10}
+			chunks := c.Split(tc.text)
+			if len(chunks) < 2 {
+				t.Fatalf("got %d chunks, want ≥2 (fixture too small to exercise the budget)", len(chunks))
+			}
+			for i, ch := range chunks {
+				if ch.TokenCount > size {
+					t.Errorf("chunk[%d].TokenCount = %d, want ≤ Size %d", i, ch.TokenCount, size)
+				}
+				if got := chunking.CountTokens(ch.Text); got != ch.TokenCount {
+					t.Errorf("chunk[%d].TokenCount = %d, but CountTokens(Text) = %d", i, ch.TokenCount, got)
+				}
+			}
+		})
+	}
+}
+
+func TestChunker_cjkChunksAreShorterInBytesThanASCII(t *testing.T) {
+	// Same token budget, denser script: a CJK chunk has to hold fewer bytes
+	// than an English one, or the budget is not doing its job. Under the byte
+	// estimator both came out at Size*4 bytes.
+	c := &chunking.Chunker{Size: 100, Overlap: 0}
+
+	ascii := c.Split(strings.Repeat("abcdefghij", 400))
+	han := c.Split(strings.Repeat("世界你好乾坤", 400))
+	if len(ascii) == 0 || len(han) == 0 {
+		t.Fatal("expected chunks for both fixtures")
+	}
+	// Three bytes per han rune against one per ascii rune: at the same token
+	// budget the han chunk should be roughly three quarters the size, not the
+	// identical Size*4 bytes the byte estimator gave both.
+	if len(han[0].Text)*4 > len(ascii[0].Text)*3 {
+		t.Errorf("first han chunk is %d bytes, first ascii chunk %d — want the han one clearly smaller",
+			len(han[0].Text), len(ascii[0].Text))
+	}
+}
+
+func TestChunker_overlapIsMeasuredInTokensNotBytes(t *testing.T) {
+	// Overlap is a token count too: on CJK it must re-include about Overlap
+	// tokens' worth of runes, not Overlap*4 bytes' worth.
+	const overlap = 10
+	text := strings.Repeat("世界你好乾坤", 400)
+	c := &chunking.Chunker{Size: 100, Overlap: overlap}
+	chunks := c.Split(text)
+	if len(chunks) < 2 {
+		t.Fatalf("got %d chunks, want ≥2", len(chunks))
+	}
+	reincluded := text[chunks[1].StartByte:chunks[0].EndByte]
+	if got := chunking.CountTokens(reincluded); got != overlap {
+		t.Errorf("overlap re-included %d tokens (%q), want %d", got, reincluded, overlap)
+	}
+}
+
+func TestChunker_tinySizeDoesNotHang(t *testing.T) {
+	// A rune can cost more than the whole budget: an emoji is worth two
+	// tokens, so Size=1 leaves no room for even one of them. The span logic
+	// must still advance rather than emit empty chunks forever.
+	cases := []struct {
+		name string
+		text string
+		size int
+	}{
+		{"emoji under a one-token budget", strings.Repeat("🙂", 20), 1},
+		{"han under a one-token budget", strings.Repeat("世界", 20), 1},
+		{"mixed under a one-token budget", strings.Repeat("a🙂世", 20), 1},
+		{"overlap larger than size", strings.Repeat("世界你好乾坤", 20), 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &chunking.Chunker{Size: tc.size, Overlap: 5}
+
+			done := make(chan []chunking.Chunk, 1)
+			go func() { done <- c.Split(tc.text) }()
+
+			select {
+			case chunks := <-done:
+				if len(chunks) == 0 {
+					t.Fatal("got 0 chunks")
+				}
+				for i, ch := range chunks {
+					if ch.Text == "" {
+						t.Errorf("chunk[%d] is empty", i)
+					}
+					if !utf8.ValidString(ch.Text) {
+						t.Errorf("chunk[%d] is not valid UTF-8: %q", i, ch.Text)
+					}
+				}
+				if last := chunks[len(chunks)-1]; last.EndByte != len(tc.text) {
+					t.Errorf("last chunk EndByte = %d, want %d", last.EndByte, len(tc.text))
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Split did not terminate within 2s (infinite loop)")
+			}
+		})
+	}
+}
+
+func TestChunker_invalidUTF8DoesNotHang(t *testing.T) {
+	// Extracted text is not guaranteed to be valid UTF-8; decoding must still
+	// advance a byte at a time rather than stall on an undecodable one.
+	text := strings.Repeat("ok \xff\xfe text. ", 40)
+	c := &chunking.Chunker{Size: 5, Overlap: 1}
+
+	done := make(chan []chunking.Chunk, 1)
+	go func() { done <- c.Split(text) }()
+
+	select {
+	case chunks := <-done:
+		if len(chunks) < 2 {
+			t.Fatalf("got %d chunks, want ≥2", len(chunks))
+		}
+		if last := chunks[len(chunks)-1]; last.EndByte != len(text) {
+			t.Errorf("last chunk EndByte = %d, want %d", last.EndByte, len(text))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Split did not terminate within 2s (infinite loop)")
 	}
 }

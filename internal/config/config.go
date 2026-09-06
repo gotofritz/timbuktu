@@ -189,8 +189,9 @@ func relativeDefaults() Config {
 		},
 		Chunking: ChunkingConfig{
 			// 400 keeps chunks safely below the llama.cpp default physical batch
-			// size of 512 tokens, accounting for BPE counts exceeding the len/4
-			// heuristic used by the chunker.
+			// size of 512 tokens. The chunker's estimator is script-aware but
+			// still an approximation, so the margin absorbs a real BPE count
+			// coming out above it.
 			Size:    400,
 			Overlap: 50,
 		},
