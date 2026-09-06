@@ -683,7 +683,8 @@ unreadable or invalid.
 | `search`/`ask` `--topic-mentions` | Widen the filter to mention grain. Off by default. |
 | `topic list [--all] [--format]` | Untyped labels + any typed label with ≥1 document attachment — i.e. everything `--topic` accepts (D10). `DOCS` and `MENTIONS` counts; `--all` flattens the whole vocabulary with a `TYPE` column. |
 | `topic show\|add\|rm\|rename\|delete` | Plan 32's group, unchanged, on `LabelRepo`. |
-| `digest --topic x` / `--entity X` | One engine, two chunk selectors (below). |
+| `digest --topic x` | Milestone 2 (plan 32). |
+| `digest --entity X [--hops N]` | Milestone 4 — same engine, second selector (below). |
 | `graph build [--topic x,y] [--llm] [--force]` | Extraction run over stored chunks; skips chunks already covered by a run of the same extractor unless `--force`. Summary: chunks seen, mentions, triples, dropped. |
 | `graph stats` | Labels per class, triples per predicate, chunk coverage %, rows whose type or predicate left the seed, last run. |
 | `graph init` | Write a commented starter `ontology.yaml`. Not run by `tbuk init` (D2); refuses to overwrite an existing file. |
@@ -695,7 +696,9 @@ unreadable or invalid.
 | `export --topic x,y` / `reindex --topic x,y` | Plan 32, unchanged — asserted rows only, by design (D5). |
 
 **One digest engine, two selectors.** Plan 32 milestone 2 builds `RunDigest`
-(exhaustive fetch → token budget → single call or map-reduce). Make its
+(exhaustive fetch → token budget → single call or map-reduce) and the topic
+selector. The entity selector lands in milestone 4 with the mention rows it
+reads — the engine ships with the seam, not with both users of it. Make the
 chunk-selection step injected:
 
 ```go
@@ -775,9 +778,9 @@ deterministically. Say so in the user guide so nobody expects otherwise.
 | # | PR | Plan | Depends on | Serves |
 |---|---|---|---|---|
 | 1 | `feat(labels): vocabulary, document grain, filter` — `labels` + `label_documents` + aliases in `schemaSQL` + `scripts/` script, `LabelRepo`, search/retrieval filter, `--topic` on ingest/search/ask/reindex, `topic` group | 32 | — | **A, complete.** This *is* [#115](../../../../issues/115). |
-| 2 | `feat(digest): topic and entity selectors` — `RunDigest`, builtin `digest` template, both selectors | 32 | 1 | A ([#116](../../../../issues/116)) |
+| 2 | `feat(digest): engine and topic selector` — `RunDigest`, builtin `digest` template, injected `ChunkSelector` | 32 | 1 | A ([#116](../../../../issues/116)) |
 | 3 | `feat(export): topic-scoped archive` | 32 | 1 | A ([#117](../../../../issues/117)) |
-| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph build`/`stats`/`suggest`, `entity list/show/alias/merge` | 33 | 1 | A sharpened, B started |
+| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph init`/`build`/`stats`/`suggest`, `entity list/show/alias/merge`, and `digest --entity` (the second selector, which needs the mentions this PR creates) | 33 | 1, 2 | A sharpened, B started |
 | 5 | `feat(graph): opt-in LLM relation extraction` — `triples`, `triple_evidence`, `graph build --llm`, validation, run bookkeeping | 33 | 4 | B |
 | 6 | `feat(retrieval): entity expansion behind a flag` — `Filters.Expand`, expander, `--expand-entities` | 33 | 5, D7 measurement | B |
 
