@@ -180,9 +180,17 @@ attaches a label to a document (asserted). `label_mentions` attaches it to a
 byte range in a chunk (derived). `triples` relates two labels and cites chunks
 as evidence.
 
-A label's `type` is empty for scenario A and a class name for scenario B; a
-label's `source` is `asserted` or the id of the extraction run that produced it.
+A label's `type` is empty for scenario A and a class name for scenario B.
 Nothing about a scenario-A label is more expensive than plan 32's topic row.
+
+**Every label in the vocabulary was named by a human.** The gazetteer only
+matches names it was given, and the LLM extractor drops anything it cannot
+resolve to an existing row (D4) — so no extractor ever invents vocabulary, and
+the table needs no `source`/provenance column to tell hand-written names from
+machine-invented ones. `type` therefore says exactly one thing: *which* human
+input the name came from — `''` for one typed at the CLI, a class name for one
+read from `ontology.yaml`. That is what makes it a sound discriminator for
+`topic list` vs `entity list` (D10).
 
 Rejected: separate `topics`/`entities` tables. Two vocabularies that neither
 compose nor convert, two sets of management commands, and a user who has to
@@ -200,8 +208,13 @@ asked for, and every one of its states is a place for a bad extraction to
 become authoritative.
 
 Invert it. The vocabulary is a small YAML file the user owns, living under the
-data root like every other data path, installed by `tbuk init` beside the
-prompt templates it already installs — and **absent entirely in scenario A**:
+data root like every other data path — and **absent entirely in scenario A**.
+
+`tbuk init` does **not** scaffold it: an unexplained vocabulary file in the
+root is noise for the majority of knowledge bases, which never type a label.
+`tbuk graph init` writes a commented starter on request, and `graph suggest`
+(D3) fills it from what the corpus actually says. A missing file is a valid
+state, not an error.
 
 ```yaml
 # ~/.tbuk/ontology.yaml — scenario B only; scenario A never creates this file
@@ -357,6 +370,59 @@ visited set. At this corpus scale — vector search is still an O(n) scan,
 
 ---
 
+### D10. `topic list` lists what `--topic` can filter on; `entity list` lists what the corpus knows
+
+Two commands over one table, split by the question each answers rather than by
+an arbitrary display preference:
+
+- **`topic list` — "what can I pass to `--topic`?"** Untyped labels, plus any
+  typed label carrying at least one document attachment. The second clause is
+  the whole reason this is a rule and not just `WHERE type = ''`: a scenario-B
+  user who tags documents with a typed label (`topic add contract.pdf "Dogger
+  Bank"`) has made it a usable filter value, and a command whose job is to
+  enumerate filter values must not hide it. Zero-attachment untyped labels stay
+  listed — plan 32's decision 8 keeps the vocabulary between re-ingests.
+- **`entity list` — "what does the corpus know about?"** Typed labels grouped by
+  class, because a flat list of three thousand turbines is not a list.
+
+In scenario A every label is untyped, so `topic list` prints all of them and
+`entity list` is empty — indistinguishable from plan 32. In scenario B the
+shelves and the entities separate on their own, with no flag to learn. The two
+sets only overlap where the user deliberately made them overlap.
+
+```
+$ tbuk topic list                          # A, and B's shelves
+TOPIC           DOCS  MENTIONS
+helix             41         -
+multi-cursor       3       117
+search             5       284
+scratch            0         -
+
+$ tbuk entity list                         # B
+Turbine (312)
+  Dogger Bank A            88 mentions   12 docs
+  Hornsea Two              51 mentions    9 docs
+Operator (14)
+  Ørsted                  203 mentions   31 docs
+```
+
+`MENTIONS` reads `-` when no extraction run has covered the corpus, so scenario
+A never sees a column of confusing zeros, and scenario A *sharpened* (D4's
+gazetteer over the same names) gets its payoff visible in the table it already
+reads. A `TYPE` column appears only when a typed row is in the output.
+
+`topic list --all` flattens the entire vocabulary into one table with `TYPE`
+filled in — for audit and grep, not for daily use. `entity list --type T`
+narrows to one class. `--format json` emits flat records in both, since the
+grouping is a presentation choice and a script wants rows.
+
+Rejected: `topic list` showing everything (three thousand rows in scenario B);
+`topic list` showing untyped only (hides a filter value the user created);
+splitting on attachment kind rather than type (a label with both grains has no
+home, and scenario A sharpened puts every label in that state).
+
+---
+
 ## What this plan drops from the brief, and why
 
 | Brief section | Verdict | Why |
@@ -502,7 +568,7 @@ internal/cli/
   topic.go           ← tbuk topic list|show|add|rm|rename|delete   (plan 32, on LabelRepo)
   graph.go           ← tbuk graph build|stats|suggest
   entity.go          ← tbuk entity list|show|alias|merge
-  init.go            ← ontology.yaml only when scaffolding a typed KB
+  init.go            ← untouched: no ontology.yaml scaffolding (D2)
   search.go, ask.go  ← --topic, --expand-entities, --hops
   doctor.go          ← seed loads; rows whose type/predicate left the seed
 
@@ -589,12 +655,14 @@ unreadable or invalid.
 | `ingest <path> [--topic x,y] [--infer-topics]` | Plan 32, unchanged, writing `label_documents`. |
 | `search`/`ask` `<q> --topic x,y` | `EXISTS` pre-filter on asserted rows (D5). Unknown name → CLI error naming the known labels. |
 | `search`/`ask` `--topic-mentions` | Widen the filter to mention grain. Off by default. |
-| `topic list\|show\|add\|rm\|rename\|delete` | Plan 32's group, on `LabelRepo`. `list` shows untyped labels by default, `--type T` or `--all` for the rest. |
+| `topic list [--all] [--format]` | Untyped labels + any typed label with ≥1 document attachment — i.e. everything `--topic` accepts (D10). `DOCS` and `MENTIONS` counts; `--all` flattens the whole vocabulary with a `TYPE` column. |
+| `topic show\|add\|rm\|rename\|delete` | Plan 32's group, unchanged, on `LabelRepo`. |
 | `digest --topic x` / `--entity X` | One engine, two chunk selectors (below). |
 | `graph build [--topic x,y] [--llm] [--force]` | Extraction run over stored chunks; skips chunks already covered by a run of the same extractor unless `--force`. Summary: chunks seen, mentions, triples, dropped. |
 | `graph stats` | Labels per class, triples per predicate, chunk coverage %, rows whose type or predicate left the seed, last run. |
+| `graph init` | Write a commented starter `ontology.yaml`. Not run by `tbuk init` (D2); refuses to overwrite an existing file. |
 | `graph suggest [--min N]` | Print-only frequency report (D3). Writes nothing. |
-| `entity list [--type T]` | Labels with mention and document counts. |
+| `entity list [--type T] [--format]` | Typed labels grouped by class, with mention and document counts (D10). Empty in scenario A. |
 | `entity show <name> [--hops N]` | Type, aliases, triples in/out, evidence chunks with `path §index` citations. |
 | `entity alias <name> <alias>...` | Add aliases — the user's half of entity resolution. |
 | `entity merge <keep> <drop>` | Re-point every attachment, delete the dropped row. Confirm prompt like `delete`. |
@@ -661,6 +729,12 @@ deterministically. Say so in the user guide so nobody expects otherwise.
   evidence chunks; `max_added_chunks` cap; expansion respects the label and
   metadata filters; `Expand: false` is byte-identical to today's result — the
   important one.
+- **cli/list views (D10):** `topic list` includes an untyped label, a typed
+  label with a document attachment, and a zero-attachment untyped label, and
+  excludes a mention-only typed label; `MENTIONS` reads `-` before any run and a
+  count after; the `TYPE` column appears only when a typed row is present;
+  `--all` flattens everything; `entity list` groups by class, is empty in
+  scenario A, and `--type T` narrows; `--format json` is flat in both.
 - **cli:** every subcommand; `graph build` skip/force; unknown-label error text;
   `entity merge` confirm prompt; `--expand-entities` forwards `Filters` (fake
   retriever asserts); `doctor` flags seed drift; extend `integration_test.go`
@@ -722,16 +796,12 @@ in milestone 5 if D7's kill criterion fires.
 
 ## Open questions
 
-- **Does `tbuk init` scaffold `ontology.yaml`?** Scenario A never needs it, and
-  an unexplained file in the root is noise. Leaning to: no file by default,
-  `tbuk graph init` writes a commented starter when the user wants one, and
-  `graph suggest` fills it.
 - **Should `graph build` run at ingest?** A separate command keeps ingest fast
   and re-runnable, matching `reindex`. An ingest hook is a cheap follow-up once
   the gazetteer is proven fast; not gating.
 - **Mention offsets on re-chunk.** `reindex` rewrites chunk rows, so mentions
   cascade away and must be rebuilt. Acceptable — re-running the gazetteer is
   cheap — but `reindex` should say so, or call `graph build` itself.
-- **`topic list` default view.** Untyped labels only is right for A; for B the
-  user probably wants their shelves *and* their entity classes listed
-  separately. `--all` may want to group by type rather than flatten.
+*(Settled and moved into the plan body: `tbuk init` does not scaffold
+`ontology.yaml` — see D2 and the config section; `topic list` vs `entity list`
+— see D10.)*
