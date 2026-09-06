@@ -22,7 +22,7 @@ func TestDeleteCommand_missingArg(t *testing.T) {
 
 func TestDeleteCommand_notFoundWithConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -68,13 +68,13 @@ func TestRunDelete_found(t *testing.T) {
 	docs := storage.NewDocumentRepo(db)
 	ctx := context.Background()
 
-	doc := &storage.Document{Path: "/tmp/test.md", SHA256: "aabbcc", Title: "test", MimeType: "text/plain"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/test.md"), SHA256: "aabbcc", Title: "test", MimeType: "text/plain"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
 
 	var out bytes.Buffer
-	err := cli.RunDelete(ctx, &out, db, docs, "", "/tmp/test.md")
+	err := cli.RunDelete(ctx, &out, db, docs, "", docPath(t, "/tmp/test.md"))
 	if err != nil {
 		t.Fatalf("RunDelete: %v", err)
 	}
@@ -83,12 +83,12 @@ func TestRunDelete_found(t *testing.T) {
 	if !strings.Contains(output, "Deleted") {
 		t.Errorf("expected 'Deleted' in output, got: %s", output)
 	}
-	if !strings.Contains(output, "/tmp/test.md") {
+	if !strings.Contains(output, docPath(t, "/tmp/test.md")) {
 		t.Errorf("expected path in output, got: %s", output)
 	}
 
 	// Document must be gone
-	_, err = docs.GetByPath(ctx, "/tmp/test.md")
+	_, err = docs.GetByPath(ctx, docPath(t, "/tmp/test.md"))
 	if err == nil {
 		t.Error("expected document to be deleted")
 	}
@@ -137,13 +137,13 @@ func TestRunDelete_removesExtractedCacheFile(t *testing.T) {
 		t.Fatalf("write cache file: %v", err)
 	}
 
-	doc := &storage.Document{Path: "/tmp/cached.md", SHA256: sha, Title: "cached", MimeType: "text/plain"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/cached.md"), SHA256: sha, Title: "cached", MimeType: "text/plain"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunDelete(ctx, &out, db, docs, extractedDir, "/tmp/cached.md"); err != nil {
+	if err := cli.RunDelete(ctx, &out, db, docs, extractedDir, docPath(t, "/tmp/cached.md")); err != nil {
 		t.Fatalf("RunDelete: %v", err)
 	}
 
@@ -158,13 +158,13 @@ func TestRunDelete_missingCacheFileIsNotAnError(t *testing.T) {
 	docs := storage.NewDocumentRepo(db)
 	ctx := context.Background()
 
-	doc := &storage.Document{Path: "/tmp/nocache.md", SHA256: "0badf00d", Title: "nocache", MimeType: "text/plain"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/nocache.md"), SHA256: "0badf00d", Title: "nocache", MimeType: "text/plain"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunDelete(ctx, &out, db, docs, t.TempDir(), "/tmp/nocache.md"); err != nil {
+	if err := cli.RunDelete(ctx, &out, db, docs, t.TempDir(), docPath(t, "/tmp/nocache.md")); err != nil {
 		t.Fatalf("RunDelete with no cache file should succeed: %v", err)
 	}
 }
@@ -175,7 +175,7 @@ func TestRunDelete_showsChunkCount(t *testing.T) {
 	chunks := storage.NewChunkRepo(db)
 	ctx := context.Background()
 
-	doc := &storage.Document{Path: "/tmp/doc.md", SHA256: "deadbeef", Title: "doc", MimeType: "text/plain"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/doc.md"), SHA256: "deadbeef", Title: "doc", MimeType: "text/plain"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestRunDelete_showsChunkCount(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunDelete(ctx, &out, db, docs, "", "/tmp/doc.md"); err != nil {
+	if err := cli.RunDelete(ctx, &out, db, docs, "", docPath(t, "/tmp/doc.md")); err != nil {
 		t.Fatalf("RunDelete: %v", err)
 	}
 
@@ -210,7 +210,7 @@ func TestRunDelete_removesEveryCachedVersion(t *testing.T) {
 	extractedDir := t.TempDir()
 	sha := "deadbeef"
 
-	doc := &storage.Document{Path: "/notes/a.md", SHA256: sha, Title: "A"}
+	doc := &storage.Document{Path: docPath(t, "/notes/a.md"), SHA256: sha, Title: "A"}
 	if err := docs.Create(context.Background(), doc); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestRunDelete_removesEveryCachedVersion(t *testing.T) {
 		}
 	}
 
-	if err := cli.RunDelete(context.Background(), &bytes.Buffer{}, sqlDB, docs, extractedDir, "/notes/a.md"); err != nil {
+	if err := cli.RunDelete(context.Background(), &bytes.Buffer{}, sqlDB, docs, extractedDir, docPath(t, "/notes/a.md")); err != nil {
 		t.Fatalf("RunDelete: %v", err)
 	}
 	for _, name := range paths {

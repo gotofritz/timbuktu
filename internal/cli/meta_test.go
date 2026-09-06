@@ -13,7 +13,7 @@ import (
 
 func TestMetaCommands_endToEnd(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -26,16 +26,16 @@ func TestMetaCommands_endToEnd(t *testing.T) {
 	}
 	docs := storage.NewDocumentRepo(db.DB())
 	if err := docs.Create(context.Background(), &storage.Document{
-		Path: "/notes.md", SHA256: "ffee", Title: "Notes", MimeType: "text/plain",
+		Path: docPath(t, "/notes.md"), SHA256: "ffee", Title: "Notes", MimeType: "text/plain",
 	}); err != nil {
 		t.Fatalf("seed doc: %v", err)
 	}
 	_ = db.Close()
 
-	if err := runCLI("--config", cfgPath, "meta", "set", "/notes.md", "tag=design"); err != nil {
+	if err := runCLI("--config", cfgPath, "meta", "set", docPath(t, "/notes.md"), "tag=design"); err != nil {
 		t.Fatalf("meta set: %v", err)
 	}
-	if err := runCLI("--config", cfgPath, "meta", "list", "/notes.md"); err != nil {
+	if err := runCLI("--config", cfgPath, "meta", "list", docPath(t, "/notes.md")); err != nil {
 		t.Fatalf("meta list: %v", err)
 	}
 	// Missing document surfaces an error through the command path.
@@ -50,13 +50,13 @@ func TestRunMetaSet_and_List(t *testing.T) {
 	meta := storage.NewMetadataRepo(db)
 	ctx := context.Background()
 
-	doc := &storage.Document{Path: "/tmp/notes.md", SHA256: "aa", Title: "notes", MimeType: "text/markdown"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/notes.md"), SHA256: "aa", Title: "notes", MimeType: "text/markdown"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/notes.md", []string{"tag=design", "author=Alice"}); err != nil {
+	if err := cli.RunMetaSet(ctx, &out, docs, meta, docPath(t, "/tmp/notes.md"), []string{"tag=design", "author=Alice"}); err != nil {
 		t.Fatalf("RunMetaSet: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestRunMetaSet_and_List(t *testing.T) {
 	}
 
 	var listOut bytes.Buffer
-	if err := cli.RunMetaList(ctx, &listOut, docs, meta, "/tmp/notes.md"); err != nil {
+	if err := cli.RunMetaList(ctx, &listOut, docs, meta, docPath(t, "/tmp/notes.md")); err != nil {
 		t.Fatalf("RunMetaList: %v", err)
 	}
 	s := listOut.String()
@@ -84,13 +84,13 @@ func TestRunMetaSet_invalidPair(t *testing.T) {
 	meta := storage.NewMetadataRepo(db)
 	ctx := context.Background()
 
-	doc := &storage.Document{Path: "/tmp/x.md", SHA256: "bb", Title: "x", MimeType: "text/markdown"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/x.md"), SHA256: "bb", Title: "x", MimeType: "text/markdown"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
 
 	var out bytes.Buffer
-	err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/x.md", []string{"noequals"})
+	err := cli.RunMetaSet(ctx, &out, docs, meta, docPath(t, "/tmp/x.md"), []string{"noequals"})
 	if err == nil {
 		t.Fatal("expected error for pair without '='")
 	}
@@ -126,13 +126,13 @@ func TestRunMetaList_empty(t *testing.T) {
 	meta := storage.NewMetadataRepo(db)
 	ctx := context.Background()
 
-	doc := &storage.Document{Path: "/tmp/empty.md", SHA256: "cc", Title: "e", MimeType: "text/markdown"}
+	doc := &storage.Document{Path: docPath(t, "/tmp/empty.md"), SHA256: "cc", Title: "e", MimeType: "text/markdown"}
 	if err := docs.Create(ctx, doc); err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
 
 	var out bytes.Buffer
-	if err := cli.RunMetaList(ctx, &out, docs, meta, "/tmp/empty.md"); err != nil {
+	if err := cli.RunMetaList(ctx, &out, docs, meta, docPath(t, "/tmp/empty.md")); err != nil {
 		t.Fatalf("RunMetaList: %v", err)
 	}
 	if !strings.Contains(out.String(), "No metadata") {
@@ -232,10 +232,10 @@ func TestRunMetaSet_rejectsARepeatedKey(t *testing.T) {
 	docs := storage.NewDocumentRepo(db)
 	meta := storage.NewMetadataRepo(db)
 	ctx := context.Background()
-	doc := seedMetaDoc(t, docs, "/tmp/soup.md")
+	doc := seedMetaDoc(t, docs, docPath(t, "/tmp/soup.md"))
 
 	var out bytes.Buffer
-	err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/soup.md", []string{"tag=food", "tag=recipe"})
+	err := cli.RunMetaSet(ctx, &out, docs, meta, docPath(t, "/tmp/soup.md"), []string{"tag=food", "tag=recipe"})
 	if err == nil {
 		t.Fatal("expected an error for a repeated key")
 	}
@@ -257,10 +257,10 @@ func TestRunMetaSet_writesNothingWhenALaterPairIsInvalid(t *testing.T) {
 	docs := storage.NewDocumentRepo(db)
 	meta := storage.NewMetadataRepo(db)
 	ctx := context.Background()
-	doc := seedMetaDoc(t, docs, "/tmp/x.md")
+	doc := seedMetaDoc(t, docs, docPath(t, "/tmp/x.md"))
 
 	var out bytes.Buffer
-	err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/x.md", []string{"tag=design", "noequals"})
+	err := cli.RunMetaSet(ctx, &out, docs, meta, docPath(t, "/tmp/x.md"), []string{"tag=design", "noequals"})
 	if err == nil {
 		t.Fatal("expected an error for the malformed pair")
 	}
@@ -278,10 +278,10 @@ func TestRunMetaSet_multipleDistinctKeys(t *testing.T) {
 	docs := storage.NewDocumentRepo(db)
 	meta := storage.NewMetadataRepo(db)
 	ctx := context.Background()
-	doc := seedMetaDoc(t, docs, "/tmp/y.md")
+	doc := seedMetaDoc(t, docs, docPath(t, "/tmp/y.md"))
 
 	var out bytes.Buffer
-	if err := cli.RunMetaSet(ctx, &out, docs, meta, "/tmp/y.md",
+	if err := cli.RunMetaSet(ctx, &out, docs, meta, docPath(t, "/tmp/y.md"),
 		[]string{"tag=design", "author=Alice", "project=timbuktu"}); err != nil {
 		t.Fatalf("RunMetaSet: %v", err)
 	}

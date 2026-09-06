@@ -679,7 +679,10 @@ func TestReindexDocument_refreshesMetadataFromStoredPath(t *testing.T) {
 	ing := newIngester(t, db, &recordingExtractor{defaultText: "text"}, &tallyEmbedder{dim: 4},
 		t.TempDir(), ingest.WithRawDir(rawDir))
 
-	doc := seedDocument(t, db, "/notes/design/api.md", sha, 0, 0)
+	// filepath.Dir derives the "dir" key, so the stored path has to be spelled
+	// the way this platform spells one: "\\notes\\design\\api.md" on Windows.
+	docPath := filepath.FromSlash("/notes/design/api.md")
+	doc := seedDocument(t, db, docPath, sha, 0, 0)
 	meta := storage.NewMetadataRepo(db.DB())
 	if err := meta.Set(context.Background(), doc.ID, "tag", "keep-me"); err != nil {
 		t.Fatal(err)
@@ -692,7 +695,7 @@ func TestReindexDocument_refreshesMetadataFromStoredPath(t *testing.T) {
 	for key, want := range map[string]string{
 		"filename":  "api.md",
 		"extension": "md",
-		"dir":       "/notes/design",
+		"dir":       filepath.Dir(docPath),
 		"tag":       "keep-me", // user-set keys survive
 	} {
 		got, err := meta.Get(context.Background(), doc.ID, key)

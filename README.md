@@ -160,6 +160,29 @@ make coverage      # total coverage percentage
 make check-ci      # full CI gate: lint + build + coverage ≥ 85% (total and per package)
 ```
 
+CI runs the full suite on `ubuntu-latest`, `macos-latest` and `windows-latest` —
+every platform a release binary is published for. The store is keyed by absolute
+path, so separators, drive letters and home-directory resolution are only ever
+wrong on Windows, and cross-compiling alone would never catch it. Tests must
+therefore stay platform-neutral:
+
+- Build paths with `filepath.Join`, never by concatenating `/`.
+- A document path in a fixture goes through the `docPath` helper. Commands
+  normalise their path argument with `filepath.Abs`, which on Windows resolves
+  `/tmp/a.md` against the current drive — a row seeded with the bare literal is
+  then never found.
+- Set a fake home with `setHome`, which sets `HOME` *and* `USERPROFILE`.
+- Take a "not found" message from the OS (`notFoundText`) rather than hardcoding
+  one platform's wording.
+- Only a path with a drive letter is absolute on Windows, so a config fixture
+  asserting that an absolute path overrides the data root has to build one.
+- POSIX-only assertions — the `0o600`/`0o700` modes — go through `wantPerm`,
+  which still checks the path exists off Unix. A test is build-tagged out only
+  when the case it covers cannot exist on the platform at all: the two
+  `export` tests turning on an ENOTDIR stat error live in `export_unix_test.go`,
+  because Windows answers the same stat with `ERROR_PATH_NOT_FOUND`, which Go
+  maps to `fs.ErrNotExist`.
+
 ## Releasing
 
 Releases are cut from a git **tag**. Pushing a `v*` tag triggers the
@@ -296,6 +319,13 @@ names a specific file within it.
 Re-running `tbuk init` on a directory that already has a `config.yaml` fills in
 any default keys the file is missing (preserving your own values) rather than
 overwriting it; a config that already has every key is left untouched.
+
+**Where `~` points.** The default root hangs off `os.UserHomeDir()`, which reads
+`$HOME` on Linux and macOS and `%USERPROFILE%` on Windows — so every `~/.tbuk`
+in this README means `C:\Users\<you>\.tbuk` there. `tbuk doctor` prints the
+resolved directory under **Platform**, and flags the case where neither variable
+is set: the defaults then fall back to a *relative* `.tbuk`, which follows the
+working directory instead of staying put.
 
 ## Backup, export, and import
 
@@ -632,6 +662,13 @@ absolute, cleaned form, so a document ingested as `docs/a.md` is deleted just
 the same via `./docs/a.md` or its full absolute path — no double-indexing under
 different spellings. (Documents indexed before this behaviour existed are keyed
 by their original relative path; re-ingest to re-key them absolutely.)
+
+Paths are stored in the platform's own form — `/home/you/docs/a.md` on Linux and
+macOS, `C:\Users\you\docs\a.md` on Windows. That string *is* the document's
+key, and `tbuk export`/`tbuk import` carry it across unchanged, so a knowledge
+base imported onto another operating system searches and answers normally but
+cannot be refreshed with `tbuk update <path>` until each file is re-ingested from
+its local path.
 
 Chunk and search-preview boundaries snap to UTF-8 rune starts, so non-ASCII
 text (accents, CJK) is never sliced mid-rune into invalid UTF-8.

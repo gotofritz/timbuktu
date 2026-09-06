@@ -290,7 +290,7 @@ func TestRunReindex_listFailureIsFatal(t *testing.T) {
 // base whose stored vectors are at the wrong dimension.
 func TestReindexCommand_endToEnd(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

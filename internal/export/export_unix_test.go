@@ -13,6 +13,40 @@ import (
 	"github.com/gotofritz/timbuktu/internal/export"
 )
 
+// These two live here because they turn on a distinction only Unix draws. A
+// path whose parent is a file fails stat with ENOTDIR, which Create must
+// propagate rather than read as "component absent". Windows answers the same
+// stat with ERROR_PATH_NOT_FOUND, which Go maps to fs.ErrNotExist — so there
+// the component genuinely is missing and skipping it is correct. The case
+// cannot be constructed off Unix, which is why this is a build tag rather than
+// a skip (issue #121).
+
+func TestCreate_dbPathStatErrorPropagates(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "afile")
+	writeFile(t, file, []byte("x"))
+	cfg := config.DefaultsForRoot(root)
+	cfg.Database.Path = filepath.Join(file, "nested.sqlite") // parent is a file → ENOTDIR
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err == nil {
+		t.Fatal("expected error when a component path cannot be stat'd")
+	}
+}
+
+func TestCreate_dirComponentStatErrorPropagates(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "notadir")
+	writeFile(t, file, []byte("x"))
+	cfg := config.DefaultsForRoot(root)
+	cfg.Prompts.Dir = filepath.Join(file, "sub") // parent is a file → ENOTDIR
+
+	var buf bytes.Buffer
+	if err := export.Create(&buf, cfg, root); err == nil {
+		t.Fatal("expected error when a directory component cannot be stat'd")
+	}
+}
+
 // A named pipe inside a data folder must not be archived: opening one blocks
 // until a writer appears, which would hang the export indefinitely.
 func TestCreate_skipsNonRegularFiles(t *testing.T) {

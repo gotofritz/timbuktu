@@ -115,7 +115,7 @@ func TestRunList_empty(t *testing.T) {
 
 func TestListCommand_badFormat(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

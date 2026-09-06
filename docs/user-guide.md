@@ -151,8 +151,10 @@ This guide assumes:
 1. **Timbuktu is installed.** The easiest way is to grab a pre-built binary
    from the [Releases page](https://github.com/gotofritz/timbuktu/releases):
    download the archive for your OS/architecture, extract the `tbuk` binary,
-   and move it onto your `PATH` (e.g. `/usr/local/bin` on macOS/Linux). No Go
-   toolchain is needed — the binary is self-contained. If you prefer to build
+   and move it onto your `PATH` (e.g. `/usr/local/bin` on macOS/Linux; on
+   Windows unzip `tbuk.exe` into a folder on your `PATH`). No Go
+   toolchain is needed — the binary is self-contained. Linux, macOS and Windows
+   are all built *and* tested on every change. If you prefer to build
    from source, see the [README](../README.md#install). Then run `tbuk version`
    — it should print a version number. If you get "command not found", the
    binary is not on your `PATH`.
@@ -382,6 +384,10 @@ tbuk doctor
 accessible, and the AI models are reachable. A healthy output looks like this:
 
 ```
+Platform
+  os:          darwin/arm64
+  home:        ✓ /Users/you
+
 Config
   path:        ~/.tbuk/config.yaml
   status:      ✓ valid
@@ -437,6 +443,12 @@ tbuk init
 This creates `~/.tbuk/` with:
 - `config.yaml` — your configuration
 - `prompts/` — templates that control how the AI formats its answers
+
+`~` is your home directory: `/Users/you` on macOS, `/home/you` on Linux, and
+`C:\Users\you` on Windows — so every `~/.tbuk` in this guide means
+`C:\Users\you\.tbuk` there. The **Platform** section of `tbuk doctor` prints
+the directory it actually resolved, which is the quickest way to see where your
+knowledge base went.
 
 It is safe to run more than once. It never overwrites your own settings: on a
 folder that already has a `config.yaml`, it only **adds** default keys the file

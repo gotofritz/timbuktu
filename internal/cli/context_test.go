@@ -37,7 +37,7 @@ func TestContextCommand_prints(t *testing.T) {
 
 func TestContextCommand_noConfigRequired(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("context"); err != nil {
 		t.Fatalf("context failed without config: %v", err)
@@ -115,6 +115,25 @@ func TestContextCommand_documentsContextBudget(t *testing.T) {
 		"compacted",
 		"dropped",
 	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("context output missing %q", want)
+		}
+	}
+}
+
+// The cheatsheet writes every path as ~/.tbuk, which names nothing on Windows.
+// An agent primed with it has to be told where the data root actually is there,
+// or it will invent a path (#121).
+func TestContextCommand_namesTheWindowsDataRoot(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := cli.New()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"context"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("context command failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"USERPROFILE", `\.tbuk`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("context output missing %q", want)
 		}

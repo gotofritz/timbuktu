@@ -16,7 +16,7 @@ func TestAskCommand_missingArg(t *testing.T) {
 
 func TestAskCommand_templateListCommand(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestAskCommand_templateListCommand(t *testing.T) {
 
 func TestAskCommand_templateShowCommand(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestAskCommand_templateShowCommand(t *testing.T) {
 
 func TestAskCommand_unknownTemplate(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestAskCommand_unknownTemplate(t *testing.T) {
 
 func TestAskCommand_templateShowNotFound(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestAskCommand_templateShowNotFound(t *testing.T) {
 
 func TestAskCommand_templateListEmpty(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	// do NOT run init — prompts dir will be empty/missing
 	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
 	// create minimal config so --config works
@@ -144,7 +144,7 @@ func TestAskCommand_templateListEmpty(t *testing.T) {
 
 func TestDoctorCommand_showsPrompts(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

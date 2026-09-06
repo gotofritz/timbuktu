@@ -65,6 +65,12 @@ Built-in templates: qa (default), brief (≤280 chars), anki (flashcards)
 
 ## Config: ~/.tbuk/config.yaml
 
+Paths below are written ~/.tbuk throughout. That is the default data root on
+Linux and macOS; on Windows it is %USERPROFILE%\.tbuk (tbuk doctor's Platform
+section prints the resolved directory). --root <dir> moves the whole root on
+any platform.
+
+
 database.path          SQLite file location
 llm.provider           mlx | llama | ollama | claude | openai (default mlx)
 llm.base_url           local server URL (default http://localhost:8080; ollama :11434)
