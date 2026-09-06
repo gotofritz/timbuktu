@@ -37,10 +37,11 @@ func (r *recorder) append(_ context.Context, sessionID int64, turn conversation.
 	return nil
 }
 
-// capturingRetrieve records the query retrieval was actually run on.
-func capturingRetrieve(query *string, chunks []retrieval.RetrievedChunk) func(context.Context, string, int, map[string]string) ([]retrieval.RetrievedChunk, error) {
-	return func(_ context.Context, q string, _ int, _ map[string]string) ([]retrieval.RetrievedChunk, error) {
-		*query = q
+// capturingRetrieve records the queries retrieval was actually run on — the
+// whole plan, since an expansion retrieves on several wordings at once.
+func capturingRetrieve(queries *[]string, chunks []retrieval.RetrievedChunk) func(context.Context, []string, int, map[string]string) ([]retrieval.RetrievedChunk, error) {
+	return func(_ context.Context, qs []string, _ int, _ map[string]string) ([]retrieval.RetrievedChunk, error) {
+		*queries = qs
 		return chunks, nil
 	}
 }
@@ -95,24 +96,24 @@ func TestRunAsk_sessionReplaysHistoryAsMessages(t *testing.T) {
 // whatever the first turn happened to return (D5).
 func TestRunAsk_sessionRetrievesOnThePlannedQuery(t *testing.T) {
 	var out bytes.Buffer
-	var query string
+	var queries []string
 	rec := &recorder{}
 
-	err := cli.RunAsk(context.Background(), &out, capturingRetrieve(&query, nil), mockChat([]string{"ok"}, nil),
+	err := cli.RunAsk(context.Background(), &out, capturingRetrieve(&queries, nil), mockChat([]string{"ok"}, nil),
 		buildQATemplate(t), "and maps?", nil, 0, false,
 		cli.WithSession(threadOf("how do slices grow?", "they double"), rec.append),
 		cli.WithPlanner(rewrite.Window{Turns: 2}))
 	if err != nil {
 		t.Fatalf("RunAsk: %v", err)
 	}
-	if query != "how do slices grow? and maps?" {
-		t.Errorf("retrieval query = %q, want the folded one", query)
+	if len(queries) != 1 || queries[0] != "how do slices grow? and maps?" {
+		t.Errorf("retrieval queries = %q, want the folded one", queries)
 	}
 	if len(rec.turns) != 1 {
 		t.Fatalf("want one appended turn, got %d", len(rec.turns))
 	}
-	if rec.turns[0].Query != query {
-		t.Errorf("stored query = %q, want the query that ran (%q)", rec.turns[0].Query, query)
+	if rec.turns[0].Query != queries[0] {
+		t.Errorf("stored query = %q, want the query that ran (%q)", rec.turns[0].Query, queries[0])
 	}
 	if rec.turns[0].Question != "and maps?" {
 		t.Errorf("stored question = %q, want it as typed", rec.turns[0].Question)

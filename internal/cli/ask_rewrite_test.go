@@ -14,10 +14,17 @@ import (
 )
 
 // fakeRewriteServer answers embeddings, condense calls and answer calls from
-// one endpoint, telling the two chat calls apart by the rewrite system prompt.
-// Doing it by content rather than by call order keeps the assertion honest
-// however many times the command reaches for the model.
+// one endpoint.
 func fakeRewriteServer(t *testing.T, condensed string) *httptest.Server {
+	t.Helper()
+	return fakePlannerServer(t, condensed, "")
+}
+
+// fakePlannerServer answers embeddings and every chat call the planner and the
+// answer make, telling them apart by their system prompts. Doing it by content
+// rather than by call order keeps the assertion honest however many times the
+// command reaches for the model.
+func fakePlannerServer(t *testing.T, condensed, expanded string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/embedding", func(w http.ResponseWriter, _ *http.Request) {
@@ -26,8 +33,11 @@ func fakeRewriteServer(t *testing.T, condensed string) *httptest.Server {
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		text := "they double"
-		if strings.Contains(string(body), "You rewrite the last question") {
+		switch {
+		case strings.Contains(string(body), "You rewrite the last question"):
 			text = condensed
+		case strings.Contains(string(body), "You write alternative search queries"):
+			text = expanded
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		payload, _ := json.Marshal(map[string]any{

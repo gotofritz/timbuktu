@@ -198,6 +198,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		budgetMsg, budgetStatus := templateBudgetsMsg(manifests, cfg.LLM)
 		printCheck(w, "budgets", budgetMsg, budgetStatus)
 		printCheck(w, "rewrite", rewriteModesMsg(manifests), "")
+		printCheck(w, "expand", expandMsg(manifests), "")
 	}
 
 	return nil
@@ -251,6 +252,27 @@ func rewriteModesMsg(manifests []prompts.Manifest) string {
 		parts = append(parts, fmt.Sprintf("off: %s (the question as typed)", strings.Join(names, ", ")))
 	}
 	return strings.Join(parts, "; ") + "; window elsewhere"
+}
+
+// expandMsg says which templates retrieve on extra wordings of the query, and
+// how many.
+//
+// It is the second line of the same story as rewriteModesMsg: an expanding
+// template spends a model call writing the alternatives and then runs a search
+// per wording, so a template picked up from an import is otherwise a quietly
+// multiplied query cost per ask.
+func expandMsg(manifests []prompts.Manifest) string {
+	var parts []string
+	for _, m := range manifests {
+		if n := m.Retrieval.Expand; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", m.Name, n))
+		}
+	}
+	if len(parts) == 0 {
+		return "off everywhere (one query per ask, the question as planned)"
+	}
+	return strings.Join(parts, ", ") +
+		" extra queries (one model call to write them, one search each, fused by RRF); off elsewhere"
 }
 
 // contextBudgetMsg describes the context window and what it leaves for the

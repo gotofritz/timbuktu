@@ -34,9 +34,11 @@ tbuk ask --no-stream ...         buffer output (useful for redirecting to a file
 tbuk ask --session <name> ...    record the turn in a conversation thread (created if new)
 tbuk ask --continue ...          the most recently used thread (-c); an error when there is none
 tbuk ask --rewrite <mode> ...    plan the retrieval query: off | window | condense (overrides the template)
+tbuk ask --expand <N> ...        also retrieve on N model-written wordings of that query, fused (0 = off)
 tbuk chat                        REPL over the same path; no --session = in memory, saves nothing
 tbuk chat --session <name>       the same, recording into a named thread (created if new)
 tbuk chat --rewrite <mode>       as on ask, for every turn of the REPL
+tbuk chat --expand <N>           as on ask, for every turn of the REPL
 tbuk search "<query>"            return matching chunks without calling the LLM
 tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 
@@ -81,7 +83,7 @@ Without --session/-c nothing changes: ask is single-shot, same prompt as ever.
 A thread lives in the knowledge base's own DB, so --root switches both together
 and it survives reindex, a new terminal and a reboot. Names are lowercased and
 trimmed, so --session Go and --session go are one thread; an unknown name
-creates it. A turn stores question + planned query + answer + citation strings
+creates it. A turn stores question + planned queries + answer + citation strings
 (not chunk ids, which reindex renumbers), and is written only when the answer
 completes — Ctrl-C, a provider error or an empty completion records nothing.
 
@@ -107,13 +109,28 @@ A condense that errors, times out (20s), returns nothing, or returns more text
 than it was given falls back to window and warns; it never fails the ask. Only
 a bad --rewrite value is an error, and it is raised before the model is called.
 
-Without --session/-c and without --rewrite condense, no planner is built at
-all: a single-shot ask retrieves on exactly what was typed and spends exactly
-one model call, as it always has.
+Without --session/-c, without --rewrite condense and without an expansion, no
+planner is built at all: a single-shot ask retrieves on exactly what was typed
+and spends exactly one model call, as it always has.
 
-tbuk session show <name> --verbose prints the query each turn actually ran on,
-which is where a bad rewrite becomes visible. tbuk doctor's Prompts / rewrite
-line names the templates that condense.
+tbuk session show <name> --verbose prints the query each turn actually ran on
+(several, joined by " | ", when expanded), which is where a bad rewrite becomes
+visible. tbuk doctor's Prompts / rewrite and Prompts / expand lines name the
+templates that condense and the ones that expand.
+
+## Expanding the query
+
+retrieval.expand: N in the manifest (or --expand N for one run, 0 = off) spends
+one model call writing N other wordings of the planned query, retrieves on each,
+and fuses the rankings with the same RRF the hybrid search uses. A chunk several
+wordings agree on outranks one a single wording found; results are de-duplicated
+by chunk id, so the prompt still holds --top distinct passages.
+
+Expansion composes with the mode rather than replacing it: window (or condense)
+plans the query and the wordings are of that, so inside a thread they carry the
+topic too. Like condense it cannot fail the ask — an error, a timeout (20s) or
+an empty completion retrieves on the planned query alone and warns. It costs one
+model call plus one search per wording, so it is off by default.
 
 ## Knowledge base
 
@@ -200,6 +217,16 @@ session.max_turns      turns kept per thread, oldest dropped first (default 0 = 
 - "rewrite: unknown mode ...": a typo in --rewrite or in a manifest's
   retrieval.rewrite. Valid values: off, window, condense. Raised at the edge —
   template load, or flag parsing — never after a model call.
+- "warning: could not expand the query (...) — retrieving on the planned query
+  alone": the expansion call failed, timed out, or came back empty. Nothing is
+  broken; the planned query ran and the answer is grounded as usual. Set
+  retrieval.expand: 0, or pass --expand 0, to stop trying.
+- "rewrite: expand must not be negative": a typo in --expand or in a manifest's
+  retrieval.expand. 0 is off; raised at the same edge as --rewrite.
+- tbuk ask suddenly runs several searches per question: a template sets
+  retrieval.expand: N — one model call to write the wordings, one search each.
+  By design. tbuk doctor's Prompts / expand line names them; --expand 0 skips it
+  for one run.
 - tbuk ask suddenly costs two model calls per question: a template sets
   retrieval.rewrite: condense. By design. tbuk doctor's Prompts / rewrite line
   names them; --rewrite window skips it for one run.

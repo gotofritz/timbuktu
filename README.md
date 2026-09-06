@@ -95,9 +95,10 @@ tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template
                          #   (--top, --template, --no-stream, --require-context to abort when no context matches)
                          #   --session NAME records the turn in a thread (created if new); -c/--continue uses the last one
                          #   --rewrite off|window|condense plans the retrieval query for this run (overrides the template)
+                         #   --expand N retrieves on N extra wordings of that query and fuses them (0 = off)
 tbuk chat                # REPL over the same path, one turn per line (--template, --top, --var, --require-context)
                          #   --session NAME records into a named thread; without it the chat is in memory and saves nothing
-                         #   --rewrite off|window|condense, as on ask
+                         #   --rewrite off|window|condense and --expand N, as on ask
 tbuk session list        # conversation threads: name, turns, template, last used
 tbuk session show <n>    # a thread turn by turn, with its citations (--verbose adds the query retrieval ran)
 tbuk session rename <old> <new>  # rename a thread, keeping its turns
@@ -445,11 +446,11 @@ internal/
   embeddings/       Embedder interface; MLX, llama.cpp, Ollama, OpenAI adapters
   ingest/           Ingester: SHA256 dedup, extract → chunk → embed → store pipeline; Reindex* — re-embed from raw/
   llm/              LLM interface; MLX, Claude, OpenAI, Ollama adapters (SSE + JSON-lines streaming)
-  search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF); query parser (phrases, exclusions)
+  search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF); FuseRRF; query parser (phrases, exclusions)
   searchtext/       Reduce — the encoding stored in chunks.search_text and handed to the embedder
-  retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
+  retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string; RetrieveMany fuses several queries
   conversation/     Thread, Turn, Replay, Messages — how a thread is replayed into a prompt (pure)
-  rewrite/          Planner interface; Window (deterministic), Condense (one LLM call) — turn (thread, question) into the query retrieval runs
+  rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings) — turn (thread, question) into the queries retrieval runs
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
@@ -675,6 +676,40 @@ harness says condensing beats it on follow-up turns. `tbuk doctor` names the
 templates that use it, on the **Prompts / rewrite** line, since each one is a
 second model call per question.
 
+#### Query expansion — several wordings of one query
+
+A search reaches the passages that share the question's vocabulary. Ask "how do
+slices grow?" of a corpus that says *reallocate* and *capacity*, and the words
+that would have found it are ones nobody typed.
+
+`retrieval.expand: N` in `manifest.yaml` (or `--expand N` for one run) spends
+one model call writing N other wordings of the planned query, retrieves on each,
+and fuses the ranked lists with the same Reciprocal Rank Fusion the hybrid
+search already uses:
+
+```bash
+tbuk ask --expand 3 "how do slices grow?"
+#   retrieves on: how do slices grow? / slice growth capacity / when append
+#   reallocates the backing array / …  — then fuses the four rankings
+```
+
+A chunk that several wordings agree on outranks one a single wording found,
+which is the point: fusion promotes agreement, so a paraphrase that wanders is
+outvoted rather than allowed to dominate. Results are de-duplicated by chunk id,
+so the prompt still holds `--top` distinct passages.
+
+Expansion **composes with the mode** rather than replacing it: `window` (or
+`condense`) plans the query for the turn, and the wordings are of what that
+arrived at — so inside a thread the paraphrases carry the topic too. Like
+`condense` it **cannot fail the ask**: an error, a timeout or an empty
+completion retrieves on the planned query alone and says so on stderr.
+
+It costs one model call plus one search per extra wording, so it is **off by
+default** and stays off until the eval harness says otherwise. `tbuk doctor`
+names the templates that expand, on the **Prompts / expand** line;
+`tbuk session show --verbose` prints every query a turn ran on, separated by
+` | `.
+
 #### `tbuk chat` — the same thread, interactively
 
 `tbuk chat` is a REPL around the same code path: one turn per line, in one
@@ -881,6 +916,8 @@ A knowledge base indexed before this change still holds chunks sized in bytes.
 | `tbuk session show/rename/delete` fails with `no conversation thread named …` | These never create a thread — there would be nothing in it | The error lists the threads that do exist; `tbuk ask --session NAME "…"` or `tbuk chat --session NAME` creates one |
 | `tbuk ask` warns `could not condense the question (…)` | The `condense` rewrite failed, timed out, or came back empty or absurd | Nothing is broken — the query was planned with the `window` instead, and the answer is grounded as usual. Check the model in the template's `model:`, or set `retrieval.rewrite: window` |
 | `tbuk ask` is suddenly making two model calls per question | A template sets `retrieval.rewrite: condense` | By design — `condense` spends a call planning the query. `tbuk doctor`'s **Prompts / rewrite** line names every template that does it; `--rewrite window` skips it for one run |
+| `tbuk ask` warns `could not expand the query (…)` | The expansion call failed, timed out, or came back empty | Nothing is broken — retrieval ran on the planned query alone and the answer is grounded as usual. Set `retrieval.expand: 0`, or pass `--expand 0`, to stop trying |
+| `tbuk ask` is suddenly slow, with several searches per question | A template sets `retrieval.expand: N` — one model call plus one search per wording | By design. `tbuk doctor`'s **Prompts / expand** line names every template that does it; `--expand 0` skips it for one run |
 | `tbuk chat` answered fine but `tbuk session list` shows nothing | A chat without `--session` is in memory and records nothing, by design | Start it as `tbuk chat --session NAME`, or type `/new NAME` part-way through to start recording |
 | `tbuk ask` fails with `prompt needs ~N tokens but only M are available` | Even a prompt with no retrieved context does not fit the budget | Shorten the question, raise `llm.context_tokens`, or lower the template's `max_tokens`; `tbuk doctor` shows both numbers |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |

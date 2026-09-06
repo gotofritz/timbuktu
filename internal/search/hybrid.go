@@ -3,11 +3,8 @@ package search
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 )
-
-const rrfK = 60
 
 // Hybrid runs vector + keyword search and fuses results with Reciprocal Rank Fusion.
 func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]SearchResult, error) {
@@ -22,32 +19,7 @@ func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]Se
 		return nil, err
 	}
 
-	type entry struct {
-		result SearchResult
-		rrf    float64
-	}
-	scores := map[int64]*entry{}
-
-	mergeRank := func(results []SearchResult) {
-		for rank, r := range results {
-			if e, ok := scores[r.ChunkID]; ok {
-				e.rrf += 1.0 / float64(rrfK+rank+1)
-			} else {
-				cp := r
-				scores[r.ChunkID] = &entry{result: cp, rrf: 1.0 / float64(rrfK+rank+1)}
-			}
-		}
-	}
-	mergeRank(vecResults)
-	mergeRank(kwResults)
-
-	fused := make([]*entry, 0, len(scores))
-	for _, e := range scores {
-		fused = append(fused, e)
-	}
-	sort.Slice(fused, func(i, j int) bool {
-		return fused[i].rrf > fused[j].rrf
-	})
+	fused := FuseRRF([][]SearchResult{vecResults, kwResults}, RRFK)
 
 	// The keyword leg already dropped the excluded chunks, but the vector leg
 	// knows nothing about NOT, so fusion hands them back. Apply the exclusions
@@ -56,17 +28,17 @@ func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]Se
 	if opts.Operators {
 		if neg := parseQuery(query, true).negativeMatch(); neg != "" {
 			ids := make([]int64, len(fused))
-			for i, e := range fused {
-				ids[i] = e.result.ChunkID
+			for i, r := range fused {
+				ids[i] = r.ChunkID
 			}
 			excluded, err := s.excludedChunkIDs(ctx, neg, ids)
 			if err != nil {
 				return nil, err
 			}
 			kept := fused[:0]
-			for _, e := range fused {
-				if !excluded[e.result.ChunkID] {
-					kept = append(kept, e)
+			for _, r := range fused {
+				if !excluded[r.ChunkID] {
+					kept = append(kept, r)
 				}
 			}
 			fused = kept
@@ -77,10 +49,10 @@ func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]Se
 	// (1/(k+rank) across legs), not cosine values, so a hybrid MinScore is on a
 	// different scale from vector search.
 	if opts.MinScore > 0 {
-		kept := make([]*entry, 0, len(fused))
-		for _, e := range fused {
-			if e.rrf >= opts.MinScore {
-				kept = append(kept, e)
+		kept := make([]SearchResult, 0, len(fused))
+		for _, r := range fused {
+			if r.Score >= opts.MinScore {
+				kept = append(kept, r)
 			}
 		}
 		fused = kept
@@ -92,8 +64,7 @@ func (s *Searcher) Hybrid(ctx context.Context, query string, opts Options) ([]Se
 	}
 	out := make([]SearchResult, k)
 	for i := range out {
-		r := fused[i].result
-		r.Score = fused[i].rrf
+		r := fused[i]
 		r.Source = "hybrid"
 		out[i] = r
 	}

@@ -41,6 +41,12 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, topK int, meta m
 	if err != nil {
 		return nil, fmt.Errorf("retrieval: hybrid search: %w", err)
 	}
+	return chunksFrom(results), nil
+}
+
+// chunksFrom attaches a citation to each result. Shared by Retrieve and
+// RetrieveMany so a chunk is rendered one way however many queries found it.
+func chunksFrom(results []search.SearchResult) []RetrievedChunk {
 	chunks := make([]RetrievedChunk, len(results))
 	for i, sr := range results {
 		chunks[i] = RetrievedChunk{
@@ -54,5 +60,5 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, topK int, meta m
 			Citation:   fmt.Sprintf("%s §%d", sr.Path, sr.ChunkIndex),
 		}
 	}
-	return chunks, nil
+	return chunks
 }

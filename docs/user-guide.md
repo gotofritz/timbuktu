@@ -1013,6 +1013,45 @@ under **Prompts**, since each one costs a second model call per question.
 `tbuk session show --verbose` prints what was actually searched for, per turn —
 which is how you check whether a rewrite helped or hurt.
 
+### Searching for the same thing in several ways
+
+A search finds documents that use *your* words. Ask "how do slices grow?" of
+notes that say *reallocate* and *capacity* and the passage you wanted is sitting
+there, described in words you did not type.
+
+`--expand N` spends one model call writing N other ways of asking the same
+thing, searches for all of them, and merges the results:
+
+```bash
+tbuk ask --expand 3 "how do slices grow?"
+# also searches for: "slice capacity growth", "when append reallocates the
+# backing array", "go slice doubling" — then merges the four sets of results
+```
+
+A passage that several of those wordings turn up is ranked above one that only a
+single wording found, so the alternatives help without letting a stray one take
+over. You still get `--top` passages; duplicates are merged, not counted twice.
+
+It works with everything else: inside a thread the wordings are written from the
+*planned* query, so they carry the topic of the conversation, and `--rewrite
+condense --expand 3` condenses first and then writes alternatives of the
+standalone question.
+
+**A failed expansion never costs you the answer** either — if the call fails or
+times out, Timbuktu searches for the planned query alone and says so:
+
+```
+warning: could not expand the query (the model did not answer within 20s) —
+retrieving on the planned query alone
+```
+
+Expansion is **off by default**, because it costs a model call plus one search
+per wording. Two or three is plenty; more mostly buys near-duplicates. Set
+`retrieval.expand:` in a template's `manifest.yaml` to make it permanent, and
+`--expand 0` switches it off for one run. `tbuk doctor` lists which templates
+expand, under **Prompts**, and `tbuk session show --verbose` prints every query
+a turn searched for, separated by ` | `.
+
 ### Chatting instead of typing `tbuk ask` each time
 
 `tbuk chat` is the same thing without the retyping: one question per line, until
@@ -1023,8 +1062,8 @@ tbuk chat                     # a conversation that is not saved
 tbuk chat --session alpha     # the "alpha" thread, saved as you go
 ```
 
-`tbuk chat` takes `--rewrite` too, and it applies to every question you type in
-that session.
+`tbuk chat` takes `--rewrite` and `--expand` too, and they apply to every
+question you type in that session.
 
 ```
 tbuk chat — thread "alpha".
@@ -1324,14 +1363,15 @@ Now use it:
 tbuk ask --template actions "What are all the things I need to do this week?"
 ```
 
-The `retrieval:` block takes two more keys, which decide how a question becomes
-the search that is run for it:
+The `retrieval:` block takes three more keys, which decide how a question becomes
+the searches that are run for it:
 
 ```yaml
 retrieval:
   top_k: 8
   rewrite: condense   # off | window (default) | condense
   window_turns: 2     # questions folded in under `window`
+  expand: 3           # extra wordings to also search for; 0 = off (the default)
 ```
 
 - `window` (the default) folds the last `window_turns` questions of the thread
@@ -1341,11 +1381,16 @@ retrieval:
 - `condense` spends one extra call on *this template's* `model`, at this
   template's `temperature`, rewriting the follow-up into a standalone question.
   A failed rewrite falls back to `window` with a warning, never an error.
+- `expand: N` spends one more call writing N other wordings of whichever query
+  the mode above arrived at, searches for all of them, and merges the results.
+  A failed expansion searches for the planned query alone, with a warning.
 
-That is why the setting lives on the template and not in `config.yaml`: it
-spends the template's model. `--rewrite MODE` overrides it for a single run, and
-`tbuk doctor` names the templates that condense. See [Choosing how the follow-up
-is searched for](#choosing-how-the-follow-up-is-searched-for).
+That is why these live on the template and not in `config.yaml`: they spend the
+template's model. `--rewrite MODE` and `--expand N` override them for a single
+run, and `tbuk doctor` names the templates that condense or expand. See
+[Choosing how the follow-up is searched
+for](#choosing-how-the-follow-up-is-searched-for) and [Searching for the same
+thing in several ways](#searching-for-the-same-thing-in-several-ways).
 
 A manifest may also set `max_tokens` (how long the answer may get) and
 `context_tokens` (the window of the model this template runs on, overriding

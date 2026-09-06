@@ -22,9 +22,9 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  rewrite/          Planner interface; Window (deterministic), Condense (one LLM call) — turn (thread, question) into the queries retrieval runs
-  retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
-  search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5; parseQuery (phrases, exclusions)
+  rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
+  retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
+  search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
   searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
   squeeze/          Text(), Chunks() — lossy prose compaction of retrieved text, code left byte-exact
   export/           Create() — tar snapshot of config + data folders (portable, path-commented config)
@@ -534,13 +534,20 @@ func (s *Searcher) Vector(ctx, query, opts)   ([]SearchResult, error) // cosine,
 func (s *Searcher) Keyword(ctx, query, opts)  ([]SearchResult, error) // FTS5 BM25 (query parsed to a MATCH expression)
 func (s *Searcher) Metadata(ctx, filters)     ([]SearchResult, error) // AND-joined metadata keys
 func (s *Searcher) Hybrid(ctx, query, opts)   ([]SearchResult, error) // RRF k=60 over vector+keyword
+func FuseRRF(lists [][]SearchResult, k int)   []SearchResult            // the fusion itself, for any ranked lists
 func CheckFTS5(db *sql.DB) error                                       // probes chunks_fts index
 ```
 
 Vector: O(n) embedding scan acceptable for < 100k chunks; swap sqlite-vec later without interface change. Runs two-phase — phase 1 scans only `(id, embedding)` and keeps a bounded min-heap of the top-K ids (O(n log K) time, O(K) memory, never touches chunk text); phase 2 hydrates text/path/title for just those K ids. Peak memory is O(K), not O(corpus).
 Hybrid RRF: `score(d) = Σ 1/(60 + rank_i(d))` — runs both searches at 2×TopK then fuses.
 `Options.MinScore` filters the fused RRF sums (a different scale from vector cosine),
-applied before truncating to TopK.
+applied before truncating to TopK. The fusion is `FuseRRF`, exported because three
+callers fuse — Hybrid's two legs, multi-query retrieval (`RetrieveMany`) and, later,
+multi-hop — and one implementation means one ranking. It de-duplicates by chunk id,
+takes everything but `Score` from the first list holding the chunk, and breaks ties by
+chunk id so identical inputs always fuse to the same order; a ranked list that
+reshuffled between runs would be truncated differently by TopK each time. `RRFK` (60) is
+the shared rank constant.
 Keyword: matches `chunks.search_text` (the reduced encoding) and returns `chunks.text`
 (the chunk as written), so a code chunk is *found* by its names and comments but
 *shown* as it was written.
@@ -627,7 +634,19 @@ type Retriever struct { /* searcher HybridSearcher */ }
 
 func New(s HybridSearcher) *Retriever
 func (r *Retriever) Retrieve(ctx context.Context, query string, topK int, meta map[string]string) ([]RetrievedChunk, error)
+func (r *Retriever) RetrieveMany(ctx context.Context, queries []string, topK int, meta map[string]string) ([]RetrievedChunk, error)
 ```
+
+`RetrieveMany` is what query expansion (and, later, multi-hop) retrieves with:
+it runs each query, fuses the ranked lists with `search.FuseRRF`, de-duplicates
+by chunk id and cuts to `topK`. Each query is searched at the full depth rather
+than at `topK/N` — fusion ranks by agreement between whole lists, and a
+paraphrase asked for one result contributes an opinion instead of a ranking.
+Blank queries are dropped (a search on nothing matches everything in rank
+order), and **one query is `Retrieve` exactly** — the same chunks with the same
+scores, not a fusion of one list, which would replace cosine/BM25-derived scores
+with RRF sums. `RunAsk` calls `RetrieveMany` for every ask; a plan of one is the
+single-shot search it always was.
 
 ### Prompt Templates
 
@@ -649,7 +668,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `variables` come from `manifest.yaml`. Query planning is a property of the template — `condense` spends the template's model at the template's temperature — so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value and a negative `window_turns` at load, the rule `normalize`'s filters already follow; `--rewrite` overrides the key for one run and is validated at the same edge, in `resolveRewriteMode`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
+Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `retrieval.expand`, `variables` come from `manifest.yaml`. Query planning is a property of the template — `condense` and `expand` spend the template's model at the template's temperature — so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value and a negative `window_turns` or `expand` at load, the rule `normalize`'s filters already follow; `--rewrite` and `--expand` override the keys for one run and are validated at the same edge, in `resolveRewriteMode` and `resolveExpand`. `--expand` is read through `Flags().Changed`, since `0` is both its zero value and the answer that switches a template's expansion off for one run. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
@@ -666,7 +685,10 @@ exceed `llm.max_tokens`, and `tbuk doctor` reports both numbers plus any
 template whose own `max_tokens` swallows its window. Its **Prompts / rewrite**
 line (`rewriteModesMsg`) names the templates that plan their query with
 `condense` or `off` — a `condense` template is a second model call on every ask
-run under it, which is otherwise invisible until the token bill says so.
+run under it, which is otherwise invisible until the token bill says so — and
+its **Prompts / expand** line (`expandMsg`) names the templates that retrieve on
+extra wordings, and how many, since each is a model call plus a search per
+wording.
 
 ```go
 func WithContextBudget(window, outputReserve int) AskOption
@@ -744,9 +766,22 @@ type Condense struct {                                 // one model call, cannot
     Timeout  time.Duration                             // 0 = CondenseTimeout
 }
 
-type Options struct { Mode string; WindowTurns int; Chat ChatFn; CallOptions llm.CallOptions; Warn io.Writer }
+type Expand struct {                                   // one model call, N wordings, cannot fail the ask
+    Base     Planner                                   // what plans the query being paraphrased; nil = the question
+    Chat     ChatFn
+    Opts     llm.CallOptions
+    N        int                                       // wordings asked for, and the ceiling on those used
+    Warn     io.Writer
+    Timeout  time.Duration                             // 0 = ExpandTimeout
+}
+
+type Options struct {
+    Mode string; WindowTurns int; Expand int
+    Chat ChatFn; CallOptions llm.CallOptions; Warn io.Writer
+}
 
 func ValidateMode(mode string) error                   // what loadManifest and --rewrite call
+func ValidateExpand(n int) error                       // what loadManifest and --expand call
 func New(opts Options) (Planner, error)
 ```
 
@@ -755,8 +790,9 @@ one. Without it, `and maps?` retrieved on its own reaches nothing: the model
 would see the thread while the retriever did not, and the answer would come from
 the previous turn's chunks plus the model's priors — a chat that has quietly
 stopped being a RAG system. `off` retrieves on the question as typed. Returning
-a slice is what lets expansion and multi-hop fit the same interface later;
-`Window` and `Condense` each return one query and `RunAsk` runs it.
+a slice is what lets expansion (and multi-hop later) fit the same interface:
+`Window` and `Condense` return one query, `Expand` returns several, and
+`RunAsk` retrieves on all of them.
 
 `condense` (roadmap #24) spends one model call rewriting *(thread, question)*
 into a question that stands on its own — resolving the pronoun rather than
@@ -786,6 +822,30 @@ quotes stripped) before it becomes a query. The planned query is stored in
 `session_turns.query`, so `session show --verbose` makes a bad rewrite visible
 rather than mysterious.
 
+`expand` (roadmap #25) is the same seam unrolled once. `Expand` **wraps** the
+planner the mode named rather than replacing it — `New` builds the mode's
+planner and hands it to `Expand` as `Base` — so `window` (or `condense`) plans
+the query for the turn and the wordings are of what that arrived at; inside a
+thread the paraphrases carry the topic too. One model call returns the
+alternatives one per line; `cleanParaphrases` strips numbering, bullets and
+wrapping quotes, `dedupeQueries` drops repeats case- and whitespace-insensitively
+(under RRF a duplicated list is a vote counted twice, which promotes a bad
+paraphrase rather than outvoting it), and `N` caps how many are kept. Failure is
+a fallback on the same terms as `condense`: the base queries alone, with a
+warning. The base planner's *own* error is not caught — there is no query to
+paraphrase and nothing to fall back to.
+
+The expansion prompt carries only the query, not the thread: whatever the thread
+had to say is already in the query the base planner arrived at, and repeating it
+invites paraphrases of the conversation instead of the question. `MaxTokens`
+defaults to `ExpandMaxTokens` (256), the timeout to `ExpandTimeout` (20s).
+
+`RunAsk` stores every query a turn ran on in `session_turns.query`, joined by
+` | ` (`queryJoiner`), so `session show --verbose` explains an expanded turn the
+same way it explains a rewritten one. A plan with nothing usable in it leaves
+the question standing, since an empty query matches the whole corpus in rank
+order.
+
 Wiring is by option, not by parameter — `RunAsk`'s positional list is already at
 its limit:
 
@@ -799,12 +859,14 @@ func WithPlanner(p rewrite.Planner) AskOption
 `ask.go` resolves the mode and builds the planner in two steps, shared with
 `chat.go`: `resolveRewriteMode(flag, manifest)` prefers `--rewrite` over the
 manifest and validates the flag before the knowledge base is opened, and
-`plannerFor(mode, manifest, threaded, chat, warn)` builds it *after* the LLM,
-which `condense` spends. `plannerFor` returns a nil planner for a single-shot
-ask under `window` or `off`: over no thread both are the identity, so the
-regression bar — no `--session`, no flag, the same prompt, the same query and
-one model call — holds by construction rather than by care. `condense` is the
-exception and is built with or without a thread.
+`plannerFor(mode, expand, manifest, threaded, chat, warn)` builds it *after* the
+LLM, which `condense` and the expansion spend. `plannerFor` returns a nil
+planner for a single-shot ask under `window` or `off` with no expansion: over no
+thread both modes are the identity, so the regression bar — no `--session`, no
+flag, the same prompt, the same query and one model call — holds by construction
+rather than by care. `condense` and `expand > 0` are the exceptions and are
+built with or without a thread, since both are worth a call on a question with
+nothing behind it.
 
 `openThread` (in `ask.go`) resolves the thread before the embedder or the LLM is
 built, so an unknown thread fails on its own terms rather than behind a
@@ -1149,8 +1211,8 @@ tbuk search <query>            search chunks; query read as an expression — "p
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document
-tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream, --require-context, --session NAME, -c/--continue, --rewrite off|window|condense)
-tbuk chat                      REPL over the same path, one turn per line (--template, --var, --top, --require-context, --session NAME, --rewrite); no --session = in memory, records nothing
+tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream, --require-context, --session NAME, -c/--continue, --rewrite off|window|condense, --expand N)
+tbuk chat                      REPL over the same path, one turn per line (--template, --var, --top, --require-context, --session NAME, --rewrite, --expand); no --session = in memory, records nothing
 tbuk session list              conversation threads: name, turns, template, last used (most recent first)
 tbuk session show <name>       the thread turn by turn with its citations (--verbose adds the query retrieval ran)
 tbuk session rename <old> <new>  rename a thread, keeping its turns

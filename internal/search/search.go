@@ -34,9 +34,15 @@ type Options struct {
 	Operators bool
 }
 
+// DefaultTopK is how many results a search returns when the caller names no
+// number of its own. Exported because multi-query retrieval truncates the fused
+// list to the same default, and two spellings of "how many is normal" is one
+// too many.
+const DefaultTopK = 5
+
 func (o *Options) topK() int {
 	if o == nil || o.TopK <= 0 {
-		return 5
+		return DefaultTopK
 	}
 	return o.TopK
 }

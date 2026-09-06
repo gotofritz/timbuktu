@@ -160,6 +160,29 @@ func TestContextCommand_documentsQueryPlanning(t *testing.T) {
 	}
 }
 
+// Expansion multiplies the searches a question costs, so an agent primed with
+// the cheatsheet has to find the knob, its default and its warning in it (#160).
+func TestContextCommand_documentsQueryExpansion(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := cli.New()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"context"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("context command failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"--expand",
+		"retrieval.expand",
+		"could not expand the query",
+		"off by default",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("context output missing %q", want)
+		}
+	}
+}
+
 // The cheatsheet writes every path as ~/.tbuk, which names nothing on Windows.
 // An agent primed with it has to be told where the data root actually is there,
 // or it will invent a path (#121).
