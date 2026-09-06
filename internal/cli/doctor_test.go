@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -929,4 +930,74 @@ func TestRunDoctor_reportsPlatform(t *testing.T) {
 			t.Errorf("doctor report missing %q:\n%s", want, got)
 		}
 	}
+}
+
+// A knowledge base built before conversation threads existed opens, ingests and
+// searches fine — only `tbuk ask --session` fails on it — so doctor has to say
+// so and name the script that adds the tables (#157).
+func TestRunDoctorTo_reportsMissingSessionTables(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+	dropSessionTables(t, dbPath)
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "sessions") {
+		t.Errorf("expected the missing tables to be reported, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "scripts/add-sessions") {
+		t.Errorf("expected the report to name the script that fixes it, got:\n%s", out.String())
+	}
+}
+
+// With the tables in place the line reports how many threads the knowledge base
+// holds, so a forgotten thread is visible before it is replayed into a prompt.
+func TestRunDoctorTo_countsSessions(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tbuk.sqlite")
+	seedDB(t, dbPath)
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	repo := storage.NewSessionRepo(db.DB())
+	for _, name := range []string{"go", "rust"} {
+		if err := repo.Create(context.Background(), &storage.Session{Name: name}); err != nil {
+			t.Fatalf("Create(%s): %v", name, err)
+		}
+	}
+	_ = db.Close()
+
+	cfg := config.Defaults()
+	cfg.Database.Path = dbPath
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "2 threads") {
+		t.Errorf("expected the thread count, got:\n%s", out.String())
+	}
+}
+
+// dropSessionTables reduces a database to the shape it had before #157.
+func dropSessionTables(t *testing.T, path string) {
+	t.Helper()
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	for _, stmt := range []string{`DROP TABLE session_turns`, `DROP TABLE sessions`} {
+		if _, err := db.DB().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	_ = db.Close()
 }

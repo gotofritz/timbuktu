@@ -7,12 +7,23 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gotofritz/timbuktu/internal/normalize"
+	"github.com/gotofritz/timbuktu/internal/rewrite"
 )
 
-// RetrievalConfig controls how many chunks to fetch for this template.
+// RetrievalConfig controls how many chunks to fetch for this template, and how
+// the query they are fetched with is planned.
 type RetrievalConfig struct {
 	TopK      int `yaml:"top_k"`
 	MaxTokens int `yaml:"max_tokens"`
+	// Rewrite names the query planner used for a turn inside a thread:
+	// "window" (the default) folds the last few questions into the query,
+	// "off" retrieves on the question exactly as typed. Query planning spends
+	// the template's model at the template's temperature, which is why it is
+	// configured here rather than in config.yaml.
+	Rewrite string `yaml:"rewrite"`
+	// WindowTurns is how many prior questions "window" folds in. 0 inherits
+	// rewrite.DefaultWindowTurns.
+	WindowTurns int `yaml:"window_turns"`
 }
 
 // VariableDefault holds a default value for a template variable.
@@ -49,6 +60,13 @@ func loadManifest(path string) (Manifest, error) {
 	}
 	if err := m.Normalize.Validate(); err != nil {
 		return Manifest{}, fmt.Errorf("manifest %s: %w", path, err)
+	}
+	if err := rewrite.ValidateMode(m.Retrieval.Rewrite); err != nil {
+		return Manifest{}, fmt.Errorf("manifest %s: %w", path, err)
+	}
+	if m.Retrieval.WindowTurns < 0 {
+		return Manifest{}, fmt.Errorf("manifest %s: retrieval window_turns must not be negative, got %d",
+			path, m.Retrieval.WindowTurns)
 	}
 	return m, nil
 }

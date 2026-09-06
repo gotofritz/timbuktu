@@ -93,6 +93,7 @@ tbuk meta set <path> k=v # attach metadata to a document (one value per key; dis
 tbuk meta list <path>    # list all metadata for a document
 tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
                          #   (--top, --template, --no-stream, --require-context to abort when no context matches)
+                         #   --session NAME records the turn in a thread (created if new); -c/--continue uses the last one
 tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR
@@ -283,6 +284,10 @@ preprocess:
 
 prompts:
   dir: ./prompts       # root directory holding prompt template folders
+
+session:
+  history_turns: 6     # prior Q/A pairs `ask --session` replays into the prompt; 0 replays none
+  max_turns: 0         # turns kept per thread, oldest dropped first; 0 keeps everything
 ```
 
 Each data path (`database.path`, `preprocess.output_dir`, `ingest.raw_dir`,
@@ -426,7 +431,7 @@ cmd/tbuk/           entry point
 internal/
   cli/              cobra root + subcommands
   config/           Config struct, Load(), Defaults()
-  storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo
+  storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo, SessionRepo
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search, rune-safe, configurable size/overlap
   embeddings/       Embedder interface; MLX, llama.cpp, Ollama, OpenAI adapters
@@ -435,6 +440,8 @@ internal/
   search/           Searcher: Vector (cosine), Keyword (FTS5 BM25), Metadata, Hybrid (RRF); query parser (phrases, exclusions)
   searchtext/       Reduce — the encoding stored in chunks.search_text and handed to the embedder
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
+  conversation/     Thread, Turn, Replay, Messages — how a thread is replayed into a prompt (pure)
+  rewrite/          Planner interface; Window — turns (thread, question) into the query retrieval runs
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
@@ -445,10 +452,12 @@ Dependencies point inward. Providers depend only on shared interfaces defined in
 ## Storage schema
 
 ```sql
-documents   — path, sha256, title, mime_type, raw_path, timestamps
-chunks      — document_id, chunk_index, text, search_text, token_count, embedding BLOB
-metadata    — document_id, key, value  (key/value per document)
-chunks_fts  — FTS5 virtual table over chunks.search_text, tokenize="unicode61 tokenchars '_'" (auto-synced via triggers)
+documents     — path, sha256, title, mime_type, raw_path, timestamps
+chunks        — document_id, chunk_index, text, search_text, token_count, embedding BLOB
+metadata      — document_id, key, value  (key/value per document)
+chunks_fts    — FTS5 virtual table over chunks.search_text, tokenize="unicode61 tokenchars '_'" (auto-synced via triggers)
+sessions      — name (unique, normalized), template, timestamps
+session_turns — session_id, turn_index, question, query, answer, citations  (cascade on session delete)
 ```
 
 Embeddings stored as little-endian `[]float32` BLOBs. Cascade delete on document removal.
@@ -464,6 +473,13 @@ index is built from and what the embedding was taken of. See
 portable when its folders move or are imported under another root. Empty means
 no copy is known — ingested with `--no-raw`, with archiving disabled, or before
 the column existed.
+
+`sessions` / `session_turns` hold conversation threads (see
+[Conversation threads](#conversation-threads)). A turn stores the question as
+typed, the query retrieval actually ran, the answer, and its citations **as
+display strings** rather than chunk ids — `chunks.id` is deleted and
+re-inserted by every re-ingest and every `tbuk reindex`, so a thread survives a
+full re-embed with its provenance intact.
 
 ### Metadata
 
@@ -540,20 +556,79 @@ model's exact maximum.
 
 Over budget, `ask` climbs a ladder and says on stderr what it did:
 
-1. **compacts the retrieved text** — repeated whitespace and blank lines
+1. **drops the oldest replayed turns** of a thread, one pair at a time (only
+   under `--session` / `--continue`; a single-shot ask has no history to drop).
+2. **compacts the retrieved text** — repeated whitespace and blank lines
    collapsed, English articles and filler words dropped. Fenced and indented
    code, identifiers, URLs and inline code spans are left byte-exact, and the
    question and template are never touched.
-2. **drops the lowest-ranked chunks**, one at a time, naming how many of how
+3. **drops the lowest-ranked chunks**, one at a time, naming how many of how
    many went. `Sources:` then lists only what the model actually saw.
-3. **fails** — if even a chunk-free prompt does not fit, before any HTTP call,
-   naming the knobs to change.
+4. **drops the thread entirely** — the most recent pair is a floor and goes
+   only here, loudly, since an answer that cannot see the turn before it reads
+   very differently from one that can.
+5. **fails** — if even a chunk-free, thread-free prompt does not fit, before
+   any HTTP call, naming the knobs to change.
 
-Compaction comes before dropping because text the model can still read beats a
-passage it can no longer cite. With `--require-context`, a budget that leaves
+History goes before compaction because grounded evidence for the question in
+front of you beats a transcript of the questions behind it, and because you can
+restate what the thread forgot but cannot restate what the corpus was never
+asked for. Compaction comes before dropping because text the model can still
+read beats a passage it can no longer cite. With `--require-context`, a budget that leaves
 room for no chunks at all aborts instead of answering from the model's priors.
 `tbuk doctor` reports the window, what it leaves for the prompt, and any
 template whose own `max_tokens` swallows it.
+
+### Conversation threads
+
+`tbuk ask` is single-shot by default and unchanged: no flag, no thread, the
+same prompt it has always sent. `--session NAME` makes the turn part of a named
+conversation instead, and `-c` / `--continue` picks up the most recently used
+one:
+
+```bash
+tbuk ask --session go "how do slices grow?"
+tbuk ask --session go "and maps?"     # retrieval knows this means Go maps
+tbuk ask -c "and channels?"           # the same thread, without naming it
+```
+
+An unknown name **creates** the thread — a thread is a shell history file, not
+a resource to provision — and names are normalized (`--session Work` and
+`--session work` are the same thread). `--continue` with no threads at all is
+an error rather than a silent single-shot ask, which would look identical on
+screen and answer from nothing.
+
+Threads live in the knowledge base's own SQLite database, so `--root` switches
+corpus and threads together and a thread can never replay questions whose
+evidence is in another index. They survive the process, a `tbuk reindex`, and a
+new terminal.
+
+Two things happen per turn:
+
+- **The prompt gets the thread.** Prior turns are replayed as role-tagged
+  user/assistant message pairs ahead of the current question — never inlined
+  into the template, and never as the earlier prompts, which would carry every
+  chunk the thread ever saw. `session.history_turns` (default 6) bounds how
+  many pairs come back; `0` records the thread without replaying it.
+- **Retrieval gets the thread too.** `and maps?` retrieved on its own reaches
+  nothing, so the query is *planned*: the `window` planner folds the last few
+  questions into it, deterministically, with no extra model call. Without this
+  the model would see the thread while the retriever did not, and the second
+  answer would come from the first answer's chunks plus the model's priors — a
+  chat that has quietly stopped being a RAG system. A template can set
+  `retrieval.rewrite: off` to retrieve on the question exactly as typed, and
+  `retrieval.window_turns:` to change how many questions are folded in
+  (default 2).
+
+A turn is recorded only once the answer completes: a Ctrl-C, a provider error
+or an empty completion writes nothing, because half an answer replayed as
+context is worse than a thread that lost a turn. `session.max_turns` caps how
+many turns a thread keeps (oldest dropped first; `0` keeps everything), and
+`tbuk doctor` reports how many threads the knowledge base holds.
+
+`tbuk export` copies the database whole, so threads ride along inside an
+archive; `tbuk import` reads that database as a document manifest and never
+looks at any other table, so threads never land on the importing machine.
 
 ### Encoding code for search
 
@@ -706,6 +781,9 @@ A knowledge base indexed before this change still holds chunks sized in bytes.
 | `tbuk doctor` shows `hosted API — not probed` | Provider is `claude`/`openai` (no `/health` endpoint) | Expected — hosted APIs aren't probed; set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and use `tbuk ask` to verify connectivity |
 | `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, rate limit; a too-long prompt is normally caught locally first) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens`. If it *is* a context-length rejection, `llm.context_tokens` is set higher than the model's real window (or `0`) |
 | `tbuk ask` warns `compacted the retrieved text` or `dropped N of M retrieved chunks` | The rendered prompt exceeded `llm.context_tokens` minus the answer's `max_tokens` | Expected when the budget is tight — raise `llm.context_tokens` to your model's real window, lower `--top`, or lower the template's `max_tokens` |
+| `tbuk ask --session` fails with `this knowledge base predates conversation threads` | The database was created before the `sessions` tables existed | `go run ./scripts/add-sessions ~/.tbuk/tbuk.sqlite`; `tbuk doctor` reports it on the **Database / sessions** line. Nothing is re-embedded |
+| `tbuk ask -c` fails with `no conversation threads yet` | `--continue` has nothing to continue | Start one with `tbuk ask --session NAME "…"`; the fallback to a single-shot ask is deliberately not silent |
+| `tbuk ask --session` warns `dropped the N oldest of M replayed turns` | The thread plus the retrieved chunks exceeded the context budget | Expected when the budget is tight — history is dropped before evidence. Lower `session.history_turns`, or raise `llm.context_tokens` |
 | `tbuk ask` fails with `prompt needs ~N tokens but only M are available` | Even a prompt with no retrieved context does not fit the budget | Shorten the question, raise `llm.context_tokens`, or lower the template's `max_tokens`; `tbuk doctor` shows both numbers |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
 | Embedding server returns `HTTP 500` on a CJK/non-Latin corpus | Chunks stored before token estimation became script-aware are sized in bytes, so they hold ~3× the tokens `chunking.size` allowed | `tbuk doctor` reports it on the **Chunking / stored** line; run `tbuk reindex` to re-chunk and re-embed. If freshly indexed chunks still overrun, the server's batch is smaller than `chunking.size` — raise it (`-b 1024 -ub 1024`) or lower the size |

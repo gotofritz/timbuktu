@@ -14,13 +14,15 @@ cmd/tbuk/           cobra entry point
 internal/
   config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML(), ExportYAML()
   cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, reindex, search, find, meta, export, import)
-  storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo
+  storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo, SessionRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
   embeddings/       Embedder interface + factory; mlx, llama, ollama, openai adapters
   llm/              LLM interface + factory; mlx, claude, openai, llama, ollama adapters (SSE + JSON-lines streaming)
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
+  conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
+  rewrite/          Planner interface; Window — turns (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5; parseQuery (phrases, exclusions)
   searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
@@ -98,12 +100,13 @@ type Config struct {
     LLM       LLMConfig        // provider, model, max_tokens, context_tokens, base_url
     Embedding EmbeddingConfig  // provider, model, dimension, base_url
     Chunking  ChunkingConfig   // size (tokens), overlap (tokens)
+    Session   SessionConfig    // history_turns (replayed pairs), max_turns (stored per thread)
 }
 ```
 
 Defaults: llm.provider=`mlx`, embedding.provider=`mlx`, dimension=768, chunk size=400, overlap=50. The `mlx` provider targets any OpenAI-compatible server fronting MLX models on Apple silicon (mlx_lm.server, mlx-openai-server, LM Studio, nativ); `llama` (llama.cpp) remains the cross-platform local alternative. Chunk size kept below llama.cpp default ubatch size (512 tokens) to avoid HTTP 500 errors from the embedding server. To use larger chunks, raise both `-b` and `-ub` at server startup (they must match; e.g. `llama-server -b 1024 -ub 1024 …`).
 
-`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, a context_tokens that does not exceed max_tokens, empty db path, an unknown llm/embedding provider, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
+`Config.Validate()` runs in the root `PersistentPreRunE` right after `Load`, so every command fails fast on a bad config (non-positive chunk size, overlap ≥ size, non-positive max_tokens/dimension, a context_tokens that does not exceed max_tokens, empty db path, an unknown llm/embedding provider, a negative session history_turns/max_turns, or ingest embed_concurrency < 1) instead of crashing deep inside a provider factory.
 
 ---
 
@@ -112,11 +115,25 @@ Defaults: llm.provider=`mlx`, embedding.provider=`mlx`, dimension=768, chunk siz
 SQLite, WAL mode, foreign keys ON. Pragmas are set in the DSN (`dsnFor`) so every pooled connection inherits them. The DB file is `chmod 0o600` after open — knowledge-base content is personal data.
 
 ```sql
-documents   — id, path (UNIQUE), sha256, title, mime_type, raw_path, created_at, updated_at
-chunks      — id, document_id (FK→documents CASCADE), chunk_index, text, search_text, token_count, embedding BLOB
-metadata    — document_id (FK→documents CASCADE), key, value  (PK: document_id+key)
-chunks_fts  — FTS5 virtual table over chunks.search_text (tokenize="unicode61 tokenchars '_'"), auto-synced via INSERT/DELETE triggers
+documents     — id, path (UNIQUE), sha256, title, mime_type, raw_path, created_at, updated_at
+chunks        — id, document_id (FK→documents CASCADE), chunk_index, text, search_text, token_count, embedding BLOB
+metadata      — document_id (FK→documents CASCADE), key, value  (PK: document_id+key)
+chunks_fts    — FTS5 virtual table over chunks.search_text (tokenize="unicode61 tokenchars '_'"), auto-synced via INSERT/DELETE triggers
+sessions      — id, name (UNIQUE, normalized), template, created_at, updated_at
+session_turns — id, session_id (FK→sessions CASCADE), turn_index, question, query, answer, citations, created_at
+                (UNIQUE: session_id+turn_index)
 ```
+
+`sessions` / `session_turns` are conversation threads (see **Conversation
+threads** below). They live in the knowledge base's own database because a
+thread is *about a corpus*: `--root` switches both together, and a thread can
+never replay questions whose evidence is in another index. A turn stores the
+question as typed, the query retrieval actually ran, the answer, and its
+citations as newline-joined **display strings** — not chunk ids, which
+`ReplaceForDocument` deletes and re-inserts on every re-ingest and every
+`reindex`. Timestamps here use RFC3339 with a fixed nine-digit fraction, so the
+text sorts the way the instants do and `--continue` orders correctly for two
+threads used in the same second.
 
 `chunks` holds one segment in two encodings. `text` is the segment as written —
 what `tbuk search` prints and what `tbuk ask` feeds the model. `search_text` is
@@ -133,9 +150,9 @@ so there is no upgrade path to carry. `schemaSQL` is therefore edited in place
 rather than followed by a versioned migration, and an existing knowledge base is
 brought forward by a throwaway script under `scripts/` (AGENTS.md, "proof of
 concept"); `search_text` and the `chunks_fts` tokenizer were both changed that
-way, and `storage.HasSearchTextColumn` / `storage.HasPunctuationTokenizer` are
-how `tbuk doctor` spots a knowledge base that has not had the matching script
-run. (`schemaVersion` is 2 because an earlier
+way, and `storage.HasSearchTextColumn` / `storage.HasPunctuationTokenizer` /
+`storage.HasSessionTables` are how `tbuk doctor` spots a knowledge base that has
+not had the matching script run. (`schemaVersion` is 2 because an earlier
 build created the same schema in two steps and recorded 2; keeping the number
 lets those knowledge bases open untouched.) Future changes append to the
 `migrations` slice. Each migration's SQL and its version record are applied in
@@ -145,9 +162,18 @@ rather than read with a misunderstood schema.
 
 Embeddings: `storage.Float32SliceToBlob` / `BlobToFloat32Slice` — little-endian `[]float32`.
 
-Repos: `DocumentRepo`, `ChunkRepo`, `MetadataRepo` — all take `*sql.DB`, return typed errors wrapping `fmt.Errorf("Repo.Method: %w", err)`.
+Repos: `DocumentRepo`, `ChunkRepo`, `MetadataRepo`, `SessionRepo` — all take `*sql.DB`, return typed errors wrapping `fmt.Errorf("Repo.Method: %w", err)`.
 
-Lookups that can miss (`DocumentRepo.GetByPath` / `GetBySHA256`) return the sentinel `storage.ErrNotFound` (wrapping `sql.ErrNoRows`) when no row matches. Callers branch with `errors.Is(err, storage.ErrNotFound)` so a genuine "does not exist" is never conflated with a transient DB error.
+`SessionRepo` is `Create`, `GetByName`, `MostRecent`, `List`, `Rename`,
+`Delete`, `AppendTurn`, `Turns`, `Prune`, `HasTables`. Names are normalized
+(`NormalizeSessionName`: lowercased, trimmed, non-empty). `AppendTurn` computes
+`MAX(turn_index)+1` inside its own transaction and touches the thread's
+`updated_at` in the same one; `UNIQUE(session_id, turn_index)` is what catches a
+concurrent second writer, which for a single-user tool is a mistake rather than
+a case to serialize.
+
+Lookups that can miss (`DocumentRepo.GetByPath` / `GetBySHA256`, every
+`SessionRepo` lookup) return the sentinel `storage.ErrNotFound` (wrapping `sql.ErrNoRows`) when no row matches. Callers branch with `errors.Is(err, storage.ErrNotFound)` so a genuine "does not exist" is never conflated with a transient DB error.
 
 ---
 
@@ -623,7 +649,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `variables` come from `manifest.yaml`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
+Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `variables` come from `manifest.yaml`. Query planning is a property of the template (it will spend the template's model at the template's temperature once `condense` lands), so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value and a negative `window_turns` at load, the rule `normalize`'s filters already follow. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
@@ -641,19 +667,108 @@ template whose own `max_tokens` swallows its window.
 
 ```go
 func WithContextBudget(window, outputReserve int) AskOption
-func fitToContext(render renderFn, chunks []retrieval.RetrievedChunk, budget int) (fittedPrompt, error)
+func fitToContext(build buildFn, history []conversation.Turn, chunks []retrieval.RetrievedChunk, budget int) (fittedPrompt, error)
 ```
 
-`fitToContext` renders, measures with `chunking.CountTokens` (the same
-script-aware estimator as the chunker — approximate by design), and climbs a
-ladder while over budget: **compact** the retrieved text via `internal/squeeze`
-(whitespace and filler words out, fenced/indented code byte-exact), then
-**drop** trailing — lowest-ranked — chunks one at a time. Compaction comes
-first because text the model can still read beats a passage it can no longer
-cite. Each rung warns on the diagnostics stream; a prompt that still overflows
-with no chunks left is an error naming the knobs, and `--require-context`
-aborts when the guard leaves no context at all. Citations reflect what
-survived, so the `Sources:` footer never lists a passage the model did not see.
+`fitToContext` builds the whole `[]llm.Message` (system, replayed pairs, current
+user message), measures it with `chunking.CountTokens` (the same script-aware
+estimator as the chunker — approximate by design), and climbs a ladder while
+over budget:
+
+1. **drop the oldest replayed turns**, one pair at a time, down to the most
+   recent pair;
+2. **compact** the retrieved text via `internal/squeeze` (whitespace and filler
+   words out, fenced/indented code byte-exact);
+3. **drop** trailing — lowest-ranked — chunks one at a time;
+4. **drop the thread's floor**, the most recent pair, and retry rungs 2–3
+   without it (the room it frees can let evidence back in);
+5. **fail**, naming the knobs.
+
+History goes first because grounded evidence for the live question beats a
+transcript of the ones behind it, and the user can restate what the thread
+forgot but not what the corpus was never asked for. Compaction comes before
+dropping because text the model can still read beats a passage it can no longer
+cite. History is dropped whole, never squeezed — a compacted question changes
+what was asked. Each rung warns on the diagnostics stream; `--require-context`
+aborts when the guard leaves no context at all. Citations reflect what survived,
+so the `Sources:` footer never lists a passage the model did not see. With no
+thread the ladder collapses to what it was before rung 1 existed, and the
+message slice is the same two messages — the regression bar the tests pin.
+
+#### Conversation threads
+
+`tbuk ask` is single-shot unless `--session NAME` or `-c`/`--continue` names a
+thread. Two things then change, and only for that turn.
+
+**The prompt gets the thread.** `internal/conversation` is pure — no DB, no
+LLM, no cobra — so the replay rules and the budget arithmetic above are testable
+as arithmetic:
+
+```go
+type Turn struct { Question, Query, Answer string; Citations []string }
+type Thread struct { ID int64; Name, Template string; Turns []Turn }
+
+func Replay(turns []Turn, limit int) []Turn            // the last `limit`, oldest first, copied
+func Messages(system, user string, turns []Turn) []llm.Message
+```
+
+`Messages` emits the system message, then each replayed turn as a
+`{RoleUser, question}` / `{RoleAssistant, answer}` pair oldest first, then the
+current turn's rendered user message. Prior turns go back as *messages*, not as
+a `{{ .History }}` block in `user.tmpl`: every provider already takes a
+role-tagged slice, and a question pasted into the template is typographically
+indistinguishable from the one being asked, which is how a model comes to answer
+the turn before last. A stored turn is deliberately not the rendered prompt —
+replaying that would carry every chunk the thread ever saw, growing cost with
+the square of the thread and letting stale evidence outrank the passages
+retrieved for the live question.
+
+**Retrieval gets the thread too.** `internal/rewrite` is the seam that turns
+*(thread, question)* into the queries retrieval runs:
+
+```go
+type Planner interface {
+    Queries(ctx context.Context, thread []conversation.Turn, question string) ([]string, error)
+}
+type Window struct { Turns int }                       // deterministic; no model, no latency
+func ValidateMode(mode string) error                   // what loadManifest calls
+func New(mode string, windowTurns int) (Planner, error)
+```
+
+`window` (the default) prepends the last `window_turns` questions to the current
+one. Without it, `and maps?` retrieved on its own reaches nothing: the model
+would see the thread while the retriever did not, and the answer would come from
+the previous turn's chunks plus the model's priors — a chat that has quietly
+stopped being a RAG system. `off` retrieves on the question as typed. Returning
+a slice is what lets expansion and multi-hop fit the same interface later;
+`Window` returns one query and `RunAsk` runs it.
+
+Wiring is by option, not by parameter — `RunAsk`'s positional list is already at
+its limit:
+
+```go
+type AppendTurnFn func(ctx context.Context, sessionID int64, turn conversation.Turn) error
+
+func WithSession(thread *conversation.Thread, appendTurn AppendTurnFn) AskOption
+func WithPlanner(p rewrite.Planner) AskOption
+```
+
+`openThread` (in `ask.go`) resolves the thread before the embedder or the LLM is
+built, so an unknown thread fails on its own terms rather than behind a
+connection error. An unknown `--session` name **creates** the thread (a thread
+is a shell history file, not a resource to provision); `--continue` with no
+threads is an error, never a silent single-shot ask, which would look identical
+on screen and answer from nothing. `session.history_turns` is applied there, by
+`conversation.Replay`, rather than in the ask path: how much of a thread comes
+back is the user's setting, not the prompt's business.
+
+The turn is appended last and only on a completed answer (`AppendTurnFn`, which
+also applies `session.max_turns` via `SessionRepo.Prune`): a Ctrl-C, a provider
+error or an empty completion writes nothing, because half an answer replayed as
+context is read by the model as a statement it finished making. The answer is
+teed into a `strings.Builder` **only when a session is active**, so the
+single-shot path allocates exactly what it did before; under a normalize
+pipeline the stored text is the normalized output — what the user saw.
 
 #### Output normalization
 
@@ -913,14 +1028,14 @@ passes `Validate()`.
 ```
 tbuk init                      create ~/.tbuk/, write default config.yaml and prompts/
 tbuk version                   print version string
-tbuk doctor                    probe config, DB (with doc/chunk counts), LLM/embedding/search
+tbuk doctor                    probe config, DB (with doc/chunk/thread counts), LLM/embedding/search
 tbuk preprocess <path>         extract text → save to extracted store (--dry-run, --output-dir)
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
 tbuk search <query>            search chunks; query read as an expression — "phrase", -exclude (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document
-tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream)
+tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream, --require-context, --session NAME, -c/--continue)
 tbuk template list             list prompt templates in ~/.tbuk/prompts/
 tbuk template show <name>      print manifest + template files to stdout
 tbuk template edit <name>      open manifest in $EDITOR
@@ -948,7 +1063,7 @@ tbuk import templates <archive>  prompt templates only; no embedding provider ne
 - `fmt.Errorf("context: %w", err)` for error wrapping
 - Sentinel errors (e.g. `storage.ErrNotFound`) matched with `errors.Is`, not string comparison
 - No `init()`, no global mutable state, no `interface{}` — CLI config is loaded in the root `PersistentPreRunE` and threaded through the cobra command context (`configFrom`/`configPathFrom`), not package-level vars
-- Composition root is a single `openApp(cfg) (*App, error)` builder (`internal/cli/app.go`), not per-command wiring. `App` owns the open DB and lazily/memoized builds the embedder, repos (`Docs()`), `Ingester()` and `LLM()`; commands call `openApp`, `defer app.Close()`, then pull only what they need. Adding a dependency touches the builder, not every command
+- Composition root is a single `openApp(cfg) (*App, error)` builder (`internal/cli/app.go`), not per-command wiring. `App` owns the open DB and lazily/memoized builds the embedder, repos (`Docs()`, `Sessions()`), `Ingester()` and `LLM()`; commands call `openApp`, `defer app.Close()`, then pull only what they need. Adding a dependency touches the builder, not every command
 - `Execute()` builds a `signal.NotifyContext` (SIGINT/SIGTERM) and runs `root.ExecuteContext(ctx)`, so Ctrl-C cancels the ctx-plumbed pipeline cleanly (deferred cleanup runs, transactions roll back, `IngestDir` stops the walk via `filepath.SkipAll` and still prints its partial summary); a second signal force-quits
 - Data files are owner-only: `~/.tbuk` dirs `0o700`; config, extracted text and DB files `0o600`
 - Ingested documents are untrusted: text can carry ANSI/OSC terminal escapes (OSC 52 clipboard write, window-title rewrite, cursor/erase). Document-derived output to the terminal is filtered of C0/C1 control chars (keeping `\n`/`\t`) via `internal/cli/sanitize.go` — streamed `ask` output goes through the rune-aware `sanitizeWriter` (buffers split UTF-8 across writes), and discrete fields (`search` paths, `list` path/title, `meta list` values) through `stripControl`. JSON output paths need no filtering (the encoder escapes control runes)

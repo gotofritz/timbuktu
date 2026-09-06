@@ -120,6 +120,39 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
     INSERT INTO chunks_fts(chunks_fts, rowid, search_text) VALUES ('delete', old.id, old.search_text);
     INSERT INTO chunks_fts(rowid, search_text) VALUES (new.id, new.search_text);
 END;
+
+-- A conversation is about a corpus, so its threads live in the corpus's own
+-- database: --root switches the knowledge base and its threads together, and a
+-- thread can never replay questions whose evidence is in another index.
+CREATE TABLE IF NOT EXISTS sessions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE,      -- normalized: lowercased, trimmed
+    template   TEXT    NOT NULL DEFAULT '',  -- the template the thread was opened with
+    created_at TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL              -- what --continue orders by
+);
+
+-- A turn is what was asked, what retrieval was actually run on, what came back,
+-- and where it came from — never the rendered prompt, which carries that turn's
+-- chunks and would put every chunk the thread ever saw into the next prompt.
+--
+-- citations are the display strings, not chunk ids: chunks.id is deleted and
+-- re-inserted by every re-ingest and every reindex, so a foreign key would
+-- either cascade a thread's provenance away or forbid the re-index.
+CREATE TABLE IF NOT EXISTS session_turns (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_index INTEGER NOT NULL,
+    question   TEXT    NOT NULL,             -- as typed
+    query      TEXT    NOT NULL DEFAULT '',  -- what retrieval actually ran
+    answer     TEXT    NOT NULL,
+    citations  TEXT    NOT NULL DEFAULT '',  -- newline-joined citation strings
+    created_at TEXT    NOT NULL,
+    UNIQUE(session_id, turn_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_turns_session
+    ON session_turns(session_id, turn_index);
 `
 
 // HasSearchTextColumn reports whether chunks carries the search_text column.
@@ -135,6 +168,24 @@ func HasSearchTextColumn(db *sql.DB) (bool, error) {
 		return false, fmt.Errorf("storage.HasSearchTextColumn: %w", err)
 	}
 	return n > 0, nil
+}
+
+// HasSessionTables reports whether the knowledge base carries both session
+// tables.
+//
+// A knowledge base created before they existed opens, ingests and searches
+// fine — nothing but `tbuk ask --session` touches them — so the failure would
+// otherwise be a raw "no such table" on the first threaded question. Doctor
+// asks instead, and names the script. Both tables are required: half the pair
+// cannot record a thread either.
+func HasSessionTables(db *sql.DB) (bool, error) {
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions','session_turns')`,
+	).Scan(&n); err != nil {
+		return false, fmt.Errorf("storage.HasSessionTables: %w", err)
+	}
+	return n == 2, nil
 }
 
 // ReadFTSTokenizer returns the tokenizer chunks_fts was created with, as the

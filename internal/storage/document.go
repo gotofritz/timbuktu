@@ -8,10 +8,11 @@ import (
 	"time"
 )
 
-// ErrNotFound is returned by lookups (GetByPath, GetBySHA256) when no row
-// matches. It wraps sql.ErrNoRows so callers can distinguish a genuine
-// "does not exist" from a transient DB error with errors.Is.
-var ErrNotFound = fmt.Errorf("storage: document not found: %w", sql.ErrNoRows)
+// ErrNotFound is returned by lookups (GetByPath, GetBySHA256, SessionRepo's)
+// when no row matches. It wraps sql.ErrNoRows so callers can distinguish a
+// genuine "does not exist" from a transient DB error with errors.Is. The text
+// names no table, since more than one repository returns it.
+var ErrNotFound = fmt.Errorf("storage: not found: %w", sql.ErrNoRows)
 
 // Document represents a source file tracked in the database.
 type Document struct {

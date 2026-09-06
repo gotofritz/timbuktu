@@ -769,3 +769,107 @@ func TestFillMissingDefaults_addsContextTokens(t *testing.T) {
 		t.Errorf("llm.max_tokens = %d, want preserved 2048", cfg.LLM.MaxTokens)
 	}
 }
+
+// session bounds how much of a thread `tbuk ask --session` replays and how much
+// of it is kept. They are a property of the user's setup, not of a template, so
+// they live in config.yaml (#157).
+func TestDefaults_session(t *testing.T) {
+	cfg := config.Defaults()
+	if cfg.Session.HistoryTurns != 6 {
+		t.Errorf("session.history_turns: want 6, got %d", cfg.Session.HistoryTurns)
+	}
+	if cfg.Session.MaxTurns != 0 {
+		t.Errorf("session.max_turns: want 0 (keep everything), got %d", cfg.Session.MaxTurns)
+	}
+}
+
+func TestLoad_session(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "session:\n  history_turns: 2\n  max_turns: 20\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.HistoryTurns != 2 {
+		t.Errorf("session.history_turns: want 2, got %d", cfg.Session.HistoryTurns)
+	}
+	if cfg.Session.MaxTurns != 20 {
+		t.Errorf("session.max_turns: want 20, got %d", cfg.Session.MaxTurns)
+	}
+}
+
+func TestConfig_Validate_session(t *testing.T) {
+	base := config.Defaults()
+
+	cases := []struct {
+		name    string
+		mutate  func(*config.Config)
+		wantErr string
+	}{
+		{"zero history turns off the replay", func(c *config.Config) { c.Session.HistoryTurns = 0 }, ""},
+		{"negative history rejected", func(c *config.Config) { c.Session.HistoryTurns = -1 }, "history_turns"},
+		{"zero max_turns keeps everything", func(c *config.Config) { c.Session.MaxTurns = 0 }, ""},
+		{"negative max_turns rejected", func(c *config.Config) { c.Session.MaxTurns = -3 }, "max_turns"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("Validate() = %v, want nil", err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("Validate() = nil, want error mentioning %q", tc.wantErr)
+			case tc.wantErr != "" && err != nil && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("Validate() = %v, want it to mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// The block ships in the config `tbuk init` writes, explained, and is backfilled
+// into a config written before sessions existed — no migration (#157).
+func TestFillMissingDefaults_addsSession(t *testing.T) {
+	existing := []byte("llm:\n  provider: mlx\n  max_tokens: 2048\n")
+
+	merged, added, err := config.FillMissingDefaults(existing)
+	if err != nil {
+		t.Fatalf("FillMissingDefaults: %v", err)
+	}
+	have := map[string]bool{}
+	for _, a := range added {
+		have[a] = true
+	}
+	if !have["session"] {
+		t.Errorf("added = %v, want it to include the session block", added)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, merged, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load(merged): %v", err)
+	}
+	if cfg.Session.HistoryTurns != 6 {
+		t.Errorf("session.history_turns = %d, want the filled default 6", cfg.Session.HistoryTurns)
+	}
+}
+
+func TestDefaultYAML_documentsSession(t *testing.T) {
+	yamlStr, err := config.DefaultYAML()
+	if err != nil {
+		t.Fatalf("DefaultYAML: %v", err)
+	}
+	if !strings.Contains(yamlStr, "history_turns: 6") {
+		t.Errorf("DefaultYAML missing session.history_turns:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "max_turns: 0") {
+		t.Errorf("DefaultYAML missing session.max_turns:\n%s", yamlStr)
+	}
+}

@@ -31,6 +31,8 @@ tbuk ask "<question>"            RAG query: retrieve + LLM answer (streams by de
 tbuk ask --template <name> ...   use a named prompt template (default: qa)
 tbuk ask --top <N> ...           retrieve N chunks (default: 5)
 tbuk ask --no-stream ...         buffer output (useful for redirecting to a file)
+tbuk ask --session <name> ...    record the turn in a conversation thread (created if new)
+tbuk ask --continue ...          the most recently used thread (-c); an error when there is none
 tbuk search "<query>"            return matching chunks without calling the LLM
 tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 
@@ -44,6 +46,25 @@ Query syntax (tbuk search only; tbuk ask reads a question, not an expression):
 A leading - excludes; a query of only exclusions returns nothing.
 A loose query reaches an identifier via the split form in search_text, so it
 finds one in a fenced block or an inline code span, not one bare in prose.
+
+## Conversation threads
+
+tbuk ask --session go "how do slices grow?"   start (or continue) the thread "go"
+tbuk ask --session go "and maps?"             the model sees the thread; retrieval does too
+tbuk ask -c "and channels?"                   the thread used last
+
+Without --session/-c nothing changes: ask is single-shot, same prompt as ever.
+A thread lives in the knowledge base's own DB, so --root switches both together
+and it survives reindex, a new terminal and a reboot. Names are lowercased and
+trimmed, so --session Go and --session go are one thread; an unknown name
+creates it. A turn stores question + planned query + answer + citation strings
+(not chunk ids, which reindex renumbers), and is written only when the answer
+completes — Ctrl-C, a provider error or an empty completion records nothing.
+
+Inside a thread, retrieval runs on a planned query, not the question as typed:
+the "window" planner prepends the last retrieval.window_turns questions
+(manifest, default 2), so "and maps?" still reaches Go's maps. Setting
+retrieval.rewrite: off in a template's manifest.yaml turns that off.
 
 ## Knowledge base
 
@@ -88,6 +109,8 @@ chunking.overlap       overlap between consecutive chunks (default 50)
                        chunk therefore holds fewer bytes than an English one at
                        the same size.
 ingest.embed_concurrency  parallel embed requests per file (default 4)
+session.history_turns  prior Q/A pairs replayed into the prompt (default 6; 0 = replay none)
+session.max_turns      turns kept per thread, oldest dropped first (default 0 = keep everything)
 
 ## Gotchas
 
@@ -101,15 +124,22 @@ ingest.embed_concurrency  parallel embed requests per file (default 4)
   or embedding.model changed. Fix: tbuk reindex (re-embeds from raw/, no originals needed).
 - tbuk ask answers from model general knowledge if retrieval finds nothing.
   Use --require-context to abort instead.
-- tbuk ask fits the whole prompt (system + template + chunks + question) into
-  llm.context_tokens minus the answer's max_tokens, before calling the model.
-  Over budget it first says "compacted the retrieved text" (whitespace and
-  filler words squeezed out), then "dropped N of M retrieved chunks", and if
-  even a context-free prompt overflows it fails locally instead of calling.
+- tbuk ask fits the whole prompt (system + template + replayed turns + chunks +
+  question) into llm.context_tokens minus the answer's max_tokens, before
+  calling the model. Over budget it says "dropped the N oldest of M replayed
+  turns" (threads only), then "compacted the retrieved text" (whitespace and
+  filler words squeezed out), then "dropped N of M retrieved chunks", then
+  drops the thread entirely, and if even a context-free, thread-free prompt
+  overflows it fails locally instead of calling. History goes before evidence.
   Fix: raise llm.context_tokens to your model's real window, lower --top, or
   lower the template's max_tokens. A template may pin its own window with a
   top-level context_tokens in manifest.yaml.
 - Claude provider: set ANTHROPIC_API_KEY; embedding must still be local (llama/ollama).
+- "this knowledge base predates conversation threads": the DB was created before
+  the sessions tables existed. Fix: go run ./scripts/add-sessions <db path>.
+  tbuk doctor reports it on the Database / sessions line. No re-embedding.
+- "--continue: this knowledge base has no conversation threads yet": nothing to
+  continue. Start one with tbuk ask --session NAME. Never falls back silently.
 - tbuk doctor "tokenizer: ✗ ...": the index was built under an earlier
   tokenizer. "default unicode61" splits every term at _; "tokenchars '_-'"
   keeps - inside a token, which locks hyphenated prose into one term.
