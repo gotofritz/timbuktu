@@ -17,7 +17,7 @@ The items below are therefore refinements, not repairs.
 
 **Shipped:** `llm.context_tokens` (default 8192, 0 = off) with a per-template `context_tokens` override bounds the whole rendered prompt against the window minus the reply's `max_tokens`. Over budget, `ask` compacts the retrieved text (`internal/squeeze`), then drops the lowest-ranked chunks, warning at each step, and fails locally — naming the knobs — when even a chunk-free prompt overflows. `tbuk doctor` reports the budget. Subplan: [`2026-09-05-2317-c9baa8f-33-context-guard.md`](../archive/2026-09-05-2317-c9baa8f-33-context-guard.md).
 
-### M2. Scheduled vulnerability scan [#119](../../../../issues/119)
+### M2. Scheduled vulnerability scan [#119](../../../../issues/119) ✅ DONE
 `govulncheck` runs only on push/PR. In quiet periods, newly disclosed CVEs in shipped dependencies (`ledongthuc/pdf` parses untrusted input; `x/net`; `modernc.org/sqlite`) go undetected until the next commit. Add a weekly `schedule:` trigger to the CI workflow's govulncheck job (or a small dedicated workflow) reusing the existing gate policy.
 
 ---
@@ -29,10 +29,10 @@ The items below are therefore refinements, not repairs.
 
 **Shipped:** `CountTokens` weighs each rune by script in quarter-tokens — ASCII 1 (the old four-characters-a-token calibration, unchanged), non-ASCII alphabetic 2, han/kana/hangul and non-ASCII punctuation 4, astral runes 8 — with no tokenizer, vocabulary or allocation. `Chunker.Split` now measures `Size` and `Overlap` with the same weights instead of assuming four bytes a token, so a chunk of dense text holds the token budget it claims. Every caller of the seam (`retrieval.max_tokens` trimming, the `ask` context guard) follows for free. `tbuk doctor` gained a **Chunking** section that re-measures the largest stored chunks and names `tbuk reindex` when they were written under the old byte estimator.
 
-### S2. Run tests on Windows in CI [#121](../../../../issues/121)
+### S2. Run tests on Windows in CI [#121](../../../../issues/121) ✅ DONE
 Windows binaries are shipped, but CI only cross-compiles for Windows — tests never run there (`os.UserHomeDir` reads `USERPROFILE`, which the HOME-based fixtures don't set, per the comment in `ci.yml`). Make the test fixtures set `USERPROFILE` alongside `HOME` and add `windows-latest` to the test matrix, so path handling (a classic Windows-breakage area for a path-keyed document store) is actually exercised on the platform users get binaries for.
 
-### S3. Re-key legacy relative-path documents [#122](../../../../issues/122)
+### S3. Re-key legacy relative-path documents [#122](../../../../issues/122) 🚫 CANCELED
 Documents ingested before path normalization are keyed by their original relative path (README "Paths & Unicode" caveat) and can double-index alongside the absolute-path key. Add a migration (or a `doctor --fix` step) that re-keys/merges legacy rows so the caveat and its foot-gun disappear.
 
 ---
