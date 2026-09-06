@@ -56,7 +56,7 @@ func TestDefaults_rawDir(t *testing.T) {
 
 func TestDefaultRoot_endsInTbuk(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if got, want := config.DefaultRoot(), filepath.Join(home, ".tbuk"); got != want {
 		t.Errorf("DefaultRoot() = %q, want %q", got, want)
 	}
@@ -367,7 +367,7 @@ func TestLoad_badYAML(t *testing.T) {
 
 func TestDefaultPath_containsTbuk(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	path := config.DefaultPath()
 	if filepath.Base(path) != "config.yaml" {
 		t.Errorf("want config.yaml basename, got %s", filepath.Base(path))
@@ -379,7 +379,7 @@ func TestDefaultPath_containsTbuk(t *testing.T) {
 
 func TestDefaultYAML_isValidYAML(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	yamlStr, err := config.DefaultYAML()
 	if err != nil {
@@ -406,7 +406,7 @@ func TestDefaultYAML_isValidYAML(t *testing.T) {
 // longer diverge — a new default field is covered automatically.
 func TestDefaultYAML_roundTripsDefaults(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	yamlStr, err := config.DefaultYAML()
 	if err != nil {
@@ -431,7 +431,7 @@ func TestDefaultYAML_roundTripsDefaults(t *testing.T) {
 // a marshalled node tree does not silently drop the base_url / concurrency help.
 func TestDefaultYAML_keepsComments(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	yamlStr, err := config.DefaultYAML()
 	if err != nil {

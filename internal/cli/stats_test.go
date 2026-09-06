@@ -13,7 +13,7 @@ import (
 
 func TestStatsCommand_withRealConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestStatsCommand_withRealConfig(t *testing.T) {
 
 func TestStatsCommand_jsonFormat(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

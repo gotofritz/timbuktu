@@ -41,7 +41,7 @@ func TestUpdateCommand_missingArg(t *testing.T) {
 
 func TestUpdateCommand_nonExistentFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

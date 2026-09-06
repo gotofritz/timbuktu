@@ -313,7 +313,7 @@ func TestImportCommand_flags(t *testing.T) {
 
 func TestImportCommand_rejectsUnknownConflictPolicy(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("import", "--on-conflict", "sometimes", "kb.tar"); err == nil {
 		t.Fatal("expected error for an unknown --on-conflict value")
 	}

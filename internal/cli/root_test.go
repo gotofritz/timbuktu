@@ -3,6 +3,8 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +17,7 @@ import (
 // signal-cancelled context reaches the ctx-plumbed pipeline (P1-19).
 func TestExecuteContext_threadsContext(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	cmd := cli.New()
 	cmd.SetArgs([]string{"version"})
@@ -28,7 +30,7 @@ func TestExecuteContext_threadsContext(t *testing.T) {
 // command opens its database beneath the chosen root, not ~/.tbuk (issue #95).
 func TestRoot_rootFlagRoutesDataUnderRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	root := filepath.Join(t.TempDir(), "kb")
 	if err := runCLI("--root", root, "init"); err != nil {
@@ -50,7 +52,7 @@ func TestRoot_rootFlagRoutesDataUnderRoot(t *testing.T) {
 // beside the config, never under ~/.tbuk (issue #96).
 func TestRoot_configDirBecomesRootWithoutRootFlag(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	dir := filepath.Join(t.TempDir(), "kb")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -93,7 +95,7 @@ func TestRoot_invalidConfigFailsFast(t *testing.T) {
 // then failed has nothing to do with usage, and printing it buries the error.
 func TestExecute_usageOnlyForMisuse(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -138,21 +140,36 @@ func TestExecute_usageOnlyForMisuse(t *testing.T) {
 // failure.
 func TestExecute_reportsAnErrorOnce(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
 
+	missing := filepath.Join(home, "no-such-file.md")
 	var out, errOut bytes.Buffer
 	cmd := cli.New()
 	cmd.SetArgs([]string{"--config", filepath.Join(home, ".tbuk", "config.yaml"),
-		"ingest", filepath.Join(home, "no-such-file.md")})
+		"ingest", missing})
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected an error")
 	}
-	if n := strings.Count(out.String()+errOut.String(), "no such file or directory"); n != 1 {
+	if n := strings.Count(out.String()+errOut.String(), notFoundText(t, missing)); n != 1 {
 		t.Errorf("error reported %d times, want once; output:\n%s", n, out.String()+errOut.String())
 	}
+}
+
+// notFoundText returns the operating system's own wording for "this path does
+// not exist" — "no such file or directory" on Unix, "The system cannot find the
+// file specified." on Windows — so the count above matches what the error
+// actually carries on the platform running the test.
+func notFoundText(t *testing.T, path string) string {
+	t.Helper()
+	_, err := os.Stat(path)
+	var pathErr *fs.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("stat %s: want a *fs.PathError, got %T: %v", path, err, err)
+	}
+	return pathErr.Err.Error()
 }

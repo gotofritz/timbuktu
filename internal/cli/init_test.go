@@ -19,7 +19,7 @@ func runCLI(args ...string) error {
 
 func TestInitCommand_createsDirs(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -40,7 +40,7 @@ func TestInitCommand_createsDirs(t *testing.T) {
 // root-derived paths) and leave the default ~/.tbuk untouched.
 func TestInitCommand_rootFlag(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	root := filepath.Join(t.TempDir(), "kb")
 	if err := runCLI("--root", root, "init"); err != nil {
@@ -79,33 +79,20 @@ func TestInitCommand_rootFlag(t *testing.T) {
 
 func TestInitCommand_dirsAndConfigPrivatePerms(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
 	dir := filepath.Join(home, ".tbuk")
-	di, err := os.Stat(dir)
-	if err != nil {
-		t.Fatalf("stat dir: %v", err)
-	}
-	if di.Mode().Perm() != 0o700 {
-		t.Errorf(".tbuk perms = %o, want 700", di.Mode().Perm())
-	}
-
-	fi, err := os.Stat(filepath.Join(dir, "config.yaml"))
-	if err != nil {
-		t.Fatalf("stat config: %v", err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Errorf("config perms = %o, want 600", fi.Mode().Perm())
-	}
+	wantPerm(t, dir, 0o700)
+	wantPerm(t, filepath.Join(dir, "config.yaml"), 0o600)
 }
 
 func TestInitCommand_writesConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -125,7 +112,7 @@ func TestInitCommand_writesConfig(t *testing.T) {
 // preserving the user's own values, rather than leaving it partial (#96).
 func TestInitCommand_fillsMissingKeysInExistingConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	cfgPath := filepath.Join(home, ".tbuk", "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
@@ -159,7 +146,7 @@ func TestInitCommand_fillsMissingKeysInExistingConfig(t *testing.T) {
 // untouched (nothing to add → bail).
 func TestInitCommand_completeConfigLeftUntouched(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("first init failed: %v", err)
@@ -185,7 +172,7 @@ func TestInitCommand_completeConfigLeftUntouched(t *testing.T) {
 
 func TestInitCommand_writesQATemplate(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -202,7 +189,7 @@ func TestInitCommand_writesQATemplate(t *testing.T) {
 func TestInitCommand_installsMissingTemplateOnRerun(t *testing.T) {
 	// Simulate existing setup (config + brief) without anki, then re-run init.
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("first init failed: %v", err)
@@ -227,7 +214,7 @@ func TestInitCommand_installsMissingTemplateOnRerun(t *testing.T) {
 
 func TestInitCommand_writesAnkiTemplate(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -243,7 +230,7 @@ func TestInitCommand_writesAnkiTemplate(t *testing.T) {
 
 func TestInitCommand_ankiTemplateIdempotent(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatal(err)
@@ -289,7 +276,7 @@ func TestRootCommand_badConfig(t *testing.T) {
 
 func TestInitCommand_customConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	cfgDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "custom.yaml")
@@ -304,7 +291,7 @@ func TestInitCommand_customConfig(t *testing.T) {
 
 func TestInitCommand_writesBriefTemplate(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -324,7 +311,7 @@ func TestInitCommand_writesBriefTemplate(t *testing.T) {
 // leave room for both.
 func TestInitCommand_briefTemplateBudgetIsNotTheCharLimit(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -342,7 +329,7 @@ func TestInitCommand_briefTemplateBudgetIsNotTheCharLimit(t *testing.T) {
 
 func TestInitCommand_briefTemplateIdempotent(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatal(err)
@@ -369,7 +356,7 @@ func TestInitCommand_briefTemplateIdempotent(t *testing.T) {
 
 func TestInitCommand_templateIdempotent(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatal(err)
@@ -401,7 +388,7 @@ func TestInitCommand_templateIdempotent(t *testing.T) {
 // separator to copy.
 func TestInitCommand_ankiSystemPromptDemonstratesCardFormat(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -436,7 +423,7 @@ func TestInitCommand_ankiSystemPromptDemonstratesCardFormat(t *testing.T) {
 // does not survive a long generation.
 func TestInitCommand_ankiManifestDeclaresNormalizePipeline(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init failed: %v", err)
