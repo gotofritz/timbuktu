@@ -15,11 +15,12 @@ import (
 type RetrievalConfig struct {
 	TopK      int `yaml:"top_k"`
 	MaxTokens int `yaml:"max_tokens"`
-	// Rewrite names the query planner used for a turn inside a thread:
-	// "window" (the default) folds the last few questions into the query,
-	// "off" retrieves on the question exactly as typed. Query planning spends
-	// the template's model at the template's temperature, which is why it is
-	// configured here rather than in config.yaml.
+	// Rewrite names the query planner: "window" (the default) folds the last
+	// few questions of the thread into the query, "off" retrieves on the
+	// question exactly as typed, and "condense" spends one model call
+	// rewriting the follow-up into a question that stands on its own. Query
+	// planning spends the template's model at the template's temperature,
+	// which is why it is configured here rather than in config.yaml.
 	Rewrite string `yaml:"rewrite"`
 	// WindowTurns is how many prior questions "window" folds in. 0 inherits
 	// rewrite.DefaultWindowTurns.

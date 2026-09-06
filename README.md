@@ -94,8 +94,10 @@ tbuk meta list <path>    # list all metadata for a document
 tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
                          #   (--top, --template, --no-stream, --require-context to abort when no context matches)
                          #   --session NAME records the turn in a thread (created if new); -c/--continue uses the last one
+                         #   --rewrite off|window|condense plans the retrieval query for this run (overrides the template)
 tbuk chat                # REPL over the same path, one turn per line (--template, --top, --var, --require-context)
                          #   --session NAME records into a named thread; without it the chat is in memory and saves nothing
+                         #   --rewrite off|window|condense, as on ask
 tbuk session list        # conversation threads: name, turns, template, last used
 tbuk session show <n>    # a thread turn by turn, with its citations (--verbose adds the query retrieval ran)
 tbuk session rename <old> <new>  # rename a thread, keeping its turns
@@ -447,7 +449,7 @@ internal/
   searchtext/       Reduce — the encoding stored in chunks.search_text and handed to the embedder
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string
   conversation/     Thread, Turn, Replay, Messages — how a thread is replayed into a prompt (pure)
-  rewrite/          Planner interface; Window — turns (thread, question) into the query retrieval runs
+  rewrite/          Planner interface; Window (deterministic), Condense (one LLM call) — turn (thread, question) into the query retrieval runs
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
@@ -625,7 +627,7 @@ Two things happen per turn:
   chat that has quietly stopped being a RAG system. A template can set
   `retrieval.rewrite: off` to retrieve on the question exactly as typed, and
   `retrieval.window_turns:` to change how many questions are folded in
-  (default 2).
+  (default 2). See [Planning the retrieval query](#planning-the-retrieval-query).
 
 A turn is recorded only once the answer completes: a Ctrl-C, a provider error
 or an empty completion writes nothing, because half an answer replayed as
@@ -638,6 +640,40 @@ archive; `tbuk import` reads that database as a document manifest and never
 looks at any other table, so threads never land on the importing machine.
 `tbuk session delete` before exporting is the answer for a thread you would
 rather not ship.
+
+#### Planning the retrieval query
+
+Three modes, chosen per template with `retrieval.rewrite` in `manifest.yaml` or
+per run with `--rewrite`:
+
+| Mode | What retrieval runs on | Cost |
+|---|---|---|
+| `window` (default) | the last `retrieval.window_turns` questions (default 2) folded in front of this one | nothing |
+| `off` | the question exactly as typed | nothing |
+| `condense` | one standalone question, rewritten by the model from the thread | one extra model call per ask |
+
+```bash
+tbuk ask -c --rewrite condense "and maps?"   # retrieves on e.g. "how do Go maps grow?"
+tbuk ask -c --rewrite off "and maps?"        # retrieves on "and maps?"
+```
+
+`condense` resolves the pronoun rather than merely dragging the thread's words
+along, and it strips chit-chat and fixes typos on the way — which is worth
+something on a question with nothing behind it too, so `tbuk ask --rewrite
+condense "hey so umm how do slices grow"` is a valid single-shot use. It spends
+the template's `model` at the template's `temperature`.
+
+**It cannot fail the ask.** A rewrite that errors, times out, comes back empty,
+or comes back longer than the thread it was given falls back to `window` and
+says so on stderr — an LLM in the retrieval path is a new way for `tbuk ask` to
+be slow or down, and none of that may cost the answer. `tbuk session show
+--verbose` prints the query each turn actually ran on, so a bad rewrite is
+visible rather than mysterious.
+
+`condense` is **opt-in**: `window` stays the default until the retrieval eval
+harness says condensing beats it on follow-up turns. `tbuk doctor` names the
+templates that use it, on the **Prompts / rewrite** line, since each one is a
+second model call per question.
 
 #### `tbuk chat` — the same thread, interactively
 
@@ -843,6 +879,8 @@ A knowledge base indexed before this change still holds chunks sized in bytes.
 | `tbuk ask -c` fails with `no conversation threads yet` | `--continue` has nothing to continue | Start one with `tbuk ask --session NAME "…"`; the fallback to a single-shot ask is deliberately not silent |
 | `tbuk ask --session` warns `dropped the N oldest of M replayed turns` | The thread plus the retrieved chunks exceeded the context budget | Expected when the budget is tight — history is dropped before evidence. Lower `session.history_turns`, or raise `llm.context_tokens` |
 | `tbuk session show/rename/delete` fails with `no conversation thread named …` | These never create a thread — there would be nothing in it | The error lists the threads that do exist; `tbuk ask --session NAME "…"` or `tbuk chat --session NAME` creates one |
+| `tbuk ask` warns `could not condense the question (…)` | The `condense` rewrite failed, timed out, or came back empty or absurd | Nothing is broken — the query was planned with the `window` instead, and the answer is grounded as usual. Check the model in the template's `model:`, or set `retrieval.rewrite: window` |
+| `tbuk ask` is suddenly making two model calls per question | A template sets `retrieval.rewrite: condense` | By design — `condense` spends a call planning the query. `tbuk doctor`'s **Prompts / rewrite** line names every template that does it; `--rewrite window` skips it for one run |
 | `tbuk chat` answered fine but `tbuk session list` shows nothing | A chat without `--session` is in memory and records nothing, by design | Start it as `tbuk chat --session NAME`, or type `/new NAME` part-way through to start recording |
 | `tbuk ask` fails with `prompt needs ~N tokens but only M are available` | Even a prompt with no retrieved context does not fit the budget | Shorten the question, raise `llm.context_tokens`, or lower the template's `max_tokens`; `tbuk doctor` shows both numbers |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |

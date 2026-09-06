@@ -2,6 +2,7 @@ package rewrite_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -79,12 +80,11 @@ func TestNew(t *testing.T) {
 		{mode: "window", turns: 2, want: "prior question"},
 		{mode: "off", turns: 2, want: ""},
 		{mode: "", turns: 2, want: "prior question"}, // unset means the default
-		{mode: "condense", turns: 2, wantErr: true},  // known, but not shipped yet
 		{mode: "nonsense", turns: 2, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
-			p, err := rewrite.New(tt.mode, tt.turns)
+			p, err := rewrite.New(rewrite.Options{Mode: tt.mode, WindowTurns: tt.turns})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("New(%q): want an error, got nil", tt.mode)
@@ -112,7 +112,7 @@ func TestNew(t *testing.T) {
 // A manifest that names no window size gets the default rather than a window of
 // nothing: "no window at all" is spelled `off`.
 func TestNew_defaultsWindowTurns(t *testing.T) {
-	p, err := rewrite.New("window", 0)
+	p, err := rewrite.New(rewrite.Options{Mode: "window"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -124,4 +124,55 @@ func TestNew_defaultsWindowTurns(t *testing.T) {
 // Every planner has to satisfy the interface the ask path holds them by.
 func TestWindow_implementsPlanner(t *testing.T) {
 	var _ rewrite.Planner = rewrite.Window{}
+}
+
+// `condense` names a model call, so a build that has no model to spend has to
+// say so at construction rather than quietly plan with the window: a template
+// asking to be rewritten by a model should not silently get the deterministic
+// planner instead.
+func TestNew_condenseNeedsAModel(t *testing.T) {
+	if _, err := rewrite.New(rewrite.Options{Mode: "condense"}); err == nil {
+		t.Fatal("New(condense) without a chat function: want an error, got nil")
+	}
+}
+
+// With a model behind it, `condense` is the planner — and it carries the window
+// it falls back to, so a failed rewrite still folds the thread in (D6).
+func TestNew_condense(t *testing.T) {
+	var log strings.Builder
+	p, err := rewrite.New(rewrite.Options{
+		Mode:        "condense",
+		WindowTurns: 2,
+		Chat:        chatFailing(errors.New("down")),
+		Warn:        &log,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got, err := p.Queries(context.Background(), thread("prior question"), "follow-up")
+	if err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	if want := "prior question follow-up"; got[0] != want {
+		t.Errorf("query = %q, want the window's %q", got[0], want)
+	}
+}
+
+// The manifest's window size is the one the fallback uses: a template that
+// widens the window widens what a failed condense falls back to.
+func TestNew_condenseFallbackUsesTheManifestWindow(t *testing.T) {
+	p, err := rewrite.New(rewrite.Options{
+		Mode: "condense",
+		Chat: chatFailing(errors.New("down")),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c, ok := p.(rewrite.Condense)
+	if !ok {
+		t.Fatalf("New(condense) returned %T, want rewrite.Condense", p)
+	}
+	if w, ok := c.Fallback.(rewrite.Window); !ok || w.Turns != rewrite.DefaultWindowTurns {
+		t.Errorf("fallback = %+v, want a window of %d turns", c.Fallback, rewrite.DefaultWindowTurns)
+	}
 }

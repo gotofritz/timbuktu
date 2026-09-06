@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  rewrite/          Planner interface; Window — turns (thread, question) into the queries retrieval runs
+  rewrite/          Planner interface; Window (deterministic), Condense (one LLM call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; CheckFTS5; parseQuery (phrases, exclusions)
   searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
@@ -649,7 +649,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `variables` come from `manifest.yaml`. Query planning is a property of the template (it will spend the template's model at the template's temperature once `condense` lands), so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value and a negative `window_turns` at load, the rule `normalize`'s filters already follow. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
+Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `variables` come from `manifest.yaml`. Query planning is a property of the template — `condense` spends the template's model at the template's temperature — so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value and a negative `window_turns` at load, the rule `normalize`'s filters already follow; `--rewrite` overrides the key for one run and is validated at the same edge, in `resolveRewriteMode`. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
@@ -663,7 +663,10 @@ template by a top-level `context_tokens` in `manifest.yaml`; what it leaves for
 the prompt is the window minus the reply's budget (`manifest.max_tokens`, else
 `llm.max_tokens`). `Config.Validate` rejects a config window that does not
 exceed `llm.max_tokens`, and `tbuk doctor` reports both numbers plus any
-template whose own `max_tokens` swallows its window.
+template whose own `max_tokens` swallows its window. Its **Prompts / rewrite**
+line (`rewriteModesMsg`) names the templates that plan their query with
+`condense` or `off` — a `condense` template is a second model call on every ask
+run under it, which is otherwise invisible until the token bill says so.
 
 ```go
 func WithContextBudget(window, outputReserve int) AskOption
@@ -730,9 +733,21 @@ retrieved for the live question.
 type Planner interface {
     Queries(ctx context.Context, thread []conversation.Turn, question string) ([]string, error)
 }
+type ChatFn func(ctx context.Context, messages []llm.Message, opts ...llm.CallOptions) (<-chan llm.Token, error)
+
 type Window struct { Turns int }                       // deterministic; no model, no latency
-func ValidateMode(mode string) error                   // what loadManifest calls
-func New(mode string, windowTurns int) (Planner, error)
+type Condense struct {                                 // one model call, cannot fail the ask
+    Chat     ChatFn
+    Opts     llm.CallOptions                           // the template's model and temperature
+    Fallback Planner                                   // nil = Window{DefaultWindowTurns}
+    Warn     io.Writer
+    Timeout  time.Duration                             // 0 = CondenseTimeout
+}
+
+type Options struct { Mode string; WindowTurns int; Chat ChatFn; CallOptions llm.CallOptions; Warn io.Writer }
+
+func ValidateMode(mode string) error                   // what loadManifest and --rewrite call
+func New(opts Options) (Planner, error)
 ```
 
 `window` (the default) prepends the last `window_turns` questions to the current
@@ -741,7 +756,35 @@ would see the thread while the retriever did not, and the answer would come from
 the previous turn's chunks plus the model's priors — a chat that has quietly
 stopped being a RAG system. `off` retrieves on the question as typed. Returning
 a slice is what lets expansion and multi-hop fit the same interface later;
-`Window` returns one query and `RunAsk` runs it.
+`Window` and `Condense` each return one query and `RunAsk` runs it.
+
+`condense` (roadmap #24) spends one model call rewriting *(thread, question)*
+into a question that stands on its own — resolving the pronoun rather than
+dragging the thread's words along, and stripping chit-chat and typos on the way,
+which is why it is worth a call on a single-shot ask too. It is **opt-in**:
+`window` stays the default until the retrieval eval harness ([#126](../../../../issues/126))
+says condensing wins on follow-up turns.
+
+**It is a fallback, not a failure.** An error, a timeout (`CondenseTimeout`, 20s),
+an empty completion or an absurd one — longer than the text it was given to
+condense, with a floor so a short thread cannot make a legitimate rewrite look
+absurd — each falls back to the window with a line on the diagnostics stream.
+An LLM in the retrieval path is a new way for `ask` to be slow, wrong or down,
+and none of that may cost the answer. `New` is where `condense` *can* fail: no
+`Chat` is an error at construction rather than a silent window, because a
+template asking to be rewritten by a model should not quietly get the
+deterministic planner instead.
+
+The rewrite prompt carries the thread as plain `Q:`/`A:` text rather than as
+replayed message pairs — the model is reading a conversation, not continuing
+one — with each replayed answer truncated to `condenseAnswerRunes` (400). A
+whole answer per turn is what stops "one cheap LLM call" being cheap, and 400
+runes is enough to resolve *the second one*. `MaxTokens` defaults to
+`CondenseMaxTokens` (256) rather than inheriting the template's answer budget,
+and the completion is reduced to one line (whitespace collapsed, wrapping
+quotes stripped) before it becomes a query. The planned query is stored in
+`session_turns.query`, so `session show --verbose` makes a bad rewrite visible
+rather than mysterious.
 
 Wiring is by option, not by parameter — `RunAsk`'s positional list is already at
 its limit:
@@ -752,6 +795,16 @@ type AppendTurnFn func(ctx context.Context, sessionID int64, turn conversation.T
 func WithSession(thread *conversation.Thread, appendTurn AppendTurnFn) AskOption
 func WithPlanner(p rewrite.Planner) AskOption
 ```
+
+`ask.go` resolves the mode and builds the planner in two steps, shared with
+`chat.go`: `resolveRewriteMode(flag, manifest)` prefers `--rewrite` over the
+manifest and validates the flag before the knowledge base is opened, and
+`plannerFor(mode, manifest, threaded, chat, warn)` builds it *after* the LLM,
+which `condense` spends. `plannerFor` returns a nil planner for a single-shot
+ask under `window` or `off`: over no thread both are the identity, so the
+regression bar — no `--session`, no flag, the same prompt, the same query and
+one model call — holds by construction rather than by care. `condense` is the
+exception and is built with or without a thread.
 
 `openThread` (in `ask.go`) resolves the thread before the embedder or the LLM is
 built, so an unknown thread fails on its own terms rather than behind a
@@ -1096,8 +1149,8 @@ tbuk search <query>            search chunks; query read as an expression — "p
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document
-tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream, --require-context, --session NAME, -c/--continue)
-tbuk chat                      REPL over the same path, one turn per line (--template, --var, --top, --require-context, --session NAME); no --session = in memory, records nothing
+tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream, --require-context, --session NAME, -c/--continue, --rewrite off|window|condense)
+tbuk chat                      REPL over the same path, one turn per line (--template, --var, --top, --require-context, --session NAME, --rewrite); no --session = in memory, records nothing
 tbuk session list              conversation threads: name, turns, template, last used (most recent first)
 tbuk session show <name>       the thread turn by turn with its citations (--verbose adds the query retrieval ran)
 tbuk session rename <old> <new>  rename a thread, keeping its turns

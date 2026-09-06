@@ -964,6 +964,55 @@ have the model fail, and nothing is written — a half-finished answer replayed
 later is worse than a missing one, because the model reads it as something it
 meant to say.
 
+### Choosing how the follow-up is searched for
+
+Widening the search with the last couple of questions is the default, and it is
+free. It is also crude: it searches for *"Who is doing the second one? and when
+is it due?"*, which finds the right documents but is not a question anybody
+asked.
+
+`--rewrite condense` spends one extra call on the model, asking it to turn your
+follow-up into a question that stands on its own, and searches for that:
+
+```bash
+tbuk ask -c --rewrite condense "and when is it due?"
+# searches for something like: "When is the second Project Alpha action item due?"
+```
+
+There are three modes:
+
+| `--rewrite` | What is searched for | Extra cost |
+|---|---|---|
+| `window` (default) | the last two questions, then yours | none |
+| `off` | your question, exactly as typed | none |
+| `condense` | one standalone question, written by the model | one extra model call |
+
+Use `condense` when your follow-ups are short and lean heavily on the last
+answer ("the second one", "and that one?"), and `off` when every question you
+type already stands on its own. `condense` also tidies typos and small talk on
+the way, so it is worth a try on a one-off question too:
+
+```bash
+tbuk ask --rewrite condense "hey so umm whats the deadline for alpha"
+```
+
+**A failed rewrite never costs you the answer.** If the model is down, slow, or
+returns something empty or rambling, Timbuktu says so and falls back to the
+default widening:
+
+```
+warning: could not condense the question (the model did not answer within 20s) —
+planning the query with the window instead
+```
+
+To make a choice permanent for a template rather than typing it each time, set
+it in that template's `manifest.yaml` (see
+[§11](#11-prompt-templates)). `tbuk doctor` lists which templates condense,
+under **Prompts**, since each one costs a second model call per question.
+
+`tbuk session show --verbose` prints what was actually searched for, per turn —
+which is how you check whether a rewrite helped or hurt.
+
 ### Chatting instead of typing `tbuk ask` each time
 
 `tbuk chat` is the same thing without the retyping: one question per line, until
@@ -973,6 +1022,9 @@ you leave.
 tbuk chat                     # a conversation that is not saved
 tbuk chat --session alpha     # the "alpha" thread, saved as you go
 ```
+
+`tbuk chat` takes `--rewrite` too, and it applies to every question you type in
+that session.
 
 ```
 tbuk chat — thread "alpha".
@@ -1272,11 +1324,28 @@ Now use it:
 tbuk ask --template actions "What are all the things I need to do this week?"
 ```
 
-The `retrieval:` block takes two more keys, both of which only matter inside a
-conversation thread: `rewrite` (`window`, the default, or `off`) chooses whether
-the last few questions are folded into the search, and `window_turns` (default
-`2`) says how many. Set `rewrite: off` for a template whose questions always
-stand on their own.
+The `retrieval:` block takes two more keys, which decide how a question becomes
+the search that is run for it:
+
+```yaml
+retrieval:
+  top_k: 8
+  rewrite: condense   # off | window (default) | condense
+  window_turns: 2     # questions folded in under `window`
+```
+
+- `window` (the default) folds the last `window_turns` questions of the thread
+  into the search. Free, and it needs no model.
+- `off` searches for the question exactly as typed — right for a template whose
+  questions always stand on their own.
+- `condense` spends one extra call on *this template's* `model`, at this
+  template's `temperature`, rewriting the follow-up into a standalone question.
+  A failed rewrite falls back to `window` with a warning, never an error.
+
+That is why the setting lives on the template and not in `config.yaml`: it
+spends the template's model. `--rewrite MODE` overrides it for a single run, and
+`tbuk doctor` names the templates that condense. See [Choosing how the follow-up
+is searched for](#choosing-how-the-follow-up-is-searched-for).
 
 A manifest may also set `max_tokens` (how long the answer may get) and
 `context_tokens` (the window of the model this template runs on, overriding

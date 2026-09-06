@@ -6,16 +6,18 @@
 // answer quietly comes from the previous turn's chunks plus the model's priors.
 //
 // One seam — (thread, question) → the queries retrieval runs — serves the whole
-// cluster: Window ships here, Condense (one LLM call) and Expand (N queries,
-// fused) land behind the same interface.
+// cluster: Window (deterministic) and Condense (one LLM call) ship here, and
+// Expand (N queries, fused) lands behind the same interface.
 package rewrite
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/gotofritz/timbuktu/internal/conversation"
+	"github.com/gotofritz/timbuktu/internal/llm"
 )
 
 // Modes accepted by New, and by the manifest's retrieval.rewrite key.
@@ -25,6 +27,23 @@ const (
 	// ModeWindow folds the last few questions of the thread into the query.
 	ModeWindow = "window"
 )
+
+// Options names the planner to build and gives it what it needs. Query
+// planning is configured on the template — it spends the template's model at
+// the template's temperature — so Mode and WindowTurns come from the manifest's
+// retrieval block, and Chat, CallOptions and Warn from the command.
+type Options struct {
+	Mode        string
+	WindowTurns int
+	// Chat is the model a rewriting planner spends. Required by ModeCondense,
+	// unused by the deterministic modes.
+	Chat ChatFn
+	// CallOptions carries the template's model and temperature into that call.
+	CallOptions llm.CallOptions
+	// Warn receives the diagnostic when a rewrite is given up on and the window
+	// plans the query instead.
+	Warn io.Writer
+}
 
 // Planner turns a thread and the question in front of it into the queries
 // retrieval actually runs. Returning more than one query is how expansion and
@@ -67,34 +86,40 @@ const DefaultWindowTurns = 2
 // ValidateMode reports whether mode names a planner this build ships. It is
 // what template load checks, so a typo fails there rather than after a model
 // call — the rule normalize's filters already follow.
-//
-// `condense` is refused by name rather than silently treated as `window`: a
-// template asking to be rewritten by a model should not quietly get the
-// deterministic planner instead.
 func ValidateMode(mode string) error {
 	switch mode {
-	case "", ModeWindow, ModeOff:
+	case "", ModeWindow, ModeOff, ModeCondense:
 		return nil
-	case "condense":
-		return fmt.Errorf("rewrite: mode %q is not available yet (want off or window)", mode)
 	default:
-		return fmt.Errorf("rewrite: unknown mode %q (want off or window)", mode)
+		return fmt.Errorf("rewrite: unknown mode %q (want off, window or condense)", mode)
 	}
 }
 
-// New returns the planner named by mode, which comes from the template
-// manifest's retrieval.rewrite key. An empty mode is the default (window), and
-// a windowTurns of zero or less takes DefaultWindowTurns — "no window at all"
-// is spelled `off`.
-func New(mode string, windowTurns int) (Planner, error) {
-	if err := ValidateMode(mode); err != nil {
+// New returns the planner named by opts.Mode, which comes from the template
+// manifest's retrieval.rewrite key (or from --rewrite for one run). An empty
+// mode is the default (window), and a WindowTurns of zero or less takes
+// DefaultWindowTurns — "no window at all" is spelled `off`.
+//
+// `condense` without a Chat is an error rather than a silent window: a template
+// asking to be rewritten by a model should not quietly get the deterministic
+// planner instead. Once built, it can no longer fail — it falls back (D6).
+func New(opts Options) (Planner, error) {
+	if err := ValidateMode(opts.Mode); err != nil {
 		return nil, err
 	}
-	if mode == ModeOff {
+	if opts.Mode == ModeOff {
 		return Window{Turns: 0}, nil
 	}
-	if windowTurns <= 0 {
-		windowTurns = DefaultWindowTurns
+	turns := opts.WindowTurns
+	if turns <= 0 {
+		turns = DefaultWindowTurns
 	}
-	return Window{Turns: windowTurns}, nil
+	window := Window{Turns: turns}
+	if opts.Mode != ModeCondense {
+		return window, nil
+	}
+	if opts.Chat == nil {
+		return nil, fmt.Errorf("rewrite: mode %q needs a model to condense with", opts.Mode)
+	}
+	return Condense{Chat: opts.Chat, Opts: opts.CallOptions, Fallback: window, Warn: opts.Warn}, nil
 }

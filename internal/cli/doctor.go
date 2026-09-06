@@ -17,6 +17,7 @@ import (
 	"github.com/gotofritz/timbuktu/internal/chunking"
 	"github.com/gotofritz/timbuktu/internal/config"
 	"github.com/gotofritz/timbuktu/internal/prompts"
+	"github.com/gotofritz/timbuktu/internal/rewrite"
 	"github.com/gotofritz/timbuktu/internal/search"
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
@@ -196,6 +197,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		printCheck(w, "templates", strings.Join(names, ", "), "✓")
 		budgetMsg, budgetStatus := templateBudgetsMsg(manifests, cfg.LLM)
 		printCheck(w, "budgets", budgetMsg, budgetStatus)
+		printCheck(w, "rewrite", rewriteModesMsg(manifests), "")
 	}
 
 	return nil
@@ -221,6 +223,34 @@ func sessionsMsg(ctx context.Context, db *sql.DB) (msg, status string) {
 		return "available", "✓"
 	}
 	return fmt.Sprintf("%d threads", len(n)), "✓"
+}
+
+// rewriteModesMsg says how each template plans its retrieval query, naming the
+// ones that depart from the deterministic default.
+//
+// `condense` is the reason this line exists: it spends a model call on every
+// ask that runs under it, and a template picked up from an import or edited
+// months ago is otherwise a silent second call per question. `off` is named
+// too, since a template that never folds the thread in answers follow-ups from
+// the words of the follow-up alone.
+func rewriteModesMsg(manifests []prompts.Manifest) string {
+	byMode := map[string][]string{}
+	for _, m := range manifests {
+		if mode := m.Retrieval.Rewrite; mode != "" && mode != rewrite.ModeWindow {
+			byMode[mode] = append(byMode[mode], m.Name)
+		}
+	}
+	if len(byMode) == 0 {
+		return "window everywhere (the default: the last questions folded into the query, no model call)"
+	}
+	var parts []string
+	if names := byMode[rewrite.ModeCondense]; len(names) > 0 {
+		parts = append(parts, fmt.Sprintf("condense: %s (one extra model call per ask)", strings.Join(names, ", ")))
+	}
+	if names := byMode[rewrite.ModeOff]; len(names) > 0 {
+		parts = append(parts, fmt.Sprintf("off: %s (the question as typed)", strings.Join(names, ", ")))
+	}
+	return strings.Join(parts, "; ") + "; window elsewhere"
 }
 
 // contextBudgetMsg describes the context window and what it leaves for the
