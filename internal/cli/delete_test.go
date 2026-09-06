@@ -22,7 +22,7 @@ func TestDeleteCommand_missingArg(t *testing.T) {
 
 func TestDeleteCommand_notFoundWithConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

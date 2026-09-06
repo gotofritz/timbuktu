@@ -22,22 +22,9 @@ func writeManifest(t *testing.T, home, name, body string) string {
 	return path
 }
 
-// fakeEditor writes a shell script that appends marker to its first argument,
-// and returns its path. It stands in for $EDITOR so a test can prove the editor
-// was launched against the manifest path.
-func fakeEditor(t *testing.T, marker string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "fake-editor.sh")
-	script := "#!/bin/sh\nprintf '%s' '" + marker + "' >> \"$1\"\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
 func TestTemplateEdit_launchesEditorOnManifest(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	manifest := writeManifest(t, home, "qa", "name: qa\n")
 	t.Setenv("EDITOR", fakeEditor(t, "EDITED"))
 
@@ -56,7 +43,7 @@ func TestTemplateEdit_launchesEditorOnManifest(t *testing.T) {
 
 func TestTemplateEdit_honorsConfiguredPromptsDir(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	// A prompts root well outside ~/.tbuk/prompts: the command must find the
 	// template here only if it reads prompts.dir from config, not the hardcoded
 	// default.
@@ -90,7 +77,7 @@ func TestTemplateEdit_honorsConfiguredPromptsDir(t *testing.T) {
 
 func TestTemplateEdit_missingTemplateErrors(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("EDITOR", fakeEditor(t, "X"))
 
 	if err := runCLI("template", "edit", "does-not-exist"); err == nil {
@@ -100,9 +87,9 @@ func TestTemplateEdit_missingTemplateErrors(t *testing.T) {
 
 func TestTemplateEdit_editorFailurePropagates(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	writeManifest(t, home, "qa", "name: qa\n")
-	t.Setenv("EDITOR", "false") // exits non-zero
+	t.Setenv("EDITOR", failingEditor(t))
 
 	if err := runCLI("template", "edit", "qa"); err == nil {
 		t.Fatal("expected editor failure to propagate, got nil")

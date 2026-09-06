@@ -118,13 +118,7 @@ func TestRunExport_writesValidArchive(t *testing.T) {
 	if !strings.Contains(out.String(), target) {
 		t.Errorf("expected success message naming %q, got %q", target, out.String())
 	}
-	info, err := os.Stat(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("archive perm = %o, want 600", perm)
-	}
+	wantPerm(t, target, 0o600)
 }
 
 func TestRunExport_declineOverwriteAborts(t *testing.T) {
@@ -212,7 +206,7 @@ func TestExportCommand_missingArg(t *testing.T) {
 
 func TestExportCommand_endToEnd(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}

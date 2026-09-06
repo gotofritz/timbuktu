@@ -33,7 +33,7 @@ func TestCLI_endToEnd(t *testing.T) {
 	defer embSrv.Close()
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	// filepath.Abs (NormalizePath) needs a stable CWD; use a fixture inside HOME.
 	fixture := filepath.Join(home, "notes.md")
 	writeFile(t, fixture, "# Title\n\nThe quick brown fox jumps over the lazy dog.\n")
@@ -90,7 +90,7 @@ func TestIngestCommand_archivesRawSource(t *testing.T) {
 	defer embSrv.Close()
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	rawDir := filepath.Join(home, ".tbuk", "raw")
 
 	mustRun(t, "init")
@@ -134,7 +134,7 @@ func TestIngestCommand_archivesRawSource(t *testing.T) {
 // command (it must not call os.Exit).
 func TestExecute_success(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	oldArgs := os.Args
 	os.Args = []string{"tbuk", "version"}

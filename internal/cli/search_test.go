@@ -15,7 +15,7 @@ import (
 
 func TestFindCommand_returnsResults(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestFindCommand_noArgs(t *testing.T) {
 
 func TestSearchCommand_emptyDB(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestSearchCommand_emptyDB(t *testing.T) {
 
 func TestSearchCommand_jsonFormat(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSearchCommand_jsonFormat(t *testing.T) {
 
 func TestSearchCommand_invalidMode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestSearchCommand_invalidMode(t *testing.T) {
 
 func TestFindCommand_emptyDB(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestFindCommand_emptyDB(t *testing.T) {
 
 func TestFindCommand_badFormat(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestFindCommand_badFormat(t *testing.T) {
 // stderr when --min-score is combined with the default hybrid mode (P1-16).
 func TestSearchCommand_hybridMinScoreWarns(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestSearchCommand_hybridMinScoreWarns(t *testing.T) {
 // and must NOT trigger the warning.
 func TestSearchCommand_vectorMinScoreNoWarn(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestTruncatePreview_multibyteStaysValid(t *testing.T) {
 // it and must stay lenient.
 func TestSearchCommand_readsOperators(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSearchCommand_readsOperators(t *testing.T) {
 
 func TestSearchCommand_readsQuotedPhrases(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -323,7 +323,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func TestDoctorCommand_showsSearch(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	if err := runCLI("init"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
