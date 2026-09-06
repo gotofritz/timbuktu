@@ -63,7 +63,7 @@ tbuk search "generics" --topic go                       # retrieval scoped to to
 tbuk ask "how do slices grow?" --topic go
 tbuk topic list                                         # all topics + doc counts
 tbuk topic show go                                      # documents under a topic
-tbuk topic digest go                                    # LLM synthesis of everything tagged go
+tbuk digest --topic go                                  # LLM synthesis of everything tagged go
 tbuk export ~/backups/go.tar --topic go                 # portable archive of just that slice
 ```
 
@@ -270,16 +270,24 @@ All `--topic` flags are `StringSlice` — repeatable and comma-splitting
 | `topic rm <path> <topic>...` | remove links; topics themselves survive. |
 | `topic rename <old> <new>` | one-row update; merge conflict (new exists) → error suggesting add+delete. |
 | `topic delete <name> [--yes]` | remove topic + all its links; confirm prompt like `delete`. Documents untouched. |
-| `topic digest <name> [...]` | milestone 2, below. |
+| `digest --topic <name> [...]` | Milestone 2, below. A top-level command with an injected chunk selector, not a `topic` subcommand: subplan 33 adds `digest --entity <name>` as a second selector over the same engine ([`33-ontology.md`](33-ontology.md) D3), and two commands would be the same map-reduce twice. |
 | `export <path> --topic x,y` | milestone 3, below. |
 | `reindex --topic x,y` | cross-plan — `tbuk reindex` has landed without it (#130), so wiring it in belongs to this plan; see "Cross-plan note" below. |
 
-## Milestone 2 — `topic digest`
+## Milestone 2 — `digest --topic`
 
 "Fetch all the knowledge about topic X" as synthesized prose:
 
-1. `DocumentsFor` + all their chunks in `(document, chunk_index)` order —
-   exhaustive, no similarity ranking.
+1. Chunk selection is **injected**, not hardcoded — subplan 33 adds a second
+   selector over this same engine (D3 there), so the seam ships with the
+   engine:
+
+   ```go
+   type ChunkSelector func(ctx context.Context) ([]retrieval.RetrievedChunk, error)
+   ```
+
+   This milestone builds the topic selector: `DocumentsFor` + all their chunks
+   in `(document, chunk_index)` order — exhaustive, no similarity ranking.
 2. Budget = the digest template's `retrieval.max_tokens` (builtin default
    ~8000; `chunking.CountTokens` approximation, as elsewhere).
 3. **Fits** → one LLM call: render builtin `digest` template with every chunk,
@@ -291,8 +299,10 @@ All `--topic` flags are `StringSlice` — repeatable and comma-splitting
    (`Citation = path`) in a final reduce call, streamed. One level of
    reduction; if even the summaries blow the budget, error with counts and
    suggest `--top`-style narrowing rather than recursing silently.
-5. Flags: `--template` (defaults `digest`), `--no-stream`, `--format` not
-   needed (prose). Progress lines (`summarizing 3/7: <path>`) on stderr.
+5. Flags: `--topic x,y` (the selector), `--template` (defaults `digest`),
+   `--no-stream`; `--format` not needed (prose). Progress lines
+   (`summarizing 3/7: <path>`) on stderr. Exactly one selector flag must be
+   given — an error naming the available ones otherwise.
 
 New builtin `digest` template installed by `init` beside `qa`/`brief`/`anki`:
 system prompt asks for a structured overview (themes, key facts, gaps),
@@ -344,7 +354,7 @@ counts in the summary line (`exported 12 of 240 documents (topics: go)`).
 
 1. **feat(topics): core** — migration, TopicRepo, search/retrieval filters,
    `--topic` on ingest/search/ask, `topic` group minus digest.
-2. **feat(topics): digest** — `topic digest`, builtin `digest` template.
+2. **feat(digest): engine and topic selector** — `digest --topic`, the injected `ChunkSelector` seam, builtin `digest` template.
 3. **feat(export): topic-scoped export** — staging-root filter + `--topic`.
 
 Each PR updates `README.md` (quick start, schema, architecture),
