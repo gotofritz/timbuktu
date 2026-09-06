@@ -1,755 +1,737 @@
-# Brief: Extend timbuktu with Ontology-Aware Retrieval
+# Subplan 33: One label substrate — topics, entities, and a knowledge graph
 
-## Objective
+Lands roadmap **#33** (hybrid RAG: vector search for similarity, graph
+traversal for exact relationships) from `docs/plans/next-steps.md`, and
+**revises plan 32's storage design** so that topics and entities are one
+mechanism rather than two. Roadmap **#34** (ontology-guided chunking) is not in
+this plan.
 
-Extend the existing RAG system, written in Go and using SQLite storage, with an **ontology + knowledge-graph layer** extracted from the existing document corpus.
+> Numbering: the archived `2026-09-05-2317-c9baa8f-33-context-guard.md` reused
+> "33" for a different item (roadmap #2 / issue [#141](../../../../issues/141)).
+> This plan is the roadmap's #33.
 
-The goal is not to replace the current RAG pipeline, but to add a structured semantic layer that improves:
-
-* entity/concept understanding
-* retrieval precision
-* relationship-aware retrieval
-* hierarchical reasoning
-* explainability/provenance
-* future corpus evolution
-
-The architecture should remain pragmatic and suitable for a local/small-to-medium deployment.
-
----
-
-## Before starting
-
-How does this interact with topics (plan 32)? Do they clash? Would this supersed topics? In the interest of simplicity, if this can replace topics then I'm happy to remove that plan
-
-## Core Concept
-
-Separate three things:
-
-1. **Ontology** — what kinds of things and relationships exist in the domain.
-2. **Knowledge graph / instances** — concrete entities and facts extracted from documents.
-3. **Document/vector retrieval** — the original unstructured evidence used to support answers.
-
-Conceptually:
-
-```text
-                         DOCUMENTS
-                             |
-                             v
-                    Entity / Relation
-                       Extraction
-                             |
-                             v
-                  KNOWLEDGE GRAPH
-                  entities + triples
-                             |
-                             v
-                  ONTOLOGY INDUCTION
-                             |
-                             v
-                       ONTOLOGY
-                 classes + relations
-                             |
-              +--------------+--------------+
-              |                             |
-              v                             v
-       Graph/ontology retrieval       Vector retrieval
-              |                             |
-              +--------------+--------------+
-                             |
-                             v
-                       LLM / RAG
-                             |
-                             v
-                   Grounded answer
-```
-
-The ontology should be treated as a **structured semantic model**, not merely as text embedded into a vector database.
+This replaces the generic brief that previously sat at this path. That brief
+surveyed the ontology/KG design space; what follows is scoped to *this*
+codebase, *this* corpus size, and *one* user.
 
 ---
 
-# 1. Ontology Model
+## Settled first: does the ontology replace topics? Do we need both?
 
-The ontology should minimally represent:
+**One system, two settings. Not two features, and not one feature pretending
+to be the other.**
 
-### Classes / Concepts
+The two scenarios that prompted the question are the two ends of the same dial:
 
-Examples:
+- **A — a Helix editor knowledge base.** The labels are `search`,
+  `multi-cursor`, `keybindings`, `lsp`. Flat, a dozen of them, no relationships
+  worth modelling. Filtering and "tell me everything about X" is the whole job.
+- **B — an energy-industry knowledge base.** The labels are `PPA`, `Substation`,
+  `Turbine`, `Operator`, `Grid` — typed, with real relations (`supplies`,
+  `operated_by`, `located_in`) that a question actually traverses.
 
-```text
-Person
-Organization
-Software
-Repository
-ProgrammingLanguage
-Framework
-Issue
-Feature
-Dependency
+The mistake is to read these as *topics* and *ontology*. What actually differs
+between them is two independent axes:
+
+| | **Where the label attaches** | **Whether the label is typed** |
+|---|---|---|
+| **A (helix)** | document — "this page is about multi-cursor" | no — a flat name is enough |
+| **B (energy)** | mention — "this chunk names Dogger Bank" | yes — class + relations |
+
+Those axes are orthogonal, and the four cells are all reachable from one
+model. A "topic" is **a label asserted at document grain with no type**. An
+"entity" is **a label derived at mention grain with a type**. They are the same
+row in the same table, differing in how they got there and what they hang off.
+
+So the design is:
+
+```
+                     one vocabulary  (labels)
+                            |
+        +-------------------+-------------------+
+        |                                       |
+  asserted, document grain              derived, mention grain
+  "this doc sits on this shelf"      "this chunk names this thing"
+        |                                       |
+   scenario A, and the filter          scenario B, and the graph
+   for scenario B too                            |
+                                          typed → triples → traversal
 ```
 
-### Relations / Properties
+### Scenario A, concretely
 
-Examples:
+Nothing beyond milestone 1. No seed file, no classes, no LLM:
 
-```text
-works_on(Person, Repository)
-depends_on(Software, Software)
-written_in(Software, ProgrammingLanguage)
-uses(Software, Framework)
-works_for(Person, Organization)
-belongs_to(Issue, Repository)
-affects(Issue, Software)
+```bash
+tbuk ingest ./helix-docs --topic helix
+tbuk topic add book/src/usage.md multi-cursor selections
+tbuk search "add cursor below" --topic multi-cursor
+tbuk digest --topic multi-cursor
 ```
 
-### Hierarchy
+Identical to plan 32's UX. The rows underneath are `labels` +
+`label_documents` instead of `topics` + `document_topics`, which costs nothing
+today and is the whole point (see "What this changes for plan 32").
 
-For example:
+**A gets sharper for free if it wants to.** Helix's docs are big pages covering
+many features, so document-grain labels are coarse: `--topic multi-cursor`
+admits all of `usage.md`, search sections included. Feed the same label names
+to the gazetteer and you get mention grain over the identical vocabulary:
 
-```text
-DigitalAsset
-├── Repository
-└── Software
-
-ComputeResource
-├── VM
-└── Container
+```bash
+tbuk graph build              # gazetteer over existing label names, no LLM
+tbuk entity show multi-cursor # the exact chunks, not the whole page
 ```
 
-Represent `is_a` / `subClassOf` explicitly.
+Opt-in, deterministic, reversible. The user never learns a second vocabulary.
 
-### Attributes
+### Scenario B, concretely
 
-Examples:
+B is A plus a seed file plus two more tables' worth of behaviour:
 
-```text
-Repository:
-    name
-    URL
-    created_at
-
-Software:
-    name
-    version
-    license
+```bash
+tbuk graph build --llm                       # relations, opt-in
+tbuk entity show "Dogger Bank" --hops 2
+tbuk ask "who operates the turbines at X?" --expand-entities
 ```
 
-### Optional constraints
+And B still uses document-grain labels for the things that are not in the text
+— `--topic internal`, `--topic regulator-filings` — because provenance is a
+shelf, not a concept.
 
-Where useful, support:
+### Configuration comparison
 
-```text
-domain
-range
-inverse_of
-transitive
-symmetric
-disjoint
-```
+| | A: helix | B: energy |
+|---|---|---|
+| Classes | none (untyped labels) | `Turbine`, `PPA`, `Substation`, `Operator`… |
+| Predicates | none | `supplies`, `operated_by`, `located_in`… |
+| `ontology.yaml` | not needed | required |
+| Attachment | asserted, document grain | derived mentions + asserted shelves |
+| LLM in the loop | none | optional, and only for triples |
+| Commands | `topic add/list/show`, `search --topic`, `digest --topic` | + `graph build`, `entity show`, `--expand-entities` |
+| Milestones | 1 | 1–4 |
 
-Do not implement a full OWL/reasoning engine unless the existing application genuinely requires it. Prefer a small, explicit semantic model.
+### The three things that only document-grain assertion can do
+
+Worth stating so the unified model is not mistaken for "entities can replace
+everything":
+
+1. **Labels that are not in the text.** "my work notes", "official docs",
+   "stuff I disagree with". No extractor finds these, at any price.
+2. **A deterministic, hand-editable document set** — what `export --topic` and
+   `reindex --topic` need. A confidence-thresholded extraction changes when you
+   re-run the build; an asserted row does not.
+3. **`--infer-topics` from directory structure** — provenance about where a
+   document came from, unrecoverable from content.
+
+And the one thing only mention grain can do: connect two documents that never
+mention each other, which is the entirety of scenario B's value.
 
 ---
 
-# 2. Distinguish Ontology from Knowledge Graph
+## What this changes for plan 32
 
-This distinction is important.
+Plan 32 is **documentation only** — `625cd10` landed the markdown; there is no
+`topics` table, no `TopicRepo`, no `--topic` flag in the tree today. That
+timing is the reason this plan is worth reading before
+[#115](../../../../issues/115) is built:
 
-Ontology:
+> **Build [#115](../../../../issues/115) on `labels` + `label_documents`, not on
+> `topics` + `document_topics`.** The two schemas are the same size and the same
+> work. Shipping the separate one costs a migration and a rewrite the day
+> scenario B arrives; shipping the shared one costs nothing now.
 
-```text
-GoldenRetriever -> is_a -> Dog
-Dog             -> is_a -> Animal
-```
+Everything else in plan 32 stands unchanged — the `EXISTS` filter (its design
+decision 3), OR semantics, normalization, lifecycle, digest map-reduce, scoped
+export, `reindex --topic`. Only the table names and the repo type change, and
+`TopicRepo` becomes a document-grain view over `LabelRepo`.
 
-Knowledge graph instance:
+Two further corrections to plan 32 while someone is in there:
 
-```text
-Fido -> is_a -> GoldenRetriever
-```
-
-The ontology defines the vocabulary and semantics.
-
-The knowledge graph contains concrete entities/facts extracted from the corpus.
-
-Documents remain the authoritative evidence for those facts.
-
----
-
-# 3. Ontology Extraction / Induction Pipeline
-
-Do not ask an LLM to directly generate a complete ontology from the entire corpus.
-
-Use an iterative two-stage process.
-
-## Stage A: Document-level extraction
-
-For each document/chunk, extract candidate:
-
-* entities/concepts
-* entity mentions
-* relationships/triples
-* candidate types
-* aliases
-* evidence/provenance
-* confidence
-
-Example:
-
-```json
-{
-  "entities": [
-    {
-      "text": "EC2 instance",
-      "type_candidate": "compute resource"
-    },
-    {
-      "text": "Auto Scaling Group",
-      "type_candidate": "compute service"
-    }
-  ],
-  "relations": [
-    {
-      "subject": "EC2 instance",
-      "predicate": "member of",
-      "object": "Auto Scaling Group"
-    }
-  ]
-}
-```
-
-Store the source document/chunk for every extraction.
-
-## Stage B: Ontology induction
-
-Aggregate extraction results across the corpus.
-
-For example:
-
-```text
-Candidate concepts:
-
-EC2 instance          2,431 occurrences
-Auto Scaling Group      817 occurrences
-Launch Template         392 occurrences
-
-Candidate relation:
-
-EC2 instance
-    -- member_of -->
-Auto Scaling Group
-
-Evidence: 183 occurrences
-```
-
-Then use an LLM and deterministic processing to propose:
-
-* canonical classes
-* canonical relationships
-* aliases
-* subclass relationships
-* domain/range
-* equivalent concepts
-* potentially obsolete/duplicate concepts
-
-The LLM should propose ontology changes from aggregated evidence rather than inventing them from scratch.
+- Its "Schema (the next migration) … version 3" section predates the collapse
+  to a single migration. New tables go into `schemaSQL` in place with a
+  throwaway `scripts/` script (see D8).
+- Its own open question — "are topics and metadata labels one thing or two?" —
+  is answered by its **answer 1** and is unaffected by this plan. `metadata`
+  states a fact *about* a document (`author`, `year`); a label says what the
+  document is *about*. Different objects, and neither is this plan's business.
 
 ---
 
-# 4. Entity and Relation Normalization
+## Goal
 
-Documents will contain variants such as:
+Give the corpus a second index that is about *things* rather than about
+similarity: which labels the documents carry, which entities their chunks
+mention, how those entities relate, and which chunk is the evidence for each
+claim.
 
-```text
-EC2
-EC2 instance
-Amazon EC2 instance
-instance
-```
-
-Implement an entity-resolution/normalization stage combining:
-
-* exact/string matching
-* aliases
-* embeddings where useful
-* LLM judgment for ambiguous cases
-
-Likewise normalize predicates:
-
-```text
-uses
-utilizes
-makes use of
-relies on
-```
-
-into a smaller canonical relation vocabulary where appropriate.
-
-Avoid creating hundreds of semantically redundant relations.
+Success = scenario A is served with no model in the loop and no vocabulary file,
+scenario B rides the same tables and commands, and `--expand-entities` is only
+wired into retrieval once it is measured to help.
 
 ---
 
-# 5. Provenance
+## Design decisions (and alternatives rejected)
 
-Every extracted fact and ontology statement should retain evidence.
+### D1. One vocabulary table, two attachment tables
 
-Example:
+`labels` holds every name the user or the extractor knows. `label_documents`
+attaches a label to a document (asserted). `label_mentions` attaches it to a
+byte range in a chunk (derived). `triples` relates two labels and cites chunks
+as evidence.
 
-```text
-EC2 Instance
-    -- member_of -->
-Auto Scaling Group
+A label's `type` is empty for scenario A and a class name for scenario B; a
+label's `source` is `asserted` or the id of the extraction run that produced it.
+Nothing about a scenario-A label is more expensive than plan 32's topic row.
 
-confidence: 0.94
+Rejected: separate `topics`/`entities` tables. Two vocabularies that neither
+compose nor convert, two sets of management commands, and a user who has to
+decide which one `multi-cursor` is. That decision has no right answer — it is
+genuinely both.
 
-evidence:
-    document_12 / chunk_7
-    document_41 / chunk_3
-    document_88 / chunk_12
+### D2. The ontology is a hand-written seed file, not an induced artifact
+
+The biggest cut against the original brief, and the one that makes the rest
+affordable. The brief proposed inducing classes, relations, hierarchy,
+domain/range and a `candidate → approved → deprecated` lifecycle from
+aggregated corpus evidence. For a single-user proof of concept with no
+evaluation harness, that is a large machine for producing a vocabulary nobody
+asked for, and every one of its states is a place for a bad extraction to
+become authoritative.
+
+Invert it. The vocabulary is a small YAML file the user owns, living under the
+data root like every other data path, installed by `tbuk init` beside the
+prompt templates it already installs — and **absent entirely in scenario A**:
+
+```yaml
+# ~/.tbuk/ontology.yaml — scenario B only; scenario A never creates this file
+classes:
+  - name: Turbine
+    aliases: [wind turbine, WTG]
+  - name: Operator
+  - name: Substation
+predicates:
+  - name: operated_by
+    domain: Turbine
+    range: Operator
+    aliases: [run by, managed by]
+  - name: connects_to
+    domain: Turbine
+    range: Substation
+labels:                      # optional seeds; the gazetteer matches these
+  - name: Dogger Bank
+    type: Turbine
+    aliases: [Dogger Bank A, DBA]
 ```
 
-This is important for:
+Consequences, all good:
 
-* debugging
-* explainability
-* ontology review
-* correcting bad extractions
-* re-running induction
-* tracing an answer back to source material
+- The vocabulary is **closed and small**, so extraction *validates against it*
+  and drops everything else. Junk never reaches the database.
+- Diffable, hand-editable, versioned by whatever the user versions their root
+  with. No lifecycle table, no approval states, no ontology-version column.
+- "Induction" degrades to a **reporting** step (D3) that prints and writes
+  nothing.
+- `domain`/`range` are the only constraints kept, and only because they are a
+  free validity check on an extracted triple. `inverse_of`, `transitive`,
+  `symmetric`, `disjoint` and `subClassOf` reasoning: dropped. No OWL, no
+  reasoner.
 
-The document corpus should remain the ultimate source of truth.
+Rejected: `ontology_classes` / `ontology_properties` / `ontology_hierarchy`
+tables. They buy nothing a file does not, and cost a schema change per idea.
 
----
+### D3. `graph suggest` prints; it never writes
 
-# 6. SQLite Design
+The useful half of induction is "here are the terms your corpus keeps using
+that your vocabulary has no name for". That is a frequency report over unmatched
+capitalised n-grams and unmatched predicate phrases, printed as a diff the user
+can paste into `ontology.yaml` — or, in scenario A, as `tbuk topic add` lines:
 
-Extend the existing SQLite database rather than introducing a graph database unless there is a demonstrated need.
-
-A possible logical schema:
-
-```text
-documents
-chunks
-
-entities
-entity_mentions
-
-relations
-relation_instances
-
-ontology_classes
-ontology_properties
-ontology_hierarchy
-
-ontology_evidence
-extraction_runs
+```
+$ tbuk graph suggest --min 25
+# candidate labels (unmatched, ≥25 occurrences)
+  labels:
+    - name: Auto Scaling Group   # 817 occurrences, 41 documents
+    - name: Launch Template      # 392 occurrences, 22 documents
+# candidate predicates near known labels
+    - name: member_of            # 183 occurrences
 ```
 
-Possible conceptual relationships:
+No approval workflow, because there is nothing to approve — the file is the
+approval.
 
-```text
-documents
-   |
-   +-- chunks
-         |
-         +-- entity_mentions --> entities
-         |
-         +-- relation evidence
+### D4. Extraction is deterministic first, LLM second and optional
 
-entities
-   |
-   +-- entity types --> ontology_classes
+`internal/llm.LLM` streams tokens and nothing else — no JSON mode, no
+structured output, no tool calling — and the default provider is a local MLX
+model. Making the feature *depend* on that model emitting valid JSON several
+thousand times is not a foundation.
 
-relation_instances
-   |
-   +-- predicate --> ontology_properties
-   |
-   +-- subject --> entities
-   |
-   +-- object --> entities
-
-ontology_classes
-   |
-   +-- hierarchy --> ontology_classes
-
-ontology_*
-   |
-   +-- evidence --> documents/chunks
-```
-
-Use SQLite foreign keys and indexes appropriately.
-
-The exact schema should be designed after inspecting the existing application's schema and query patterns.
-
----
-
-# 7. RAG Retrieval Architecture
-
-The ontology should complement, not replace, vector retrieval.
-
-Given:
-
-```text
-User question
-```
-
-the retrieval pipeline should be capable of:
-
-```text
-Question
-   |
-   v
-Entity / concept detection
-   |
-   +----------------------+
-   |                      |
-   v                      v
-Ontology lookup       Vector search
-   |                      |
-   v                      v
-Graph traversal       Relevant chunks
-   |                      |
-   +----------+-----------+
-              |
-              v
-      Combined context
-              |
-              v
-             LLM
-```
-
-Use ontology/graph retrieval for:
-
-* exact relationships
-* hierarchy
-* entity expansion
-* related concepts
-* structured constraints
-
-Use vector retrieval for:
-
-* semantic similarity
-* explanatory text
-* facts not represented structurally
-* supporting evidence
-
-A hybrid retrieval strategy is preferred.
-
----
-
-# 8. Graph Traversal
-
-Implement lightweight graph traversal in SQLite.
-
-For example, given:
-
-```text
-Golden Retriever
-```
-
-the retrieval system may discover:
-
-```text
-Golden Retriever
-    -> is_a -> Dog
-        -> is_a -> Animal
-    -> has_property -> ...
-```
-
-The amount/depth of traversal should be configurable.
-
-Avoid unrestricted graph expansion.
-
-Potential configuration:
-
-```text
-max_hops = 1..3
-max_entities = N
-max_relationships = N
-```
-
-The retrieved graph context should be converted into compact structured context for the LLM.
-
----
-
-# 9. Embeddings
-
-Do **not** assume that embeddings alone accurately represent ontology semantics.
-
-For example:
-
-```text
-Dog -> is_a -> Animal
-```
-
-and
-
-```text
-Animal -> is_a -> Dog
-```
-
-may be semantically close in embedding space despite being logically different.
-
-Therefore:
-
-* use embeddings for semantic retrieval
-* store ontology relationships explicitly
-* use graph traversal for exact semantics
-
-If the existing RAG already stores embeddings in SQLite, investigate whether ontology/entity embeddings can reuse the same mechanism.
-
-Do not introduce a separate vector database without a concrete reason.
-
----
-
-# 10. Ontology Evolution
-
-The system should support incremental updates.
-
-When new documents arrive:
-
-```text
-New documents
-     |
-     v
-Extraction
-     |
-     v
-Existing ontology/entity matching
-     |
-     +--> known entities/facts
-     |
-     +--> new candidates
-                |
-                v
-          ontology review
-```
-
-New concepts should initially be treated as **candidates**, rather than automatically becoming authoritative ontology classes.
-
-This allows:
-
-* confidence thresholds
-* human review
-* batch ontology updates
-* detection of emerging concepts
-* ontology versioning
-
-Consider an `ontology_version` or extraction/induction run identifier.
-
----
-
-# 11. Confidence and Lifecycle
-
-Distinguish:
-
-```text
-candidate
-approved
-deprecated
-rejected
-```
-
-for ontology concepts/relations.
-
-Likewise retain extraction confidence.
-
-Possible lifecycle:
-
-```text
-Document extraction
-       |
-       v
-Candidate entity/relation
-       |
-       v
-Normalization
-       |
-       v
-Ontology proposal
-       |
-       +--> approved
-       +--> rejected
-       +--> needs review
-```
-
-Do not let low-confidence extraction silently modify the authoritative ontology.
-
----
-
-# 12. Go Architecture
-
-Before implementing anything, inspect the existing Go application and identify:
-
-* document ingestion pipeline
-* chunking
-* embedding generation
-* SQLite schema/repository layer
-* vector search implementation
-* current retrieval pipeline
-* LLM abstraction
-* configuration
-* tests
-* CLI/API boundaries
-
-Prefer extending existing abstractions.
-
-Potential logical components:
-
-```text
-OntologyExtractor
-EntityResolver
-RelationExtractor
-OntologyInducer
-OntologyRepository
-KnowledgeGraphRepository
-GraphRetriever
-HybridRetriever
-```
-
-These are conceptual interfaces, not requirements for exact type names.
-
-Keep LLM-specific functionality behind existing or new abstractions so the ontology system is not tightly coupled to one model/provider.
-
----
-
-# 13. Suggested Interfaces
-
-Consider interfaces along these lines:
+Two extractors behind one interface:
 
 ```go
-type OntologyRepository interface {
-    GetClass(id int64) (...)
-    FindClassByName(name string) (...)
-    GetRelations(classID int64) (...)
-    GetAncestors(classID int64, maxDepth int) (...)
-}
-
-type KnowledgeGraphRepository interface {
-    FindEntity(name string) (...)
-    GetRelations(entityID int64, maxHops int) (...)
-    AddEntity(...)
-    AddTriple(...)
-}
-
-type OntologyExtractor interface {
-    Extract(ctx context.Context, chunk Chunk) (ExtractionResult, error)
-}
-
-type OntologyInducer interface {
-    Induce(ctx context.Context, evidence []ExtractionResult) (OntologyProposal, error)
+type Extractor interface {
+    Extract(ctx context.Context, chunk storage.Chunk) (Result, error)
 }
 ```
 
-Adapt these to the existing codebase rather than forcing a new architecture.
+1. **Gazetteer (default, no LLM).** Match label names and aliases against
+   `chunks.text`, case-folded, on word boundaries. Shortlist candidate chunks
+   with an FTS5 `MATCH` over the alias terms first, then exact-scan only the
+   shortlist for byte offsets — the index is already there and already tuned.
+   `searchtext.Reduce`'s split forms give code identifiers extra aliases for
+   free. 100% precision on known names, zero cost, fully reproducible. **This is
+   what makes scenario A's "sharper" mode free:** the label list *is* the
+   gazetteer.
+2. **LLM (opt-in, `graph build --llm`).** Buffers the token stream (the
+   `--no-stream` path in `ask.go` already does this), parses JSON tolerantly,
+   then **hard-validates every triple against the seed**: unknown predicate →
+   drop; subject/object type violating `domain`/`range` → drop; label not
+   resolvable to a seed or existing row → drop. Reports the drop rate at the end
+   of the run. A model that cannot hold the format degrades to zero rows, not to
+   garbage rows.
+
+Rejected: LLM-only extraction — unusable offline, unreproducible, and the whole
+feature dies when the local model has a bad day.
+
+### D5. The retrieval filter reads asserted rows by default
+
+`search --topic x` filters on `label_documents` with an `EXISTS` subquery
+(plan 32's design decision 3, unchanged: a JOIN would multiply chunk rows).
+Mention-grain rows do **not** silently widen a filter — a filter's value is that
+it is exact and free, and a derived one is neither.
+
+`--topic-mentions` opts into the union for a corpus where mention grain is the
+better filter (scenario A sharpened). Off by default.
+
+### D6. Graph expansion returns chunks, not a facts block (in v1)
+
+The brief wants a structured `Entity / Type / Relationships` block handed to the
+model alongside the retrieved text. That is a new prompt shape, a new
+interaction with the context-window guard that just shipped
+([#147](../../../../issues/147)), and a new groundedness question — a triple is
+a claim; only its evidence chunk is a source.
+
+v1 therefore expands the *chunk set*: detect labels in the question, traverse
+≤`hops` in `triples`, collect the evidence chunks of the traversed triples, and
+merge them into the retrieved set below the vector/keyword hits. They flow
+through the existing citation, `squeeze` compaction and budget machinery
+untouched, and every added chunk is a real quotable source.
+
+Honest cost: v1 cannot answer a relation question whose answer is spread across
+two chunks that never co-occur — it can only put both chunks in front of the
+model, which is most but not all of the value. A `Facts:` template block is a v2
+decision, taken after D7's measurement, not before.
+
+### D7. Retrieval wiring is gated on measurement, with a kill criterion
+
+Entity expansion adds chunks. Adding chunks trades precision for recall, and
+this repo has no way to tell which way that trade lands — the retrieval eval
+split (#30 / [#126](../../../../issues/126)) is still open.
+
+Milestones 1–3 change **no** retrieval behaviour beyond the label filter and are
+useful on their own (`entity show`, `graph stats`, `graph suggest` are
+corpus-browsing tools). Milestone 4 wires expansion in behind an off-by-default
+flag, and must land with either eval numbers or a documented manual A/B over ≥20
+questions.
+
+> **Kill criterion.** If expansion does not beat the baseline on recall@10
+> without losing more than 5 points of precision@5, ship milestones 1–3, delete
+> the expander, and record the result here. Scenario A is unaffected either way.
+> That is an acceptable outcome, not a failure.
+
+### D8. Schema is edited into `schemaSQL` in place, not a new migration
+
+Per AGENTS.md ("proof of concept") and the standing comment in
+`internal/storage/migrate.go`: `schemaVersion` stays 2, the new tables go into
+`schemaSQL`, and an existing knowledge base is brought forward by a throwaway
+script under `scripts/` — the route `search_text` and the FTS tokenizer both
+took. Deleted once it has done its job.
+
+### D9. SQLite, recursive CTE, no graph database
+
+Consistent with the brief and with the repo: pure-Go `modernc.org/sqlite`, no
+CGO. Traversal is a `WITH RECURSIVE` over `triples` with a depth cap and a
+visited set. At this corpus scale — vector search is still an O(n) scan,
+[#127](../../../../issues/127) — a dedicated graph store is unjustifiable.
 
 ---
 
-# 14. Retrieval Output
+## What this plan drops from the brief, and why
 
-The hybrid retriever should return both:
+| Brief section | Verdict | Why |
+|---|---|---|
+| §3 Stage B ontology induction | → `graph suggest`, print-only (D3) | The vocabulary is the user's (D2) |
+| §11 candidate/approved/deprecated lifecycle | Dropped | No induced state to govern once D2 holds |
+| §10 ontology versioning | Dropped | The YAML file is versioned by the user's VCS |
+| §1 `inverse_of`, `transitive`, `symmetric`, `disjoint` | Dropped | No reasoner; `domain`/`range` kept as a free validity check |
+| §1 `subClassOf` hierarchy | Deferred | Nothing in v1 traverses it; revisit if `entity show` wants roll-up |
+| §14 structured facts block for the LLM | Deferred to v2 | Prompt shape + context-guard interaction (D6) |
+| §6 `ontology_*` tables | Dropped | Replaced by the seed file (D2) |
+| Roadmap #34 ontology-guided chunking | Out of scope | Its own plan, and it needs this one first |
 
-### Structured context
-
-```text
-Entity:
-    Apache Spark
-
-Type:
-    Software
-
-Relationships:
-    Apache Spark -- written_in --> Scala
-    Apache Spark -- uses --> Spark SQL
-    Apache Spark -- depends_on --> ...
-```
-
-### Source evidence
-
-```text
-document_123 / chunk_4
-document_456 / chunk_8
-```
-
-The LLM should receive enough provenance to ground claims in source documents.
+Kept in full: entity/relation extraction, normalization and resolution,
+provenance on every row, hybrid retrieval, incremental re-runs, replaceable LLM.
 
 ---
 
-# 15. Important Design Principles
+## Schema
 
-### Keep ontology small
+Appended to `schemaSQL` in `internal/storage/migrate.go` (D8). Milestone 1
+ships the first two tables — the same footprint plan 32 was going to spend on
+`topics` + `document_topics`.
 
-Do not attempt to create a perfect ontology of the entire corpus.
+```sql
+-- The one vocabulary. A scenario-A topic is a row with type=''.
+CREATE TABLE IF NOT EXISTS labels (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Normalized (lowercased, trimmed, whitespace-collapsed) match key.
+    name       TEXT    NOT NULL,
+    -- As the user or seed spells it; what the CLI prints.
+    display    TEXT    NOT NULL,
+    -- '' for an untyped topic, else a class name from ontology.yaml. Validated
+    -- on write, not by FK: the vocabulary lives in a file, so a class the user
+    -- deletes must leave its rows readable rather than orphaning them.
+    type       TEXT    NOT NULL DEFAULT '',
+    created_at TEXT    NOT NULL,
+    UNIQUE(name, type)
+);
 
-A small, high-confidence ontology is preferable to thousands of noisy classes.
+-- Asserted, document grain. This is plan 32's document_topics.
+CREATE TABLE IF NOT EXISTS label_documents (
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    label_id    INTEGER NOT NULL REFERENCES labels(id)    ON DELETE CASCADE,
+    PRIMARY KEY (document_id, label_id)
+);
 
-### Keep facts separate from ontology
+CREATE INDEX IF NOT EXISTS idx_label_documents_label ON label_documents(label_id);
 
-Ontology:
+CREATE TABLE IF NOT EXISTS label_aliases (
+    label_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    alias    TEXT    NOT NULL,          -- normalized
+    PRIMARY KEY (alias, label_id)
+);
 
-```text
-Software -> written_in -> ProgrammingLanguage
+-- Derived, mention grain. Milestone 1 (gazetteer) onward.
+CREATE TABLE IF NOT EXISTS label_mentions (
+    chunk_id   INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    label_id   INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    start_byte INTEGER NOT NULL,
+    end_byte   INTEGER NOT NULL,
+    run_id     INTEGER NOT NULL REFERENCES extraction_runs(id) ON DELETE CASCADE,
+    PRIMARY KEY (chunk_id, label_id, start_byte)
+);
+
+CREATE INDEX IF NOT EXISTS idx_label_mentions_label ON label_mentions(label_id);
+
+-- Scenario B. Milestone 3 onward.
+CREATE TABLE IF NOT EXISTS triples (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    predicate  TEXT    NOT NULL,         -- validated against ontology.yaml
+    object_id  INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    UNIQUE(subject_id, predicate, object_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject_id);
+CREATE INDEX IF NOT EXISTS idx_triples_object  ON triples(object_id);
+
+-- Provenance. A triple whose last evidence row goes with a deleted chunk is
+-- removed by the build, so a fact never outlives the text that said it.
+CREATE TABLE IF NOT EXISTS triple_evidence (
+    triple_id  INTEGER NOT NULL REFERENCES triples(id) ON DELETE CASCADE,
+    chunk_id   INTEGER NOT NULL REFERENCES chunks(id)  ON DELETE CASCADE,
+    confidence REAL    NOT NULL DEFAULT 1.0,
+    run_id     INTEGER NOT NULL REFERENCES extraction_runs(id) ON DELETE CASCADE,
+    PRIMARY KEY (triple_id, chunk_id)
+);
+
+CREATE TABLE IF NOT EXISTS extraction_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  TEXT    NOT NULL,
+    finished_at TEXT    NOT NULL DEFAULT '',
+    extractor   TEXT    NOT NULL,          -- "gazetteer" | "llm:<provider>/<model>"
+    chunks_seen INTEGER NOT NULL DEFAULT 0,
+    dropped     INTEGER NOT NULL DEFAULT 0, -- failed seed validation (D4)
+    notes       TEXT    NOT NULL DEFAULT ''
+);
 ```
 
-Fact:
+`type` and `predicate` are text validated against the seed at write time rather
+than foreign keys, deliberately: the vocabulary is a file, and a user editing
+that file must not corrupt the database. `graph stats` reports rows whose type
+or predicate has left the seed, so the drift is visible.
 
-```text
-Spark -> written_in -> Scala
-```
-
-### Preserve provenance
-
-Every important extracted statement should be traceable to source text.
-
-### Use hybrid retrieval
-
-Ontology/graph retrieval and vector retrieval solve different problems.
-
-### Prefer deterministic structure where possible
-
-Do not rely on embeddings or LLMs for relationships whose semantics need to be exact.
-
-### Make LLM extraction replaceable
-
-The architecture should allow different models/providers.
-
-### Design for incremental evolution
-
-The ontology should improve as more documents are processed.
-
-### Don't over-engineer initially
-
-SQLite + Go + existing vector RAG should remain the foundation.
-
-A graph database, RDF store, OWL reasoner, or external vector database should only be introduced if actual requirements justify it.
+Deleting a document already cascades to its chunks, which now cascades to
+mentions and evidence — a fact dies with its source. A label row survives at
+zero attachments until `topic delete` removes it (plan 32's decision 8,
+unchanged).
 
 ---
 
-# 16. Expected Deliverable from Codex
+## Package changes
 
-First **inspect the existing repository and architecture**.
+```
+internal/storage/
+  labels.go          ← LabelRepo (vocabulary + both attachment grains)
+  labels_test.go
+  graph.go           ← TripleRepo, RunRepo; Traverse (recursive CTE)
+  graph_test.go
+  migrate.go         ← new tables appended to schemaSQL
 
-Do not immediately implement.
+internal/ontology/
+  seed.go            ← Seed: Load(path), Validate(), class/predicate lookup, Normalize()
+  seed_test.go
+  gazetteer.go       ← gazetteer extractor: FTS shortlist → exact offset scan
+  gazetteer_test.go
+  llmextract.go      ← LLM extractor: buffered stream → tolerant JSON → seed validation
+  llmextract_test.go
+  suggest.go         ← frequency report over unmatched terms (print-only)
+  suggest_test.go
 
-Produce an architecture proposal covering:
+internal/search/
+  filters.go         ← labelFilterSQL(names, docAlias) EXISTS fragment (plan 32's shape)
+  search.go          ← Options.Topics []string, TopicMentions bool
 
-1. Existing RAG architecture relevant to this feature
-2. Proposed ontology/knowledge-graph architecture
-3. SQLite schema changes
-4. Go package/module changes
-5. Extraction pipeline
-6. Ontology induction pipeline
-7. Entity/relation normalization
-8. Hybrid retrieval strategy
-9. Provenance model
-10. Incremental update strategy
-11. Configuration
-12. Testing strategy
-13. Migration/backward compatibility
-14. Example end-to-end query flow
-15. Trade-offs and alternatives
+internal/retrieval/
+  retrieval.go       ← Filters{Meta, Topics, Expand, Hops} — defined once (see below)
+  expand.go          ← label detection in the query + traversal + chunk merge
+  expand_test.go
 
-Then propose an implementation plan in incremental stages.
+internal/cli/
+  topic.go           ← tbuk topic list|show|add|rm|rename|delete   (plan 32, on LabelRepo)
+  graph.go           ← tbuk graph build|stats|suggest
+  entity.go          ← tbuk entity list|show|alias|merge
+  init.go            ← ontology.yaml only when scaffolding a typed KB
+  search.go, ask.go  ← --topic, --expand-entities, --hops
+  doctor.go          ← seed loads; rows whose type/predicate left the seed
 
-The existing RAG should continue to work if ontology extraction is disabled.
+internal/config/
+  config.go          ← OntologyConfig; ResolvePaths covers ontology.path; Validate()
 
-The preferred result is an **incremental extension of the current system**, not a rewrite.
+scripts/
+  add-label-tables.sh  ← throwaway (D8); deleted once run
+```
+
+**`retrieval.Filters` is defined exactly once.** Plan 32 milestone 1 replaces
+`Retrieve(ctx, query, topK, meta)` with a `Filters` struct; this plan adds
+`Expand`/`Hops` to that same struct. Whichever lands first defines it.
+
+### Repos
+
+```go
+type Label struct { ID int64; Name, Display, Type string }
+type Triple struct { ID int64; Subject Label; Predicate string; Object Label }
+type Evidence struct { ChunkID int64; Confidence float64; RunID int64 }
+
+// Vocabulary
+func (r *LabelRepo) Ensure(ctx context.Context, display, typ string) (int64, error)
+func (r *LabelRepo) FindByName(ctx context.Context, name string) (Label, error) // ErrNotFound
+func (r *LabelRepo) IDsForNames(ctx context.Context, names []string) ([]int64, error)
+func (r *LabelRepo) List(ctx context.Context, typ string) ([]LabelCount, error)
+func (r *LabelRepo) Rename(ctx context.Context, old, new string) error
+func (r *LabelRepo) Delete(ctx context.Context, name string) error
+func (r *LabelRepo) AddAlias(ctx context.Context, id int64, alias string) error
+func (r *LabelRepo) Merge(ctx context.Context, keep, drop int64) error // re-points every attachment
+
+// Document grain (asserted) — what `topic` and the filter use
+func (r *LabelRepo) Tag(ctx context.Context, docID int64, labelIDs ...int64) error
+func (r *LabelRepo) Untag(ctx context.Context, docID int64, labelIDs ...int64) error
+func (r *LabelRepo) DocumentsFor(ctx context.Context, names []string) ([]Document, error)
+func (r *LabelRepo) ForDocument(ctx context.Context, docID int64) ([]Label, error)
+
+// Mention grain (derived) — what the gazetteer and `entity show` use
+func (r *LabelRepo) AddMention(ctx context.Context, chunkID, labelID int64, start, end int, runID int64) error
+func (r *LabelRepo) ChunksMentioning(ctx context.Context, labelIDs []int64) ([]int64, error)
+
+func (r *TripleRepo) Add(ctx context.Context, t Triple, ev Evidence) error
+func (r *TripleRepo) For(ctx context.Context, labelID int64) ([]Triple, error)
+// Traverse walks up to maxHops from the seed labels, capped at maxLabels, and
+// returns the reached triples with their evidence chunk ids.
+func (r *TripleRepo) Traverse(ctx context.Context, from []int64, maxHops, maxLabels int) ([]Triple, []int64, error)
+```
+
+Errors wrap `fmt.Errorf("LabelRepo.Method: %w", err)`; misses use
+`storage.ErrNotFound`, matching the existing repos. `App` grows memoized
+`Labels()` / `Triples()` accessors in the composition root.
+
+---
+
+## Config
+
+```yaml
+ontology:
+  path: ./ontology.yaml   # relative to root (rebased by ResolvePaths) or absolute;
+                          # empty or missing = untyped labels only (scenario A)
+  extract:
+    llm: false            # gazetteer only unless true (D4)
+    batch: 32
+  retrieval:
+    expand: false         # off until D7's measurement says otherwise
+    max_hops: 1
+    max_labels: 8
+    max_added_chunks: 10
+```
+
+Scenario A needs none of this — an absent seed file means untyped labels, which
+is the default. `Config.Validate()` (the existing fail-fast chokepoint) rejects
+`max_hops` outside 1..3, non-positive caps, and a `path` that is set but
+unreadable or invalid.
+
+---
+
+## CLI surface
+
+`--topic` flags are `StringSlice` — repeatable and comma-splitting — per plan 32.
+
+| Command | Behaviour |
+|---|---|
+| `ingest <path> [--topic x,y] [--infer-topics]` | Plan 32, unchanged, writing `label_documents`. |
+| `search`/`ask` `<q> --topic x,y` | `EXISTS` pre-filter on asserted rows (D5). Unknown name → CLI error naming the known labels. |
+| `search`/`ask` `--topic-mentions` | Widen the filter to mention grain. Off by default. |
+| `topic list\|show\|add\|rm\|rename\|delete` | Plan 32's group, on `LabelRepo`. `list` shows untyped labels by default, `--type T` or `--all` for the rest. |
+| `digest --topic x` / `--entity X` | One engine, two chunk selectors (below). |
+| `graph build [--topic x,y] [--llm] [--force]` | Extraction run over stored chunks; skips chunks already covered by a run of the same extractor unless `--force`. Summary: chunks seen, mentions, triples, dropped. |
+| `graph stats` | Labels per class, triples per predicate, chunk coverage %, rows whose type or predicate left the seed, last run. |
+| `graph suggest [--min N]` | Print-only frequency report (D3). Writes nothing. |
+| `entity list [--type T]` | Labels with mention and document counts. |
+| `entity show <name> [--hops N]` | Type, aliases, triples in/out, evidence chunks with `path §index` citations. |
+| `entity alias <name> <alias>...` | Add aliases — the user's half of entity resolution. |
+| `entity merge <keep> <drop>` | Re-point every attachment, delete the dropped row. Confirm prompt like `delete`. |
+| `export --topic x,y` / `reindex --topic x,y` | Plan 32, unchanged — asserted rows only, by design (D5). |
+
+**One digest engine, two selectors.** Plan 32 milestone 2 builds `RunDigest`
+(exhaustive fetch → token budget → single call or map-reduce). Make its
+chunk-selection step injected:
+
+```go
+type ChunkSelector func(ctx context.Context) ([]retrieval.RetrievedChunk, error)
+```
+
+- `--topic`: every chunk of every document carrying the label.
+- `--entity`: every chunk mentioning the label, plus the evidence chunks of its
+  triples within `--hops`.
+
+Rejected: a separate `entity digest` command — the same code twice, drifting.
+
+Label names reaching the terminal go through the existing `cli.sanitize` path;
+they are document-derived text.
+
+---
+
+## Export / import
+
+`export.Create` snapshots config + data folders, so `ontology.yaml` rides along
+with an export. `importer.Extract` ignores config and prompts and will ignore
+the seed for the same reason — the importing knowledge base keeps its own
+vocabulary. Asserted `label_documents` rows are carried by plan 32's
+topic-scoped export as it already specifies; mention and triple rows are not,
+because import re-ingests from the raw archive and `graph build` re-derives them
+deterministically. Say so in the user guide so nobody expects otherwise.
+
+---
+
+## Testing (TDD, table-driven, ≥85% per package)
+
+- **storage/labels:** vocabulary CRUD; normalization (`Multi-Cursor` ≡
+  `multi-cursor`); `UNIQUE(name, type)` lets an untyped topic and a typed entity
+  share a name; `IDsForNames` miss → `ErrNotFound`; document delete cascades
+  document attachments; chunk delete cascades mentions; `Merge` re-points both
+  grains and leaves no orphan; `Rename`/`Delete` edge cases. In-memory SQLite.
+- **storage/graph:** `Add` idempotent; a triple whose last evidence row goes
+  with a deleted chunk is removed; `Traverse` at 1/2/3 hops; a cycle (`A→B→A`)
+  terminates; `maxLabels` cap honoured; a disconnected seed returns empty.
+- **ontology/seed:** valid load; unknown class in a predicate's domain/range →
+  error; duplicate class names; empty file; **missing file is not an error** (it
+  is scenario A).
+- **ontology/gazetteer:** exact and alias match; case folding; word boundaries
+  (`Go` must not match `Google`); UTF-8 offsets land on rune starts; overlapping
+  aliases prefer the longest match; code identifiers via `searchtext.Reduce`
+  split forms; a chunk with no match writes no rows.
+- **ontology/llmextract:** fake `chatFn` returning canned token channels (the
+  `ask_run_test.go` pattern) — well-formed JSON; JSON wrapped in prose; a
+  trailing comma; unparseable output → zero rows and a counted drop; unknown
+  predicate dropped; `domain`/`range` violation dropped; stream error
+  propagated; context cancellation mid-stream.
+- **search:** label filter on vector/keyword/hybrid; a doc carrying two of the
+  requested labels returns no duplicate chunks; labels and metadata compose
+  (AND); unmatched label → empty; empty `Topics` ≡ today (regression parity);
+  `TopicMentions` widens and only then.
+- **retrieval/expand:** label detection in a question; expansion adds only
+  evidence chunks; `max_added_chunks` cap; expansion respects the label and
+  metadata filters; `Expand: false` is byte-identical to today's result — the
+  important one.
+- **cli:** every subcommand; `graph build` skip/force; unknown-label error text;
+  `entity merge` confirm prompt; `--expand-entities` forwards `Filters` (fake
+  retriever asserts); `doctor` flags seed drift; extend `integration_test.go`
+  with both scenarios — A (`ingest --topic → search --topic → digest --topic`,
+  no seed file present) and B (`graph build → entity show → search
+  --expand-entities`).
+
+---
+
+## Rollout (one PR per milestone)
+
+| # | PR | Depends on | Serves |
+|---|---|---|---|
+| 1 | `feat(labels): vocabulary, document grain, filter` — `labels` + `label_documents` + aliases in `schemaSQL` + `scripts/` script, `LabelRepo`, search/retrieval filter, `--topic` on ingest/search/ask/reindex, `topic` group | — | **A, complete.** This *is* [#115](../../../../issues/115). |
+| 2 | `feat(digest): topic and entity selectors` — `RunDigest`, builtin `digest` template, both selectors | 1 | A ([#116](../../../../issues/116)) |
+| 3 | `feat(export): topic-scoped archive` | 1 | A ([#117](../../../../issues/117)) |
+| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph build`/`stats`/`suggest`, `entity list/show/alias/merge` | 1 | A sharpened, B started |
+| 5 | `feat(graph): opt-in LLM relation extraction` — `triples`, `triple_evidence`, `graph build --llm`, validation, run bookkeeping | 4 | B |
+| 6 | `feat(retrieval): entity expansion behind a flag` — `Filters.Expand`, expander, `--expand-entities` | 5, D7 measurement | B |
+
+Milestones 1–3 are plan 32 rebased onto the shared substrate; they are the whole
+of scenario A and carry no new concepts for a user who never opens
+`ontology.yaml`. Milestones 4–6 are scenario B and are individually skippable.
+
+Each PR updates `README.md`, `docs/initial-context.md` (schema, CLI list,
+architecture — per AGENTS.md, before merge) and `docs/user-guide.md`. Plan 32 is
+archived in the milestone-3 PR; this plan is archived in the milestone-6 PR, or
+in milestone 5 if D7's kill criterion fires.
+
+---
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| Unifying the tables slows down scenario A | It does not: milestone 1 is the same two tables and the same filter plan 32 already specified, with two extra columns. If it starts growing scenario-B concepts, that is the signal to stop and split. |
+| Local MLX model emits unusable JSON | The gazetteer is the default and needs no model; the LLM path validates hard and reports its drop rate (D4). A run that produces nothing is legible, not silent. |
+| Extraction cost — one LLM call per chunk | `--llm` is opt-in and `--topic`-scopeable. Order of magnitude: a 5,000-chunk corpus at ~2 s/chunk on a local model is ~3 hours. Say so in the docs; do not bury it. |
+| Expansion hurts answer quality | Off by default, gated on D7, with a stated kill criterion. Scenario A is unaffected. |
+| Seed drift — user edits `ontology.yaml`, rows keep old types | `graph stats` and `doctor` both report it; `graph build --force` re-derives. |
+| Scope creep back toward the brief | The drops table above is the contract. Reopening any row needs a reason written into this plan. |
+
+---
+
+## Out of scope (deliberate)
+
+- Ontology-guided chunking (roadmap #34) — its own plan, and it needs this one.
+- A `Facts:` block in the prompt (brief §14) — v2, after D7 (D6).
+- Class hierarchy traversal / roll-up queries.
+- Any reasoner, RDF store, SPARQL, or external graph database.
+- Label embeddings — the vocabulary is small enough for exact matching, and
+  `Dog is_a Animal` vs `Animal is_a Dog` is exactly what embeddings get wrong
+  (brief §9).
+- Cross-document coreference beyond alias matching.
+- AND-intersection filter mode, hierarchical topic names — plan 32's out-of-scope
+  list, unchanged.
+
+---
+
+## Open questions
+
+- **Does `tbuk init` scaffold `ontology.yaml`?** Scenario A never needs it, and
+  an unexplained file in the root is noise. Leaning to: no file by default,
+  `tbuk graph init` writes a commented starter when the user wants one, and
+  `graph suggest` fills it.
+- **Should `graph build` run at ingest?** A separate command keeps ingest fast
+  and re-runnable, matching `reindex`. An ingest hook is a cheap follow-up once
+  the gazetteer is proven fast; not gating.
+- **Mention offsets on re-chunk.** `reindex` rewrites chunk rows, so mentions
+  cascade away and must be rebuilt. Acceptable — re-running the gazetteer is
+  cheap — but `reindex` should say so, or call `graph build` itself.
+- **`topic list` default view.** Untyped labels only is right for A; for B the
+  user probably wants their shelves *and* their entity classes listed
+  separately. `--all` may want to group by type rather than flatten.
