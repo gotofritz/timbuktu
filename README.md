@@ -94,6 +94,12 @@ tbuk meta list <path>    # list all metadata for a document
 tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template, stream LLM answer
                          #   (--top, --template, --no-stream, --require-context to abort when no context matches)
                          #   --session NAME records the turn in a thread (created if new); -c/--continue uses the last one
+tbuk chat                # REPL over the same path, one turn per line (--template, --top, --var, --require-context)
+                         #   --session NAME records into a named thread; without it the chat is in memory and saves nothing
+tbuk session list        # conversation threads: name, turns, template, last used
+tbuk session show <n>    # a thread turn by turn, with its citations (--verbose adds the query retrieval ran)
+tbuk session rename <old> <new>  # rename a thread, keeping its turns
+tbuk session delete <n>  # delete a thread and its turns (--yes skips prompt)
 tbuk template list       # list prompt templates in ~/.tbuk/prompts/
 tbuk template show <n>   # print manifest + template files
 tbuk template edit <n>   # open template manifest in $EDITOR
@@ -429,7 +435,7 @@ rejected.
 cmd/tbuk/           entry point
 
 internal/
-  cli/              cobra root + subcommands
+  cli/              cobra root + subcommands; ask/chat share one RunAsk path, session/* read the thread store
   config/           Config struct, Load(), Defaults()
   storage/          SQLite: Open, migrations, DocumentRepo, ChunkRepo, MetadataRepo, SessionRepo
   preprocess/       Extractor interface; Markdown, plain-text, HTML, PDF backends; SHA256 helpers
@@ -590,6 +596,7 @@ one:
 tbuk ask --session go "how do slices grow?"
 tbuk ask --session go "and maps?"     # retrieval knows this means Go maps
 tbuk ask -c "and channels?"           # the same thread, without naming it
+tbuk chat --session go                # the same thread, interactively
 ```
 
 An unknown name **creates** the thread — a thread is a shell history file, not
@@ -629,6 +636,57 @@ many turns a thread keeps (oldest dropped first; `0` keeps everything), and
 `tbuk export` copies the database whole, so threads ride along inside an
 archive; `tbuk import` reads that database as a document manifest and never
 looks at any other table, so threads never land on the importing machine.
+`tbuk session delete` before exporting is the answer for a thread you would
+rather not ship.
+
+#### `tbuk chat` — the same thread, interactively
+
+`tbuk chat` is a REPL around the same code path: one turn per line, in one
+process, so the model and the embedding server are reached once rather than per
+question.
+
+```bash
+tbuk chat                  # in memory — nothing is recorded
+tbuk chat --session go     # the thread "go", recorded as it goes
+```
+
+**Without `--session` a chat saves nothing.** Most conversations are not worth
+keeping, and a tool that silently accumulates every idle question makes
+`tbuk session list` useless within a week. The thread still grows for the length
+of the session — the follow-ups work exactly as they do under `--session` — it
+is simply never written down. `/new NAME` starts recording part-way through.
+
+Its command language is deliberately five words long; anything larger is a
+shell, and this is a CLI:
+
+| Command | What |
+|---|---|
+| `/sources` | the citations behind the last answer |
+| `/new [name]` | start a fresh thread; with a name, a stored one (created if new) |
+| `/forget` | drop the replayed history, keeping the thread and its turns |
+| `/help` | the list |
+| `/exit` | leave — so does Ctrl-D |
+
+A turn that fails (an unreachable provider, say) is reported and the loop lives
+on: losing a whole conversation to one timeout is worse than the timeout.
+
+#### Managing threads
+
+```bash
+tbuk session list                    # name, turns, template, last used; most recent first
+tbuk session show go                 # the thread turn by turn, with its citations
+tbuk session show go --verbose       # …and the query retrieval actually ran
+tbuk session rename go golang        # keeps the turns
+tbuk session delete go --yes         # the thread and, by cascade, its turns
+```
+
+`show`, `rename` and `delete` never create a thread the way `ask --session`
+does — there would be nothing in it — so an unknown name is an error that names
+the threads which do exist, the typo being the usual cause. `--verbose` on
+`show` is where a planned query that fetched the wrong thing becomes visible
+rather than mysterious. Stored answers echo document text, so everything these
+commands print goes through the same control-character filter as `search` and
+`ask`.
 
 ### Encoding code for search
 
@@ -781,9 +839,11 @@ A knowledge base indexed before this change still holds chunks sized in bytes.
 | `tbuk doctor` shows `hosted API — not probed` | Provider is `claude`/`openai` (no `/health` endpoint) | Expected — hosted APIs aren't probed; set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and use `tbuk ask` to verify connectivity |
 | `tbuk ask` fails with `HTTP 4xx/5xx` | Provider rejected the request (unknown model, rate limit; a too-long prompt is normally caught locally first) | The error now includes the provider's own message — read it, then fix the model name or lower `--top` / `max_tokens`. If it *is* a context-length rejection, `llm.context_tokens` is set higher than the model's real window (or `0`) |
 | `tbuk ask` warns `compacted the retrieved text` or `dropped N of M retrieved chunks` | The rendered prompt exceeded `llm.context_tokens` minus the answer's `max_tokens` | Expected when the budget is tight — raise `llm.context_tokens` to your model's real window, lower `--top`, or lower the template's `max_tokens` |
-| `tbuk ask --session` fails with `this knowledge base predates conversation threads` | The database was created before the `sessions` tables existed | `go run ./scripts/add-sessions ~/.tbuk/tbuk.sqlite`; `tbuk doctor` reports it on the **Database / sessions** line. Nothing is re-embedded |
+| `tbuk ask --session`, `tbuk chat --session` or `tbuk session …` fails with `this knowledge base predates conversation threads` | The database was created before the `sessions` tables existed | `go run ./scripts/add-sessions ~/.tbuk/tbuk.sqlite`; `tbuk doctor` reports it on the **Database / sessions** line. Nothing is re-embedded |
 | `tbuk ask -c` fails with `no conversation threads yet` | `--continue` has nothing to continue | Start one with `tbuk ask --session NAME "…"`; the fallback to a single-shot ask is deliberately not silent |
 | `tbuk ask --session` warns `dropped the N oldest of M replayed turns` | The thread plus the retrieved chunks exceeded the context budget | Expected when the budget is tight — history is dropped before evidence. Lower `session.history_turns`, or raise `llm.context_tokens` |
+| `tbuk session show/rename/delete` fails with `no conversation thread named …` | These never create a thread — there would be nothing in it | The error lists the threads that do exist; `tbuk ask --session NAME "…"` or `tbuk chat --session NAME` creates one |
+| `tbuk chat` answered fine but `tbuk session list` shows nothing | A chat without `--session` is in memory and records nothing, by design | Start it as `tbuk chat --session NAME`, or type `/new NAME` part-way through to start recording |
 | `tbuk ask` fails with `prompt needs ~N tokens but only M are available` | Even a prompt with no retrieved context does not fit the budget | Shorten the question, raise `llm.context_tokens`, or lower the template's `max_tokens`; `tbuk doctor` shows both numbers |
 | `tbuk ingest` produces 0 chunks | File is empty or extension not supported | Check file has content; supported: `.md`, `.txt`, `.pdf`, `.html`, `.htm` |
 | Embedding server returns `HTTP 500` on a CJK/non-Latin corpus | Chunks stored before token estimation became script-aware are sized in bytes, so they hold ~3× the tokens `chunking.size` allowed | `tbuk doctor` reports it on the **Chunking / stored** line; run `tbuk reindex` to re-chunk and re-embed. If freshly indexed chunks still overrun, the server's batch is smaller than `chunking.size` — raise it (`-b 1024 -ub 1024`) or lower the size |

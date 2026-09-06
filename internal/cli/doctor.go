@@ -205,16 +205,16 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 // that it cannot hold any.
 //
 // A knowledge base built before the tables existed opens, ingests and searches
-// fine — nothing but `tbuk ask --session` touches them — so without this line
-// the first threaded question is the first anyone hears of it, as a raw
-// "no such table" (issue #157).
+// fine — only the threaded commands (`ask --session`, `chat`, `session …`)
+// touch them — so without this line the first threaded question is the first
+// anyone hears of it, as a raw "no such table" (issue #157).
 func sessionsMsg(ctx context.Context, db *sql.DB) (msg, status string) {
 	ok, err := storage.HasSessionTables(db)
 	if err != nil {
 		return "not checked (" + err.Error() + ")", ""
 	}
 	if !ok {
-		return "tables missing — ask --session cannot record a thread; run scripts/add-sessions/", "✗"
+		return "tables missing — ask --session, chat and session cannot run; run scripts/add-sessions/", "✗"
 	}
 	n, err := storage.NewSessionRepo(db).List(ctx)
 	if err != nil {

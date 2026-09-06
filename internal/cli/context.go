@@ -33,6 +33,8 @@ tbuk ask --top <N> ...           retrieve N chunks (default: 5)
 tbuk ask --no-stream ...         buffer output (useful for redirecting to a file)
 tbuk ask --session <name> ...    record the turn in a conversation thread (created if new)
 tbuk ask --continue ...          the most recently used thread (-c); an error when there is none
+tbuk chat                        REPL over the same path; no --session = in memory, saves nothing
+tbuk chat --session <name>       the same, recording into a named thread (created if new)
 tbuk search "<query>"            return matching chunks without calling the LLM
 tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 
@@ -52,6 +54,26 @@ finds one in a fenced block or an inline code span, not one bare in prose.
 tbuk ask --session go "how do slices grow?"   start (or continue) the thread "go"
 tbuk ask --session go "and maps?"             the model sees the thread; retrieval does too
 tbuk ask -c "and channels?"                   the thread used last
+tbuk chat --session go                        the same thread, interactively
+
+tbuk session list                name, turns, template, last used; most recent first
+tbuk session show <name>         the thread turn by turn, with its citations
+                                 --verbose also prints the query retrieval ran
+tbuk session rename <old> <new>  rename a thread, keeping its turns
+tbuk session delete <name>       delete a thread and its turns (--yes skips the prompt)
+
+An unknown name to ask --session or chat --session creates the thread; an
+unknown name to session show/rename/delete is an error naming the known ones.
+
+tbuk chat is a REPL over the same RunAsk path, one turn per line. Its commands:
+  /sources        the citations behind the last answer
+  /new [name]     start a fresh thread; with a name, a stored one
+  /forget         drop the replayed history, keeping the thread
+  /help           the list
+  /exit           leave (so does Ctrl-D)
+Without --session a chat is in memory and records nothing: most conversations
+are not worth keeping, and a tool that hoards every idle question makes
+session list useless within a week. /new NAME starts recording mid-chat.
 
 Without --session/-c nothing changes: ask is single-shot, same prompt as ever.
 A thread lives in the knowledge base's own DB, so --root switches both together
@@ -137,7 +159,10 @@ session.max_turns      turns kept per thread, oldest dropped first (default 0 = 
 - Claude provider: set ANTHROPIC_API_KEY; embedding must still be local (llama/ollama).
 - "this knowledge base predates conversation threads": the DB was created before
   the sessions tables existed. Fix: go run ./scripts/add-sessions <db path>.
+  Every threaded command says it — ask --session, chat --session, session *.
   tbuk doctor reports it on the Database / sessions line. No re-embedding.
+- "no conversation thread named X": session show/rename/delete never create one;
+  the error lists the threads that do exist. tbuk ask --session X "…" makes it.
 - "--continue: this knowledge base has no conversation threads yet": nothing to
   continue. Start one with tbuk ask --session NAME. Never falls back silently.
 - tbuk doctor "tokenizer: ✗ ...": the index was built under an earlier

@@ -141,11 +141,8 @@ func openThread(
 	// A knowledge base built before sessions existed reads and ingests fine, so
 	// the first threaded ask is where it surfaces — as "no such table" unless
 	// something asks first.
-	if ok, err := repo.HasTables(); err != nil {
-		return nil, nil, fmt.Errorf("check for the session tables: %w", err)
-	} else if !ok {
-		return nil, nil, fmt.Errorf("this knowledge base predates conversation threads; " +
-			"add the tables with: go run ./scripts/add-sessions <db path>")
+	if err := requireSessionTables(repo); err != nil {
+		return nil, nil, err
 	}
 
 	var (
