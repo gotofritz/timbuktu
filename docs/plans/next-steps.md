@@ -77,7 +77,7 @@ scattered across it; the matrix above points at them by group.
 
 9. **Embedding-model migration.** Changing embedding model/dimension currently forces a full `--force` re-ingest. Support re-embedding from the cached extracted text (skip re-extraction), track the embedding model per document, and detect/repair dimension mismatches gracefully.
 
-33. **Hybrid RAG — knowledge graph over the corpus.** Vector search for semantic
+33. [#153](../../../../issues/153), [#154](../../../../issues/154), [#155](../../../../issues/155) **Hybrid RAG — knowledge graph over the corpus.** Vector search for semantic
 similarity, graph traversal for exact relationships, the LLM to synthesize the
 retrieved subgraph. Concretely: a hand-written `ontology.yaml` naming the classes
 and predicates that matter, a deterministic gazetteer marking where those names

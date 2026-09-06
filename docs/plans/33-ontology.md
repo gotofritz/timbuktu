@@ -167,7 +167,7 @@ Ownership is therefore:
 | | Owner | Issues |
 |---|---|---|
 | Vocabulary tables, document grain, filter, topic CLI, digest, scoped export | **plan 32** | #115, #116, #117 |
-| Seed ontology, mention grain, triples, graph CLI, entity expansion | **plan 33** (here) | not yet filed |
+| Seed ontology, mention grain, triples, graph CLI, entity expansion | **plan 33** (here) | [#153](../../../../issues/153), [#154](../../../../issues/154), [#155](../../../../issues/155) |
 
 The rollout table below shows both, so the sequence is readable in one place;
 rows 1–3 are plan 32's to build and plan 32's to archive.
@@ -788,9 +788,9 @@ deterministically. Say so in the user guide so nobody expects otherwise.
 | 1 | `feat(labels): vocabulary, document grain, filter` — `labels` + `label_documents` + aliases in `schemaSQL` + `scripts/` script, `LabelRepo`, search/retrieval filter, `--topic` on ingest/search/ask/reindex, `topic` group | 32 | — | **A, complete.** This *is* [#115](../../../../issues/115). |
 | 2 | `feat(digest): engine and topic selector` — `RunDigest`, builtin `digest` template, injected `ChunkSelector` | 32 | 1 | A ([#116](../../../../issues/116)) |
 | 3 | `feat(export): topic-scoped archive` | 32 | 1 | A ([#117](../../../../issues/117)) |
-| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph init`/`build`/`stats`/`suggest`, `entity list/show/alias/merge`, and `digest --entity` (the second selector, which needs the mentions this PR creates) | 33 | 1, 2 | A sharpened, B started |
-| 5 | `feat(graph): opt-in LLM relation extraction` — `triples`, `triple_evidence`, `graph build --llm`, validation, run bookkeeping | 33 | 4 | B |
-| 6 | `feat(retrieval): entity expansion behind a flag` — `Filters.Expand`, expander, `--expand-entities` | 33 | 5, D7 measurement | B |
+| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph init`/`build`/`stats`/`suggest`, `entity list/show/alias/merge`, and `digest --entity` (the second selector, which needs the mentions this PR creates) | 33 | 1, 2 | A sharpened, B started ([#153](../../../../issues/153)) |
+| 5 | `feat(graph): opt-in LLM relation extraction` — `triples`, `triple_evidence`, `graph build --llm`, validation, run bookkeeping | 33 | 4 | B ([#154](../../../../issues/154)) |
+| 6 | `feat(retrieval): entity expansion behind a flag` — `Filters.Expand`, expander, `--expand-entities` | 33 | 5, D7 measurement | B ([#155](../../../../issues/155)) |
 
 Milestones 1–3 belong to plan 32 and are listed here only so the sequence reads
 in one place — they are the whole of scenario A and carry no new concepts for a
