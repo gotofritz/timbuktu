@@ -162,20 +162,44 @@ appends no turn, and it modifies no row. A corpus is put in place by
 also ingested would be two commands wearing one name, and its `--force`
 semantics alone would be a plan of their own.
 
-### D8. CI regression-testing uses a deterministic embedder, not a server
+### D8. CI scores the fixture corpus against **frozen real vectors**, not a live server
 
-`make check-ci` has no embedding server and no model, so the shipped fixture
-corpus is scored inside a Go test against a **hashing embedder**: a stable
-vector derived from the text's tokens.
+`make check-ci` has no embedding server and no model. The naive answer is a
+hashing embedder, and it is the wrong one: hashed pseudo-vectors carry no
+semantics, so the only thing they can pin is that a ranking did not move — a
+test that fails identically whether the change was a regression or an
+improvement.
 
-It is not a semantic model and the plan does not pretend otherwise — the
-absolute numbers are meaningless. What it pins is **rank stability**: a refactor
-of `FuseRRF`, of the query parser, or of chunking that reshuffles the ranking
-changes a metric and fails a test. That is the regression bar the extraction in
-[#160](../../../../issues/160) had to assert by hand, made permanent.
+Instead the fixture corpus is embedded **once** by a real model and the vectors
+are committed as testdata, keyed by `sha256` of the chunk text. The test-time
+embedder is a lookup: a cache miss is a hard failure naming the text, never a
+silent fallback, since a fallback would score half the corpus against nothing
+and still print a number.
 
-Quality, as opposed to regression, is measured against a real embedder on a real
-corpus, by the user, with `tbuk eval`.
+This is the cassette pattern that `httptest` already gives the HTTP seams,
+applied to the one dependency that cannot be faked without destroying the
+measurement. It buys real semantics, byte-identical runs, no network, and a
+suite that stays honest on a laptop with no server running.
+
+The fixture records **which model produced it** (`model`, `dimension`,
+`recorded_at`). Vectors from two models are never mixed, and a report over a
+frozen set says which one it used, so a number is always traceable to an
+instrument.
+
+Recording is `make eval-record`: a Go test behind a `record` build tag that
+reads the fixture corpus, calls the *configured real* embedder, and writes the
+file. It is not a CLI flag — the production surface owes nothing to a test
+concern — and it runs on a machine that has a model, which CI does not.
+
+**Until that recording exists**, the fixture is embedded by a TF-IDF + SVD
+(LSA) embedder fitted on the corpus itself: no downloaded weights, fully
+deterministic, and real distributional semantics rather than a hash. It is a
+weak model and the plan says so — on a trial over this repository's own docs it
+put the right section first for "how do I ask follow-up questions in a
+conversation" and for "what happens when the prompt is too big", and missed on
+"re-embed everything after changing the embedding model". Good enough to prove
+the instrument and to pin a ranking; not good enough to decide anything about
+quality. The fixture header names it, exactly as it names any other model.
 
 ### D9. The report is text for a person and JSON for a diff, and `--baseline` does the diff
 
@@ -236,6 +260,29 @@ failure.
 
 An explicit path argument bypasses the directory entirely.
 
+### D14. A case may carry the **gold query**, and the ceiling is free to measure
+
+```yaml
+    query: and maps?
+    gold_query: how do Go maps grow as they fill up?
+```
+
+`gold_query` is the standalone question a competent human would have typed in
+place of the follow-up — plan 05's Evaluation gate already names it as "the
+ceiling", it simply never noticed that measuring the ceiling costs **no model
+call at all**. Retrieval on `gold_query` is an ordinary search.
+
+That makes the cheapest pending decision cheap. Running `window` and `gold` over
+the same follow-up cases gives the gap a rewrite has left to close: if `window`
+already scores within a few points of the ceiling, `condense` cannot buy enough
+to justify a model call per question, and [#159](../../../../issues/159)'s
+deferred default is settled without ever invoking a condenser. If the gap is
+wide, that is the number that justifies spending one.
+
+The same column doubles as a regression check on the planners themselves: a
+`condense` that scores *below* the window is a broken rewrite, not a subtle one,
+and it says so without a human reading rewritten queries.
+
 ---
 
 ## Label set format
@@ -264,6 +311,7 @@ cases:
       - question: how do slices grow?
         answer: A slice grows when append finds len == cap …
     query: and maps?
+    gold_query: how do Go maps grow as they fill up?   # the ceiling (D14)
     relevant:
       - path: go/maps.md
 ```
@@ -284,9 +332,9 @@ Macro-averaged over cases; per-case numbers in `--verbose` and always in JSON.
 |---|---|
 | hit@k | 1 if any labelled passage is in the top k |
 | recall@k | labelled passages found in top k ÷ labelled passages |
-| precision@k | labelled passages found in top k ÷ retrieved |
+| precision@k | retrieved chunks satisfying some label ÷ retrieved (max k) |
 | MRR | 1 ÷ rank of the first labelled passage |
-| nDCG@k | Σ (2^grade − 1)/log₂(rank+1), over the ideal ordering |
+| nDCG@k | Σ (2^grade − 1)/log₂(rank+1), each label credited at most once |
 
 Generation, all in 0–1:
 
@@ -302,6 +350,26 @@ Precision at a k larger than the number of labels is bounded above by
 `labels/k`, which is a property of the label set and not of the retriever. The
 report says so in a footnote rather than hiding it, because the first reaction
 to `P@5 0.29` is otherwise to go looking for a bug.
+
+### What is measurable with no model at all
+
+Worth stating plainly, because it decides how much of this harness earns its
+keep in CI rather than on someone's afternoon:
+
+| Measurement | Needs |
+|---|---|
+| `--mode keyword` — every retrieval metric | nothing. FTS5 only |
+| The **gold ceiling** (D14) | nothing beyond the labels |
+| `--rewrite window` and `--rewrite off` | nothing — the window is deterministic |
+| `--mode vector` / `hybrid` over the fixture corpus | the frozen vectors (D8) |
+| `--rewrite condense`, `--expand N` | a model, once, per label set |
+| The generation stage | a model per case |
+
+Query planning changes the query **string**, and the keyword leg is a function
+of that string — so `window` versus `off` versus the gold ceiling is a real,
+free, repeatable measurement of the thing #24 is about, available in
+`make check-ci` from milestone 2 onward. Only `condense` itself needs the model,
+and by then the ceiling has already said how much room it has to win.
 
 ---
 
@@ -402,10 +470,17 @@ section (D13).
   a set whose labels match nothing warns and still reports; **no rows are
   written** (D7) — the assertion that keeps the command honest.
 - **fixture corpus (D8):** `internal/eval/testdata/corpus/` ingested into an
-  in-memory SQLite KB with the hashing embedder, scored against
-  `testdata/corpus/labels.yaml`, asserting the metrics are exactly what the
-  committed baseline says. This is the test that fails when a ranking refactor
-  changes a ranking.
+  in-memory SQLite KB and scored against `testdata/corpus/labels.yaml`, twice:
+  once in `--mode keyword`, which needs nothing at all, and once in `hybrid`
+  against the frozen vectors, which needs only the committed file. Both assert
+  the metrics the committed baseline records. These are the tests that fail
+  when a ranking refactor changes a ranking.
+- **frozen vectors:** a cache miss fails loudly and names the missing text; a
+  fixture whose header names a different model or dimension than the run is an
+  error, not a warning.
+- **gold ceiling (D14):** `window` and `gold_query` scored over the same
+  follow-up cases in `--mode keyword` — free, deterministic, and the number
+  #24 has been waiting for.
 - **integration:** extend `internal/cli/integration_test.go` with
   `init → ingest → eval --format json`, embedding faked as it already is.
 
@@ -416,7 +491,7 @@ section (D13).
 | # | PR | Delivers | Depends on |
 |---|---|---|---|
 | 1 | `feat(eval): label sets and retrieval metrics` — `internal/eval` parsing, matching, metrics, aggregation, report + `Diff`. Pure package, no CLI | the instrument | — |
-| 2 | `feat(eval): tbuk eval over the knowledge base` — the command, sweep flags, text/JSON, `--baseline`, config key, doctor section, fixture corpus + hashing-embedder regression test | #126's acceptance | 1 |
+| 2 | `feat(eval): tbuk eval over the knowledge base` — the command, sweep flags, text/JSON, `--baseline`, config key, doctor section, fixture corpus, frozen vectors + `make eval-record` (D8), keyword and ceiling metrics in `check-ci` | #126's acceptance | 1 |
 | 3 | `feat(eval): generation scoring and an LLM judge` — deterministic answer scoring, `--stage`, `--judge` | #30's split | 2 |
 | 4 | `docs(eval): measure the deferred defaults` — a `docs/eval/` set over this repo's own docs, the numbers for `window` vs `condense` (#24) and `expand` (#25), and the resulting default decision; archive this plan | the payoff | 3 |
 
@@ -424,12 +499,15 @@ section (D13).
 stages exist and report. Milestone 4 is the roadmap's #30 in the sense that
 matters: the numbers get used.
 
-**Milestone 4 is the user's to run, not this session's.** Real numbers need a
-real embedding server and a real model; a container with neither can produce the
-label set, the procedure and the reporting, and cannot produce evidence. The PR
-delivers the first three honestly and says plainly that the default flips wait
-on a run the author has to do. Inventing numbers here would be the one failure
-mode this whole plan exists to prevent.
+**Milestone 4 splits by what a measurement actually needs.** The keyword-mode
+metrics and the gold ceiling (D14) are real, free and reproducible anywhere, so
+they land in the PR as numbers. `condense`, `expand` and the generation stage
+need a model, so those runs belong to whoever has one: the PR ships the label
+set, the procedure and a `make` target, and states which rows are empty and why.
+
+No number in this repository will be produced by anything but a real run. A
+harness whose own evidence was invented is the one failure mode this entire plan
+exists to prevent, and it would be a strange way to fail.
 
 ---
 
@@ -439,7 +517,8 @@ mode this whole plan exists to prevent.
 |---|---|
 | The label set is small enough to overfit to | The report prints the case count next to every metric, and `--baseline` shows deltas rather than absolutes. A 24-case set moves 0.04 on one case; the docs say so. |
 | Labelling is work nobody does, so the harness is never used | `session_turns.query` already records real queries from real threads ([#157](../../../../issues/157)); a case is a query plus the paths that should have come back, which is a two-minute job per case with `tbuk search` open in another pane. Milestone 4 seeds a set so nobody starts from an empty file. |
-| The hashing embedder's numbers get mistaken for quality | It lives in `testdata`, it is never what `tbuk eval` uses, and the test that consumes it is named for regression. Stated in D8 and in the test's doc comment. |
+| The frozen vectors go stale against the corpus they embed | Keyed by `sha256` of the chunk text, so an edited fixture document is a cache **miss**, and a miss is a loud failure naming the text (D8) — never a quiet zero. Re-record with `make eval-record`. |
+| The stopgap LSA numbers get mistaken for quality | The fixture header names the model that produced every vector, the report prints it, and D8 says in as many words that LSA pins rankings and decides nothing. |
 | The judge becomes the thing being measured | `--judge` is opt-in, deterministic scoring always runs alongside it, the prompt is versioned code (D6), and the JSON records the judge model — so a judge upgrade is visible as a judge upgrade. |
 | Latency numbers are compared across machines | The JSON records provider, model and host; `--baseline` from a different provider prints a warning next to the latency deltas. |
 | The harness ossifies today's retrieval shape | It only reads `retrieval.RetrieveMany` and `rewrite.Planner`, both of which #160 already generalised. `--hops` is a flag, not a redesign. |
