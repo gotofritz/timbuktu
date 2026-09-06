@@ -38,6 +38,7 @@ func newAskCmd() *cobra.Command {
 		requireContext  bool
 		sessionName     string
 		continueSession bool
+		rewriteFlag     string
 	)
 
 	cmd := &cobra.Command{
@@ -53,6 +54,10 @@ func newAskCmd() *cobra.Command {
 			tmpl, err := td.Load(templateName)
 			if err != nil {
 				return fmt.Errorf("load template %q: %w", templateName, err)
+			}
+			mode, err := resolveRewriteMode(rewriteFlag, tmpl.Manifest())
+			if err != nil {
+				return err
 			}
 
 			app, err := openApp(cfg)
@@ -70,18 +75,14 @@ func newAskCmd() *cobra.Command {
 			// Resolved before the embedder and the LLM are built, so an unknown
 			// thread or a knowledge base without the tables fails on its own
 			// terms rather than behind a connection error.
-			if sessionName != "" || continueSession {
+			threaded := sessionName != "" || continueSession
+			if threaded {
 				thread, appendTurn, err := openThread(
 					cmd.Context(), app.Sessions(), cfg.Session, sessionName, continueSession, templateName)
 				if err != nil {
 					return err
 				}
-				planner, err := rewrite.New(
-					tmpl.Manifest().Retrieval.Rewrite, tmpl.Manifest().Retrieval.WindowTurns)
-				if err != nil {
-					return fmt.Errorf("template %q: %w", templateName, err)
-				}
-				opts = append(opts, WithSession(thread, appendTurn), WithPlanner(planner))
+				opts = append(opts, WithSession(thread, appendTurn))
 			}
 
 			emb, err := app.Embedder()
@@ -94,6 +95,15 @@ func newAskCmd() *cobra.Command {
 			l, err := app.LLM()
 			if err != nil {
 				return err
+			}
+
+			// After the LLM, because `condense` spends it.
+			planner, err := plannerFor(mode, tmpl.Manifest(), threaded, l.Chat, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			if planner != nil {
+				opts = append(opts, WithPlanner(planner))
 			}
 
 			return RunAsk(
@@ -118,8 +128,59 @@ func newAskCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&requireContext, "require-context", false, "abort instead of answering when no relevant context is found")
 	cmd.Flags().StringVar(&sessionName, "session", "", "record this turn in a named conversation thread (created if new)")
 	cmd.Flags().BoolVarP(&continueSession, "continue", "c", false, "continue the most recently used conversation thread")
+	cmd.Flags().StringVar(&rewriteFlag, "rewrite", "", "how the retrieval query is planned: off | window | condense (overrides the template)")
 	cmd.MarkFlagsMutuallyExclusive("session", "continue")
 	return cmd
+}
+
+// resolveRewriteMode picks the planner mode for one run: --rewrite when it was
+// given, the template's manifest otherwise.
+//
+// The flag is validated here, before the knowledge base is opened and long
+// before any model is called, which is the rule loadManifest already follows
+// for the manifest key: a typo fails at the edge, not after a round trip.
+func resolveRewriteMode(flag string, manifest prompts.Manifest) (string, error) {
+	if flag == "" {
+		return manifest.Retrieval.Rewrite, nil
+	}
+	if err := rewrite.ValidateMode(flag); err != nil {
+		return "", fmt.Errorf("--rewrite: %w", err)
+	}
+	return flag, nil
+}
+
+// plannerFor builds the query planner for one run, or returns nil when nothing
+// could change the query.
+//
+// Outside a thread the deterministic modes are identities — a window over no
+// turns is the question, and `off` is the question by definition — so a
+// single-shot ask builds no planner at all and retrieves on exactly what was
+// typed, which is what `tbuk ask` has always done. `condense` is different: it
+// strips chit-chat and fixes typos, so it is worth a call even with nothing
+// behind the question, and a template (or a flag) that asks for it gets it.
+func plannerFor(
+	mode string,
+	manifest prompts.Manifest,
+	threaded bool,
+	chat rewrite.ChatFn,
+	warn io.Writer,
+) (rewrite.Planner, error) {
+	if !threaded && mode != rewrite.ModeCondense {
+		return nil, nil
+	}
+	p, err := rewrite.New(rewrite.Options{
+		Mode:        mode,
+		WindowTurns: manifest.Retrieval.WindowTurns,
+		Chat:        chat,
+		// Query planning spends the template's model at the template's
+		// temperature; the answer's max_tokens is not its budget to spend.
+		CallOptions: llm.CallOptions{Model: manifest.Model, Temperature: manifest.Temperature},
+		Warn:        warn,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plan queries: %w", err)
+	}
+	return p, nil
 }
 
 // openThread resolves the thread this ask belongs to — named, or the most

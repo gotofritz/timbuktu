@@ -418,6 +418,28 @@ func TestManifest_rewrite(t *testing.T) {
 	}
 }
 
+// Every mode this build ships loads; the command decides whether it has a model
+// to spend on the ones that need one.
+func TestLoad_acceptsEveryRewriteMode(t *testing.T) {
+	for _, mode := range []string{"off", "window", "condense"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTemplate(t, dir, "t", map[string]string{
+				"manifest.yaml": "name: t\nretrieval:\n  rewrite: " + mode + "\n",
+				"system.tmpl":   "sys",
+				"user.tmpl":     "usr",
+			})
+			tmpl, err := prompts.NewTemplateDir(dir).Load("t")
+			if err != nil {
+				t.Fatalf("Load(%s): %v", mode, err)
+			}
+			if got := tmpl.Manifest().Retrieval.Rewrite; got != mode {
+				t.Errorf("retrieval.rewrite = %q, want %q", got, mode)
+			}
+		})
+	}
+}
+
 // A typo in the planner mode fails at template load rather than after a model
 // call, the rule normalize's filters already follow.
 func TestLoad_rejectsBadRewrite(t *testing.T) {
@@ -427,7 +449,6 @@ func TestLoad_rejectsBadRewrite(t *testing.T) {
 		want     string
 	}{
 		{"unknown mode", "name: t\nretrieval:\n  rewrite: windwo\n", "windwo"},
-		{"unshipped mode", "name: t\nretrieval:\n  rewrite: condense\n", "condense"},
 		{"negative window", "name: t\nretrieval:\n  rewrite: window\n  window_turns: -1\n", "window_turns"},
 	}
 	for _, tc := range cases {

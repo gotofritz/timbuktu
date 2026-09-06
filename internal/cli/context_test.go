@@ -136,6 +136,30 @@ func TestContextCommand_documentsContextBudget(t *testing.T) {
 	}
 }
 
+// An agent that does not know condense exists cannot reach for it, and one that
+// does not know it costs a second model call will reach for it everywhere
+// (#159).
+func TestContextCommand_documentsQueryPlanning(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := cli.New()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"context"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("context command failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"--rewrite",
+		"condense",
+		"could not condense",
+		"retrieval.window_turns",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("context output missing %q", want)
+		}
+	}
+}
+
 // The cheatsheet writes every path as ~/.tbuk, which names nothing on Windows.
 // An agent primed with it has to be told where the data root actually is there,
 // or it will invent a path (#121).

@@ -767,6 +767,55 @@ func TestRunDoctorTo_templateBudgetsOK(t *testing.T) {
 	}
 }
 
+// ── query planning (#159) ────────────────────────────────────────────────────
+
+// `condense` spends a model call on every ask that runs under it, so which
+// templates carry it is worth hearing before the token bill says so.
+func TestRunDoctorTo_namesTemplatesThatCondense(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\n")
+	writeTemplateAt(t, promptRoot, "deep", "name: deep\nretrieval:\n  rewrite: condense\n")
+	writeTemplateAt(t, promptRoot, "plain", "name: plain\nretrieval:\n  rewrite: off\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"rewrite", "condense: deep", "off: plain", "model call"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("doctor report missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The common case is every template on the deterministic default, and the line
+// says so rather than going quiet and leaving it to be inferred.
+func TestRunDoctorTo_reportsTheDefaultPlanner(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "window everywhere") {
+		t.Errorf("want the report to name the default planner:\n%s", out.String())
+	}
+}
+
 // ── CheckChunkBudget ──────────────────────────────────────────────────────────
 
 // seedChunkTexts stores one chunk per text under a single document.

@@ -33,8 +33,10 @@ tbuk ask --top <N> ...           retrieve N chunks (default: 5)
 tbuk ask --no-stream ...         buffer output (useful for redirecting to a file)
 tbuk ask --session <name> ...    record the turn in a conversation thread (created if new)
 tbuk ask --continue ...          the most recently used thread (-c); an error when there is none
+tbuk ask --rewrite <mode> ...    plan the retrieval query: off | window | condense (overrides the template)
 tbuk chat                        REPL over the same path; no --session = in memory, saves nothing
 tbuk chat --session <name>       the same, recording into a named thread (created if new)
+tbuk chat --rewrite <mode>       as on ask, for every turn of the REPL
 tbuk search "<query>"            return matching chunks without calling the LLM
 tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 
@@ -83,10 +85,35 @@ creates it. A turn stores question + planned query + answer + citation strings
 (not chunk ids, which reindex renumbers), and is written only when the answer
 completes — Ctrl-C, a provider error or an empty completion records nothing.
 
-Inside a thread, retrieval runs on a planned query, not the question as typed:
-the "window" planner prepends the last retrieval.window_turns questions
-(manifest, default 2), so "and maps?" still reaches Go's maps. Setting
-retrieval.rewrite: off in a template's manifest.yaml turns that off.
+## Planning the retrieval query
+
+Retrieval runs on a planned query, not always the question as typed. The mode
+comes from the template's manifest (retrieval.rewrite) and --rewrite overrides
+it for one run:
+
+  window     the last retrieval.window_turns questions of the thread (default
+             2) prepended to this one, so "and maps?" still reaches Go's maps.
+             The default: deterministic, no model call, cannot fail
+  off        the question exactly as typed
+  condense   one extra model call rewriting (thread, question) into a question
+             that stands on its own; also strips chit-chat and typos, so it is
+             worth something on a single-shot ask too
+
+condense spends the template's model at the template's temperature — which is
+why it is a manifest key and not a config one. It is opt-in: window stays the
+default until the retrieval eval says otherwise.
+
+A condense that errors, times out (20s), returns nothing, or returns more text
+than it was given falls back to window and warns; it never fails the ask. Only
+a bad --rewrite value is an error, and it is raised before the model is called.
+
+Without --session/-c and without --rewrite condense, no planner is built at
+all: a single-shot ask retrieves on exactly what was typed and spends exactly
+one model call, as it always has.
+
+tbuk session show <name> --verbose prints the query each turn actually ran on,
+which is where a bad rewrite becomes visible. tbuk doctor's Prompts / rewrite
+line names the templates that condense.
 
 ## Knowledge base
 
@@ -165,6 +192,17 @@ session.max_turns      turns kept per thread, oldest dropped first (default 0 = 
   the error lists the threads that do exist. tbuk ask --session X "…" makes it.
 - "--continue: this knowledge base has no conversation threads yet": nothing to
   continue. Start one with tbuk ask --session NAME. Never falls back silently.
+- "warning: could not condense the question (...) — planning the query with the
+  window instead": the condense rewrite failed, timed out, or came back empty
+  or absurd. Nothing is broken; the query was planned with the window and the
+  answer is grounded as usual. Set retrieval.rewrite: window in the manifest,
+  or pass --rewrite window, to stop trying.
+- "rewrite: unknown mode ...": a typo in --rewrite or in a manifest's
+  retrieval.rewrite. Valid values: off, window, condense. Raised at the edge —
+  template load, or flag parsing — never after a model call.
+- tbuk ask suddenly costs two model calls per question: a template sets
+  retrieval.rewrite: condense. By design. tbuk doctor's Prompts / rewrite line
+  names them; --rewrite window skips it for one run.
 - tbuk doctor "tokenizer: ✗ ...": the index was built under an earlier
   tokenizer. "default unicode61" splits every term at _; "tokenchars '_-'"
   keeps - inside a token, which locks hyphenated prose into one term.

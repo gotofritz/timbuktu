@@ -12,7 +12,6 @@ import (
 	"github.com/gotofritz/timbuktu/internal/conversation"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
-	"github.com/gotofritz/timbuktu/internal/rewrite"
 	"github.com/gotofritz/timbuktu/internal/search"
 )
 
@@ -23,6 +22,7 @@ func newChatCmd() *cobra.Command {
 		topK           int
 		requireContext bool
 		sessionName    string
+		rewriteFlag    string
 	)
 
 	cmd := &cobra.Command{
@@ -41,10 +41,9 @@ func newChatCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load template %q: %w", templateName, err)
 			}
-			planner, err := rewrite.New(
-				tmpl.Manifest().Retrieval.Rewrite, tmpl.Manifest().Retrieval.WindowTurns)
+			mode, err := resolveRewriteMode(rewriteFlag, tmpl.Manifest())
 			if err != nil {
-				return fmt.Errorf("template %q: %w", templateName, err)
+				return err
 			}
 
 			app, err := openApp(cfg)
@@ -82,6 +81,13 @@ func newChatCmd() *cobra.Command {
 				return err
 			}
 
+			// Every REPL turn is a turn in a thread, so the planner is built the
+			// way a threaded ask builds it — after the LLM, which condense spends.
+			planner, err := plannerFor(mode, tmpl.Manifest(), true, l.Chat, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+
 			return RunChat(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), ChatDeps{
 				Retrieve:     retrieval.New(search.New(app.DB(), emb)).Retrieve,
 				Chat:         l.Chat,
@@ -107,6 +113,7 @@ func newChatCmd() *cobra.Command {
 	cmd.Flags().IntVar(&topK, "top", 0, "number of chunks to retrieve (overrides manifest)")
 	cmd.Flags().BoolVar(&requireContext, "require-context", false, "abort a turn instead of answering when no relevant context is found")
 	cmd.Flags().StringVar(&sessionName, "session", "", "record the conversation in a named thread (created if new); omit to keep it in memory")
+	cmd.Flags().StringVar(&rewriteFlag, "rewrite", "", "how the retrieval query is planned: off | window | condense (overrides the template)")
 	return cmd
 }
 
