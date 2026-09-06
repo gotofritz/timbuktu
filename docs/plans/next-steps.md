@@ -67,7 +67,7 @@ scattered across it; the matrix above points at them by group.
 
 ## Big Bets — high impact, high effort
 
-5. [#145](../../../../issues/145) **Conversational context / multi-turn `ask`.** *(user-requested: context management)* `ask` is single-shot today. Introduce a session concept: keep a bounded conversation history, feed prior turns back into the prompt within the context budget, and let retrieval consider the running thread. This is the deep version of "context management" and touches `cli`, `retrieval`, `prompts`, and possibly storage (session persistence).
+5. [#145](../../../../issues/145), [#157](../../../../issues/157), [#158](../../../../issues/158) **Conversational context / multi-turn `ask`.** *(user-requested: context management)* `ask` is single-shot today. Introduce a session concept: keep a bounded conversation history, feed prior turns back into the prompt within the context budget, and let retrieval consider the running thread. This is the deep version of "context management" and touches `cli`, `retrieval`, `prompts`, and storage (session persistence: `sessions` + `session_turns` in the knowledge base's own database, so switching corpus switches threads). **Planned together with the query-planning cluster it needs — #24, #25 and #28** — since a follow-up question is not a query, and a thread the retriever cannot see is a chat that has quietly stopped being RAG. Subplan: **`05-conversational-context.md`**.
 
 6. [#127](../../../../issues/127) **`sqlite-vec` ANN index.** Vector search is a full table scan (fine below ~100k chunks). Swapping in `sqlite-vec` for approximate nearest-neighbour keeps search fast at scale. The `Searcher` interface was designed for this swap, but it's still real integration + benchmarking work.
 
@@ -167,15 +167,15 @@ the extractor.
 
 Coupled levers that raise answer quality without adding documents. Ordered by **dependency**, not just impact: **build the eval split (#30) first** so each lever is measured, not guessed. Cheap query-side wins (#24–#26) come before the heavier retrieval-shape changes (#27), the structural chunking they lean on (#29), and the agentic loop (#28). Re-ranking (#8, above) belongs to this cluster too.
 
-24. **Query rewriting.** Clean the raw question before retrieval — expand pronouns, fix spelling, drop chit-chat — via one cheap LLM call. Low effort; most valuable once `ask` is multi-turn (#5), where the live question depends on prior turns.
+24. [#159](../../../../issues/159) **Query rewriting.** Clean the raw question before retrieval — expand pronouns, fix spelling, drop chit-chat — via one cheap LLM call. Low effort; most valuable once `ask` is multi-turn (#5), where the live question depends on prior turns. **Planned in `05-conversational-context.md`** as the `condense` planner, opt-in until the eval split says it beats the free deterministic `window`, and falling back to it on any failure.
 
-25. **Query expansion (multi-query).** Retrieve on several paraphrases / synonym sets and fuse the hit-lists with the existing RRF. Cheap — reuses the hybrid + RRF plumbing already in `search`.
+25. [#160](../../../../issues/160) **Query expansion (multi-query).** Retrieve on several paraphrases / synonym sets and fuse the hit-lists with the existing RRF. Cheap — reuses the hybrid + RRF plumbing already in `search`. **Planned in `05-conversational-context.md`**: the same planner seam as #24 returning N queries instead of one, over an exported `search.FuseRRF`.
 
 26. **Hypothetical Document Embeddings (HyDE).** Generate a hypothetical answer, embed *that*, and search by it — helps when the question's wording is far from the corpus's. One extra LLM call; gate it behind eval (#30), it doesn't always win.
 
 27. **Parent-child retrieval.** Embed and search *small* child chunks for precision, but feed the enclosing *parent* (section or document) to the LLM for context. Needs a parent link in storage and pairs with structural chunking (#29). Strong precision-plus-context win.
 
-28. **Iterative / agentic retrieval.** Let `ask` run multi-hop: retrieve → reason → issue follow-up queries until it has enough, instead of one shot. Highest effort here; builds on query rewriting (#24) and conversational context (#5). A deliberate big bet.
+28. [#161](../../../../issues/161) **Iterative / agentic retrieval.** Let `ask` run multi-hop: retrieve → reason → issue follow-up queries until it has enough, instead of one shot. Highest effort here; builds on query rewriting (#24) and conversational context (#5). A deliberate big bet. **Planned in `05-conversational-context.md`** as its last milestone, off by default and carrying a written kill criterion: two hops must beat one on answer correctness at no worse than 2× median latency, or the loop does not ship.
 
 29. **Better chunking strategies.** *(user-asked: "is chunking fixed-size?")* **Current: yes — fixed-size.** `Chunker.Split` cuts every `Size*4` bytes, then snaps back to the nearest sentence separator (`. `, `\n\n`, `! `, `? `) and UTF-8 rune boundary, with token overlap. It is structure-blind. Add: Markdown-heading + code-block-aware splitting, recursive splitting, and optional semantic (embedding-distance) chunking, selectable per source. Feeds parent-child (#27); measure against eval (#30).
 
@@ -194,4 +194,4 @@ Coupled levers that raise answer quality without adding documents. Ordered by **
 3. **Feed real work:** the `Source` abstraction (#18), then the Joplin ingestor (#19) — user-blocking; Evernote `.enex` (#20) and YouTube (#21) follow the same seam.
 4. **Then measure, then tune:** land the eval split (#30) before touching the **Retrieval Quality** cluster, and take that cluster in dependency order — cheap query-side wins (#24–#26) → re-ranking (#8) / parent-child (#27) → agentic (#28), with structural chunking (#29) slotted in where parent-child needs it.
 
-The **Conversational context** big bet (#5) pairs naturally with query rewriting (#24) and agentic retrieval (#28); do it alongside that cluster rather than before it. Back all retrieval changes with the **eval split (#30)** so they are measurable before re-ranking and `sqlite-vec` land.
+The **Conversational context** big bet (#5) pairs naturally with query rewriting (#24) and agentic retrieval (#28); do it alongside that cluster rather than before it. That pairing is now written down: **`05-conversational-context.md`** covers #5, #24, #25 and #28 as one plan with five milestones, of which the first two (the session store, then `tbuk chat`) need no eval and can go early, while the three query-planning ones wait on the split. Back all retrieval changes with the **eval split (#30)** so they are measurable before re-ranking and `sqlite-vec` land.
