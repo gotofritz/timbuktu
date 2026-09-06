@@ -109,7 +109,7 @@ shelf, not a concept.
 | Attachment | asserted, document grain | derived mentions + asserted shelves |
 | LLM in the loop | none | optional, and only for triples |
 | Commands | `topic add/list/show`, `search --topic`, `digest --topic` | + `graph build`, `entity show`, `--expand-entities` |
-| Milestones | 1 | 1–4 |
+| Milestones | 1 (–3 for digest and export) | 1, then 4–6 |
 
 ### The three things that only document-grain assertion can do
 
@@ -143,8 +143,34 @@ timing is the reason this plan is worth reading before
 
 Everything else in plan 32 stands unchanged — the `EXISTS` filter (its design
 decision 3), OR semantics, normalization, lifecycle, digest map-reduce, scoped
-export, `reindex --topic`. Only the table names and the repo type change, and
-`TopicRepo` becomes a document-grain view over `LabelRepo`.
+export, `reindex --topic`. Only the table names and the repo name change:
+`TopicRepo` becomes `LabelRepo`, and every call site in plan 32 passes `""` for
+the label type.
+
+### So does plan 32 go?
+
+**No.** The topics feature is untouched, and plan 32 keeps everything this plan
+does not restate: the digest map-reduce (budget, batching, the reduce-overflow
+error), the export staging-root procedure, `--infer-topics` derivation, the
+`reindex --topic` cross-plan obligation, its nine design decisions, its CLI
+behaviour table and its tests. None of that has an equivalent here, and issues
+[#115](../../../../issues/115)–[#117](../../../../issues/117) still point at it.
+
+What goes is plan 32's **schema section** and its independence from this one.
+It has been amended in place: `labels`/`label_documents`/`label_aliases`
+instead of `topics`/`document_topics`, `LabelRepo` instead of `TopicRepo`,
+`schemaSQL` in place instead of "migration version 3", and D10's rule for
+`topic list`. Everything else in it reads exactly as before.
+
+Ownership is therefore:
+
+| | Owner | Issues |
+|---|---|---|
+| Vocabulary tables, document grain, filter, topic CLI, digest, scoped export | **plan 32** | #115, #116, #117 |
+| Seed ontology, mention grain, triples, graph CLI, entity expansion | **plan 33** (here) | not yet filed |
+
+The rollout table below shows both, so the sequence is readable in one place;
+rows 1–3 are plan 32's to build and plan 32's to archive.
 
 Two further corrections to plan 32 while someone is in there:
 
@@ -746,23 +772,26 @@ deterministically. Say so in the user guide so nobody expects otherwise.
 
 ## Rollout (one PR per milestone)
 
-| # | PR | Depends on | Serves |
-|---|---|---|---|
-| 1 | `feat(labels): vocabulary, document grain, filter` — `labels` + `label_documents` + aliases in `schemaSQL` + `scripts/` script, `LabelRepo`, search/retrieval filter, `--topic` on ingest/search/ask/reindex, `topic` group | — | **A, complete.** This *is* [#115](../../../../issues/115). |
-| 2 | `feat(digest): topic and entity selectors` — `RunDigest`, builtin `digest` template, both selectors | 1 | A ([#116](../../../../issues/116)) |
-| 3 | `feat(export): topic-scoped archive` | 1 | A ([#117](../../../../issues/117)) |
-| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph build`/`stats`/`suggest`, `entity list/show/alias/merge` | 1 | A sharpened, B started |
-| 5 | `feat(graph): opt-in LLM relation extraction` — `triples`, `triple_evidence`, `graph build --llm`, validation, run bookkeeping | 4 | B |
-| 6 | `feat(retrieval): entity expansion behind a flag` — `Filters.Expand`, expander, `--expand-entities` | 5, D7 measurement | B |
+| # | PR | Plan | Depends on | Serves |
+|---|---|---|---|---|
+| 1 | `feat(labels): vocabulary, document grain, filter` — `labels` + `label_documents` + aliases in `schemaSQL` + `scripts/` script, `LabelRepo`, search/retrieval filter, `--topic` on ingest/search/ask/reindex, `topic` group | 32 | — | **A, complete.** This *is* [#115](../../../../issues/115). |
+| 2 | `feat(digest): topic and entity selectors` — `RunDigest`, builtin `digest` template, both selectors | 32 | 1 | A ([#116](../../../../issues/116)) |
+| 3 | `feat(export): topic-scoped archive` | 32 | 1 | A ([#117](../../../../issues/117)) |
+| 4 | `feat(graph): seed ontology, mentions, gazetteer build` — `ontology.yaml`, `label_mentions`, `extraction_runs`, `graph build`/`stats`/`suggest`, `entity list/show/alias/merge` | 33 | 1 | A sharpened, B started |
+| 5 | `feat(graph): opt-in LLM relation extraction` — `triples`, `triple_evidence`, `graph build --llm`, validation, run bookkeeping | 33 | 4 | B |
+| 6 | `feat(retrieval): entity expansion behind a flag` — `Filters.Expand`, expander, `--expand-entities` | 33 | 5, D7 measurement | B |
 
-Milestones 1–3 are plan 32 rebased onto the shared substrate; they are the whole
-of scenario A and carry no new concepts for a user who never opens
-`ontology.yaml`. Milestones 4–6 are scenario B and are individually skippable.
+Milestones 1–3 belong to plan 32 and are listed here only so the sequence reads
+in one place — they are the whole of scenario A and carry no new concepts for a
+user who never opens `ontology.yaml`. Milestones 4–6 are this plan's, are
+scenario B, and are individually skippable.
 
 Each PR updates `README.md`, `docs/initial-context.md` (schema, CLI list,
 architecture — per AGENTS.md, before merge) and `docs/user-guide.md`. Plan 32 is
-archived in the milestone-3 PR; this plan is archived in the milestone-6 PR, or
-in milestone 5 if D7's kill criterion fires.
+archived in its own milestone-3 PR; this plan is archived in the milestone-6 PR,
+or in milestone 5 if D7's kill criterion fires. Milestone 1 belongs to plan 32
+but creates the tables this plan's schema section specifies — whoever builds it
+should read both.
 
 ---
 

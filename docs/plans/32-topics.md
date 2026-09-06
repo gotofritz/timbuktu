@@ -120,39 +120,72 @@ export is a *valid KB archive* that `tbuk import` restores unchanged.
    by folder structure". Only active with flag; default (no `--infer-topics`) →
    no change to existing behavior.
 
-## Schema (the next migration)
+## Schema — **amended, see subplan 33**
 
-> Numbering: `storage/migrate.go` now holds a single migration at
-> `schemaVersion` = 2, which creates the whole current schema. Topics append the
-> next entry — version 3 — rather than a "002".
+> **Two corrections to what this section used to say.** Both were written
+> before the facts they depend on changed; neither alters a single behaviour
+> described in this plan.
+>
+> 1. **Not a new migration.** `storage/migrate.go` now holds one migration at
+>    `schemaVersion` = 2 that creates the whole schema, and it is edited in
+>    place, with an existing knowledge base brought forward by a throwaway
+>    script under `scripts/` (AGENTS.md, "proof of concept"). The tables below
+>    go into `schemaSQL`. There is no version 3.
+> 2. **Not `topics` / `document_topics`.** They are `labels` /
+>    `label_documents` — one vocabulary table shared with the knowledge-graph
+>    layer, per [`33-ontology.md`](33-ontology.md) design decision D1. A topic
+>    is a label with an empty `type` and a document attachment; an entity is a
+>    label with a class and mention attachments. Same rows, same repo, same
+>    filter. The two schemas are the same size and the same work, so sharing
+>    the substrate now costs nothing and saves a migration the day a typed
+>    knowledge base arrives.
 
-
-Appended to the `migrations` slice in `storage/migrate.go`, same style as 001:
+Appended to `schemaSQL` in `storage/migrate.go`:
 
 ```sql
-CREATE TABLE IF NOT EXISTS topics (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT    NOT NULL UNIQUE
+CREATE TABLE IF NOT EXISTS labels (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Normalized (lowercased, trimmed) match key.
+    name       TEXT    NOT NULL,
+    -- As the user spells it; what the CLI prints.
+    display    TEXT    NOT NULL,
+    -- '' for a topic. A class name once subplan 33's typed labels exist;
+    -- nothing in this plan ever writes a non-empty value.
+    type       TEXT    NOT NULL DEFAULT '',
+    created_at TEXT    NOT NULL,
+    UNIQUE(name, type)
 );
 
-CREATE TABLE IF NOT EXISTS document_topics (
+CREATE TABLE IF NOT EXISTS label_documents (
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    topic_id    INTEGER NOT NULL REFERENCES topics(id)    ON DELETE CASCADE,
-    PRIMARY KEY (document_id, topic_id)
+    label_id    INTEGER NOT NULL REFERENCES labels(id)    ON DELETE CASCADE,
+    PRIMARY KEY (document_id, label_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_document_topics_topic ON document_topics(topic_id);
+CREATE INDEX IF NOT EXISTS idx_label_documents_label ON label_documents(label_id);
+
+CREATE TABLE IF NOT EXISTS label_aliases (
+    label_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    alias    TEXT    NOT NULL,          -- normalized
+    PRIMARY KEY (alias, label_id)
+);
 ```
 
-`name` stores the normalized (lowercased, trimmed) form.
+`label_aliases` is unused by this plan — subplan 33's gazetteer is its only
+reader — but it ships here so the vocabulary's shape is settled in one pass.
+
+Design decision 1 above ("first-class tables, not metadata") is unaffected:
+the argument was against encoding multi-value labels into the single-value
+`metadata` table, and a junction table is still the answer. Only its name
+changed.
 
 ## Package changes
 
 ```
 internal/storage/
-  topics.go         ← TopicRepo (new)
-  topics_test.go
-  migrate.go        ← the next migration appended
+  labels.go         ← LabelRepo (new)
+  labels_test.go
+  migrate.go        ← the new tables appended to schemaSQL (not a migration)
 
 internal/search/
   search.go         ← Options.Topics []string
@@ -177,28 +210,32 @@ internal/export/
   filter.go         ← staging-root builder for topic-scoped export (milestone 3)
 ```
 
-### TopicRepo
+### LabelRepo
 
 ```go
-type Topic struct { ID int64; Name string }
-type TopicCount struct { Topic; Documents int }
+type Label struct { ID int64; Name, Display, Type string }
+type LabelCount struct { Label; Documents int }
 
-func NewTopicRepo(db *sql.DB) *TopicRepo
+func NewLabelRepo(db *sql.DB) *LabelRepo
 
-func (r *TopicRepo) Ensure(ctx, name string) (int64, error)        // normalize, upsert by name
-func (r *TopicRepo) Tag(ctx, docID int64, topicIDs ...int64) error // idempotent INSERT OR IGNORE
-func (r *TopicRepo) Untag(ctx, docID int64, topicIDs ...int64) error
-func (r *TopicRepo) ListAll(ctx) ([]TopicCount, error)             // name + doc count, ordered by name
-func (r *TopicRepo) ListForDocument(ctx, docID int64) ([]Topic, error)
-func (r *TopicRepo) IDsForNames(ctx, names []string) ([]int64, error) // storage.ErrNotFound naming the missing topic
-func (r *TopicRepo) Rename(ctx, old, new string) error
-func (r *TopicRepo) Delete(ctx, name string) error                 // row + links
-func (r *TopicRepo) DocumentsFor(ctx, names []string) ([]Document, error) // union, for show/digest/export
+func (r *LabelRepo) Ensure(ctx, display, typ string) (int64, error) // normalize, upsert by (name, type)
+func (r *LabelRepo) Tag(ctx, docID int64, labelIDs ...int64) error  // idempotent INSERT OR IGNORE
+func (r *LabelRepo) Untag(ctx, docID int64, labelIDs ...int64) error
+func (r *LabelRepo) ListTopics(ctx) ([]LabelCount, error)           // see `topic list` below
+func (r *LabelRepo) ListForDocument(ctx, docID int64) ([]Label, error)
+func (r *LabelRepo) IDsForNames(ctx, names []string) ([]int64, error) // storage.ErrNotFound naming the missing label
+func (r *LabelRepo) Rename(ctx, old, new string) error
+func (r *LabelRepo) Delete(ctx, name string) error                  // row + links
+func (r *LabelRepo) DocumentsFor(ctx, names []string) ([]Document, error) // union, for show/digest/export
+func (r *LabelRepo) AddAlias(ctx, id int64, alias string) error     // unused here; subplan 33 reads it
 ```
 
-Errors wrap `fmt.Errorf("TopicRepo.Method: %w", err)`; misses use
+Every call site in this plan passes `""` for `typ` — topics are untyped
+labels, and nothing here creates any other kind.
+
+Errors wrap `fmt.Errorf("LabelRepo.Method: %w", err)`; misses use
 `storage.ErrNotFound`, matching the existing repos. `App` grows a memoized
-`Topics()` accessor in the composition root.
+`Labels()` accessor in the composition root.
 
 ### Search filter
 
@@ -227,7 +264,7 @@ All `--topic` flags are `StringSlice` — repeatable and comma-splitting
 | `ingest <path> [--topic x,y] [--infer-topics]` | after each successful (non-skipped, non-error) file: `Ensure` + `Tag`. Dir ingest tags every ingested file. Explicit `--topic` flags apply to all files. `--infer-topics` derives topics from directory path components (top-level root ignored; `docs/food/recipe/file.md` → `food`, `recipe`); composes with explicit topics (union). Re-ingest without flags leaves existing links alone (doc row is upserted, junction untouched). |
 | `search <q> --topic x,y` | validate names via `IDsForNames` → `Options.Topics`. Works in all three modes. |
 | `ask <q> --topic x,y` | validate → `retrieval.Filters.Topics`. Empty retrieval falls into the existing no-context warning / `--require-context` path. |
-| `topic list [--format]` | names + document counts (text/json). |
+| `topic list [--all] [--format]` | Untyped labels, plus any typed label carrying at least one document attachment — i.e. exactly what `--topic` accepts ([`33-ontology.md`](33-ontology.md) D10). Until typed labels exist that is every row, so this reads as "names + document counts", text/json. `--all` flattens the whole vocabulary with a `TYPE` column. |
 | `topic show <name> [--format]` | the topic's documents: path, title, chunk count. |
 | `topic add <path> <topic>...` | tag an already-ingested doc (path via `NormalizePath`, miss → `ErrNotFound` message). Creates topics as needed. |
 | `topic rm <path> <topic>...` | remove links; topics themselves survive. |
@@ -284,7 +321,7 @@ counts in the summary line (`exported 12 of 240 documents (topics: go)`).
 
 ## Testing (TDD, table-driven, ≥85% per package)
 
-- **storage:** the new migration applies over the current schema (and fresh); TopicRepo CRUD;
+- **storage:** the new tables are created on a fresh knowledge base and by the `scripts/` script over an existing one; LabelRepo CRUD;
   normalization (`Go` ≡ `go`); `IDsForNames` miss → `ErrNotFound`; document
   delete cascades links; `Delete`/`Rename` edge cases. In-memory SQLite.
 - **search:** topics filter on vector/keyword/hybrid; multi-topic doc returns
