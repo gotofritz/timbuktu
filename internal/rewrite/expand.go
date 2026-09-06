@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -86,7 +87,11 @@ func (e Expand) Queries(ctx context.Context, thread []conversation.Turn, questio
 		}
 		return queries, nil
 	}
-	return dedupeQueries(append(queries, paraphrases...), len(queries)+e.N), nil
+	// Copied rather than appended in place: the slice belongs to the base
+	// planner, and a caller's backing array is not ours to write into.
+	plan := make([]string, 0, len(queries)+len(paraphrases))
+	plan = append(append(plan, queries...), paraphrases...)
+	return dedupeQueries(plan, len(queries)+e.N), nil
 }
 
 // paraphrase makes the call and vets what comes back. Every error it returns is
@@ -139,13 +144,19 @@ func (e Expand) paraphrase(ctx context.Context, query string) ([]string, error) 
 	return out, nil
 }
 
+// listMarker is what a model puts in front of a query when it lists them
+// despite being told not to. The trailing space is required: it is what tells a
+// marker from a query that opens with a number, so "2024 budget report" keeps
+// its year and "3.5 inch floppy" its size.
+var listMarker = regexp.MustCompile(`^(?:\d+[.)]|[-*•])\s+`)
+
 // cleanParaphrases reduces the completion to the queries retrieval runs. A
 // model told to reply with one per line and nothing else still numbers them,
 // bullets them or quotes them; none of that is the query.
 func cleanParaphrases(s string, n int) []string {
 	out := make([]string, 0, n)
 	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimLeft(strings.TrimSpace(line), "-*•0123456789.)( \t")
+		line = listMarker.ReplaceAllString(strings.TrimSpace(line), "")
 		if line = cleanCondensed(line); line == "" {
 			continue
 		}

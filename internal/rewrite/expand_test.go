@@ -82,6 +82,12 @@ func TestExpand_cleansTheCompletion(t *testing.T) {
 			[]string{"slice growth", "append reallocation"}},
 		{"trailing whitespace", "  slice growth  \n\tappend reallocation\t",
 			[]string{"slice growth", "append reallocation"}},
+		// A list marker is a number followed by a separator and a space. The
+		// digits a query opens with are part of the query.
+		{"a query that starts with a number", "2024 budget report\n3.5 inch floppy capacity",
+			[]string{"2024 budget report", "3.5 inch floppy capacity"}},
+		{"a numbered list of numbered things", "1. 2024 budget report\n2) 1099 filing deadline",
+			[]string{"2024 budget report", "1099 filing deadline"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
