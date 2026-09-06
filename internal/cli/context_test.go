@@ -139,3 +139,30 @@ func TestContextCommand_namesTheWindowsDataRoot(t *testing.T) {
 		}
 	}
 }
+
+// The cheatsheet is what an agent reads before it runs anything, so the thread
+// flags, the config knobs and the two errors peculiar to threads have to be in
+// it (#157).
+func TestContextCommand_documentsConversationThreads(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := cli.New()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"context"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("context command failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"--session",
+		"--continue",
+		"session.history_turns",
+		"session.max_turns",
+		"retrieval.rewrite",
+		"scripts/add-sessions",
+		"no conversation threads yet",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("context output missing %q", want)
+		}
+	}
+}

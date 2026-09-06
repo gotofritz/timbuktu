@@ -147,3 +147,14 @@ func mustOpenApp(t *testing.T) *App {
 	t.Cleanup(func() { _ = app.Close() })
 	return app
 }
+
+func TestApp_Sessions_memoized(t *testing.T) {
+	app := mustOpenApp(t)
+	first := app.Sessions()
+	if first == nil {
+		t.Fatal("Sessions() = nil")
+	}
+	if app.Sessions() != first {
+		t.Fatal("Sessions() not memoized: returned different pointers")
+	}
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -99,6 +100,8 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 			if n, err := storage.NewChunkRepo(sqlDB).Count(ctx); err == nil {
 				printCheck(w, "chunks", fmt.Sprintf("%d", n), "")
 			}
+			msg, status := sessionsMsg(ctx, sqlDB)
+			printCheck(w, "sessions", msg, status)
 			_ = db.Close()
 		}
 		if info, err := os.Stat(cfg.Database.Path); err == nil {
@@ -196,6 +199,28 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	}
 
 	return nil
+}
+
+// sessionsMsg reports the conversation threads this knowledge base holds, or
+// that it cannot hold any.
+//
+// A knowledge base built before the tables existed opens, ingests and searches
+// fine — nothing but `tbuk ask --session` touches them — so without this line
+// the first threaded question is the first anyone hears of it, as a raw
+// "no such table" (issue #157).
+func sessionsMsg(ctx context.Context, db *sql.DB) (msg, status string) {
+	ok, err := storage.HasSessionTables(db)
+	if err != nil {
+		return "not checked (" + err.Error() + ")", ""
+	}
+	if !ok {
+		return "tables missing — ask --session cannot record a thread; run scripts/add-sessions/", "✗"
+	}
+	n, err := storage.NewSessionRepo(db).List(ctx)
+	if err != nil {
+		return "available", "✓"
+	}
+	return fmt.Sprintf("%d threads", len(n)), "✓"
 }
 
 // contextBudgetMsg describes the context window and what it leaves for the

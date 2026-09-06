@@ -376,3 +376,75 @@ func TestManifest_contextTokens(t *testing.T) {
 		t.Errorf("context_tokens default: want 0 (inherit config), got %d", got)
 	}
 }
+
+// Query planning spends the template's model at the template's temperature, so
+// it is configured next to top_k rather than in config.yaml (#157). Absent
+// means "inherit the default", which is the zero value.
+func TestManifest_rewrite(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "threaded", map[string]string{
+		"manifest.yaml": "name: threaded\nretrieval:\n  top_k: 5\n  rewrite: window\n  window_turns: 3\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+	writeTemplate(t, dir, "inherits", map[string]string{
+		"manifest.yaml": "name: inherits\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+
+	td := prompts.NewTemplateDir(dir)
+
+	threaded, err := td.Load("threaded")
+	if err != nil {
+		t.Fatalf("Load(threaded): %v", err)
+	}
+	if got := threaded.Manifest().Retrieval.Rewrite; got != "window" {
+		t.Errorf("retrieval.rewrite: want window, got %q", got)
+	}
+	if got := threaded.Manifest().Retrieval.WindowTurns; got != 3 {
+		t.Errorf("retrieval.window_turns: want 3, got %d", got)
+	}
+
+	inherits, err := td.Load("inherits")
+	if err != nil {
+		t.Fatalf("Load(inherits): %v", err)
+	}
+	if got := inherits.Manifest().Retrieval.Rewrite; got != "" {
+		t.Errorf("retrieval.rewrite default: want empty (inherit), got %q", got)
+	}
+	if got := inherits.Manifest().Retrieval.WindowTurns; got != 0 {
+		t.Errorf("retrieval.window_turns default: want 0 (inherit), got %d", got)
+	}
+}
+
+// A typo in the planner mode fails at template load rather than after a model
+// call, the rule normalize's filters already follow.
+func TestLoad_rejectsBadRewrite(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest string
+		want     string
+	}{
+		{"unknown mode", "name: t\nretrieval:\n  rewrite: windwo\n", "windwo"},
+		{"unshipped mode", "name: t\nretrieval:\n  rewrite: condense\n", "condense"},
+		{"negative window", "name: t\nretrieval:\n  rewrite: window\n  window_turns: -1\n", "window_turns"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTemplate(t, dir, "t", map[string]string{
+				"manifest.yaml": tc.manifest,
+				"system.tmpl":   "sys",
+				"user.tmpl":     "usr",
+			})
+			_, err := prompts.NewTemplateDir(dir).Load("t")
+			if err == nil {
+				t.Fatal("expected a load error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should name %q, got %q", tc.want, err)
+			}
+		})
+	}
+}

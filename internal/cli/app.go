@@ -23,8 +23,9 @@ type App struct {
 	cfg config.Config
 	db  *storage.DB
 
-	docs *storage.DocumentRepo
-	emb  embeddings.Embedder
+	docs     *storage.DocumentRepo
+	sessions *storage.SessionRepo
+	emb      embeddings.Embedder
 }
 
 // openApp opens the database at cfg.Database.Path and returns an App wrapping
@@ -49,6 +50,15 @@ func (a *App) Docs() *storage.DocumentRepo {
 		a.docs = storage.NewDocumentRepo(a.DB())
 	}
 	return a.docs
+}
+
+// Sessions returns the conversation-thread repository, building it once on
+// first use.
+func (a *App) Sessions() *storage.SessionRepo {
+	if a.sessions == nil {
+		a.sessions = storage.NewSessionRepo(a.DB())
+	}
+	return a.sessions
 }
 
 // Embedder returns the configured embedder, building it once on first use.

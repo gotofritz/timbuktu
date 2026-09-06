@@ -65,6 +65,14 @@ func (c Config) Validate() error {
 	if c.Ingest.EmbedConcurrency < 1 {
 		return fmt.Errorf("config: ingest embed_concurrency must be at least 1, got %d", c.Ingest.EmbedConcurrency)
 	}
+	// Both session bounds use 0 for "no bound" — no replay, no cap — so only a
+	// negative one is meaningless.
+	if c.Session.HistoryTurns < 0 {
+		return fmt.Errorf("config: session history_turns must not be negative, got %d", c.Session.HistoryTurns)
+	}
+	if c.Session.MaxTurns < 0 {
+		return fmt.Errorf("config: session max_turns must not be negative, got %d", c.Session.MaxTurns)
+	}
 	return nil
 }
 
@@ -77,6 +85,20 @@ type Config struct {
 	Preprocess PreprocessConfig `yaml:"preprocess"`
 	Ingest     IngestConfig     `yaml:"ingest"`
 	Prompts    PromptsConfig    `yaml:"prompts"`
+	Session    SessionConfig    `yaml:"session"`
+}
+
+// SessionConfig bounds a conversation thread: how much of it `tbuk ask
+// --session` replays into the prompt, and how much of it is kept at all. Both
+// are a property of the user's setup rather than of a template, which is why
+// they live here and not in a manifest.
+type SessionConfig struct {
+	// HistoryTurns is how many prior question/answer pairs are replayed.
+	// 0 replays none, which records threads without threading the prompt.
+	HistoryTurns int `yaml:"history_turns"`
+	// MaxTurns caps how many turns a thread stores, oldest dropped first.
+	// 0 keeps everything.
+	MaxTurns int `yaml:"max_turns"`
 }
 
 // PromptsConfig controls where prompt templates live.
@@ -205,6 +227,13 @@ func relativeDefaults() Config {
 		Prompts: PromptsConfig{
 			Dir: "./prompts",
 		},
+		Session: SessionConfig{
+			// Six pairs is enough for a follow-up to resolve against and small
+			// enough that history rarely crowds out the retrieved evidence —
+			// and when it would, the context guard drops history first.
+			HistoryTurns: 6,
+			MaxTurns:     0,
+		},
 	}
 }
 
@@ -320,6 +349,13 @@ func defaultConfigNode() (*yaml.Node, error) {
 
 	mapKey(mapValue(&node, "prompts"), "dir").HeadComment =
 		"dir: root directory holding prompt template folders"
+
+	mapKey(mapValue(&node, "session"), "history_turns").HeadComment =
+		"history_turns: prior question/answer pairs tbuk ask --session replays\n" +
+			"into the prompt; 0 records the thread without replaying any of it"
+
+	mapKey(mapValue(&node, "session"), "max_turns").HeadComment =
+		"max_turns: turns kept per thread, oldest dropped first; 0 keeps everything"
 
 	return &node, nil
 }

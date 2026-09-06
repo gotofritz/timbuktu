@@ -532,6 +532,10 @@ preprocess:
 
 prompts:
   dir: ./prompts       # where prompt templates live
+
+session:
+  history_turns: 6     # earlier question/answer pairs replayed in a conversation thread
+  max_turns: 0         # turns kept per thread; 0 = keep everything
 ```
 
 The paths above are **relative to the data root** — the folder holding this
@@ -551,6 +555,13 @@ keeps in flight at once for a single file. The default of `4` overlaps network
 round-trips so large ingests finish faster. Lower it to `1` (fully serial) if
 your embedding server is rate-limited or easily overloaded; raising it past a
 handful rarely helps and can trip provider rate limits. Must be at least `1`.
+
+The `session:` block bounds conversation threads (`tbuk ask --session`, see
+[Having a conversation](#having-a-conversation)). `history_turns` is how many
+earlier question/answer pairs are replayed into the prompt — six is enough for
+a follow-up to make sense without crowding out the passages retrieved for it;
+`0` still records the thread but replays none of it. `max_turns` caps how many
+turns a thread keeps, oldest dropped first; `0` keeps everything.
 
 `llm.context_tokens` is the size of the model's memory for one exchange — the
 question, the passages retrieved for it, and the answer, all together. Timbuktu
@@ -832,19 +843,28 @@ alongside the answer it still has to write. That size is `llm.context_tokens`
 in `~/.tbuk/config.yaml`, and the answer's share of it is `max_tokens`.
 
 Before calling the model, `tbuk ask` checks the prompt against that budget. If
-it is too big, it says so on stderr and makes room in two steps:
+it is too big, it says so on stderr and makes room a step at a time:
 
 ```
+warning: the prompt exceeds the model's context budget — dropped the 1 oldest of 6 replayed turns …
 warning: the prompt exceeds the model's context budget — compacted the retrieved text …
 warning: still over the context budget after compacting — dropped 2 of 10 retrieved chunks …
 ```
 
-**Compacting** squeezes the retrieved passages — repeated spaces and blank
-lines go, and so do words like "the", "a", "really", "basically" that a model
-can read straight past. Code, file paths, URLs and anything in backticks are
-left exactly as they were, and your question is never touched. **Dropping**
+**Dropping earlier turns** only happens inside a conversation thread (see
+[Having a conversation](#having-a-conversation)); a plain `tbuk ask` has no
+earlier turns to drop. It goes first, because evidence for the question you are
+asking now is worth more than a transcript of the ones before it — and you can
+always repeat what the thread forgot, while you cannot repeat a passage that was
+never fetched. **Compacting** squeezes the retrieved passages — repeated spaces
+and blank lines go, and so do words like "the", "a", "really", "basically" that
+a model can read straight past. Code, file paths, URLs and anything in backticks
+are left exactly as they were, and your question is never touched. **Dropping**
 removes the weakest matches, lowest-scoring first; the `Sources:` list then
-shows only the passages the model actually saw.
+shows only the passages the model actually saw. The most recent question and
+answer of a thread are kept to the very last, and if even they have to go,
+`ask` says so — an answer that cannot see the turn before it will read
+differently.
 
 If even a question with no passages at all would not fit, `ask` stops before
 calling the model:
@@ -898,6 +918,51 @@ the model's capacity. Start with the default and increase only if answers feel
 incomplete. Ask for more than the context window holds and the extra passages
 are compacted, then dropped again, with a warning saying so — see [Fitting the
 model's context window](#fitting-the-models-context-window).
+
+### Having a conversation
+
+By default every `tbuk ask` is a fresh start: it knows nothing about the
+question you asked a minute ago. That is usually what you want for a one-off
+lookup, and it is unchanged.
+
+For a back-and-forth, name a **thread** with `--session`:
+
+```bash
+tbuk ask --session alpha "What are the action items for Project Alpha?"
+tbuk ask --session alpha "Who is doing the second one?"
+tbuk ask -c "and when is it due?"          # -c = the thread you used last
+```
+
+The thread does two things. The model is shown the earlier questions and
+answers, so "the second one" and "it" mean something. And the *search* is
+widened with the last couple of questions, so "and when is it due?" still finds
+passages about Project Alpha — without that, a two-word follow-up matches almost
+nothing, the model answers from what it happens to remember, and you would not
+be able to tell.
+
+You do not create a thread first; naming one that does not exist starts it.
+Names are case-insensitive (`--session Alpha` and `--session alpha` are the same
+thread) and threads belong to the knowledge base, so they follow `--root` and
+survive closing the terminal, re-running `tbuk reindex`, and rebooting. `tbuk
+doctor` reports how many you have, under **Database**.
+
+`-c` / `--continue` picks up the thread you used most recently, which is what
+you actually want to type for a second question. If there are no threads at all
+it is an error rather than a silent one-off answer — the two look identical on
+screen and behave very differently.
+
+Two settings in `~/.tbuk/config.yaml` bound a thread:
+
+```yaml
+session:
+  history_turns: 6   # how many earlier question/answer pairs are replayed
+  max_turns: 0       # how many turns are kept at all; 0 = keep everything
+```
+
+A turn is recorded only when the answer finishes. Press `Ctrl-C` half way, or
+have the model fail, and nothing is written — a half-finished answer replayed
+later is worse than a missing one, because the model reads it as something it
+meant to say.
 
 ### Saving output to a file
 
@@ -1133,6 +1198,12 @@ Now use it:
 ```bash
 tbuk ask --template actions "What are all the things I need to do this week?"
 ```
+
+The `retrieval:` block takes two more keys, both of which only matter inside a
+conversation thread: `rewrite` (`window`, the default, or `off`) chooses whether
+the last few questions are folded into the search, and `window_turns` (default
+`2`) says how many. Set `rewrite: off` for a template whose questions always
+stand on their own.
 
 A manifest may also set `max_tokens` (how long the answer may get) and
 `context_tokens` (the window of the model this template runs on, overriding
@@ -1670,6 +1741,10 @@ down.
   (default 512 tokens); increase `-b` and `-ub` at server startup to go higher.
 - **Real-time or recent information.** The knowledge base knows only what you
   have ingested. Run `tbuk ingest` after updating your documents.
+- **A follow-up question without a thread.** `tbuk ask "and maps?"` on its own
+  searches for the words "and maps" and nothing else — it has no idea what came
+  before. Use `--session` / `-c` for anything conversational (see [Having a
+  conversation](#having-a-conversation)).
 
 ### Tuning chunk size
 
