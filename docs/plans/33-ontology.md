@@ -195,6 +195,14 @@ Success = scenario A is served with no model in the loop and no vocabulary file,
 scenario B rides the same tables and commands, and `--expand-entities` is only
 wired into retrieval once it is measured to help.
 
+**Reference corpora.** Milestones 1–3 are validated against the Helix editor
+documentation — small, public, and made of large multi-feature pages, which is
+exactly the shape that shows whether document-grain labels are too coarse.
+Milestones 4–6 are validated against an energy-industry corpus (turbines,
+operators, substations, PPAs), where the relations are real and a traversal has
+something to find. Both are named in `docs/plans/next-steps.md` beside their
+roadmap entries.
+
 ---
 
 ## Design decisions (and alternatives rejected)

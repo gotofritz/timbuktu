@@ -29,9 +29,9 @@ engineering cost against the current architecture.
            │  • Document cleaning pass      │    parent-child, agentic)      │
            │  • Query rewrite / expand      │  • Embedding-model migration   │
            │  • Lineage: source_uri         │  • Structural chunking         │
-           │    + inline citations          │                                │
-           │  • Topics (tags): filter,      │                                │
-           │    digest, scoped export       │                                │
+           │    + inline citations          │  • Knowledge graph: entities,  │
+           │  • Topics (tags): filter,      │    triples, entity expansion   │
+           │    digest, scoped export       │    (shares #32's tables)       │
            ├────────────────────────────────┼────────────────────────────────┤
            │  FILL-INS                      │  MONEY PITS                    │
    LOW     │  spare-time polish             │  avoid / defer                 │
@@ -61,7 +61,7 @@ scattered across it; the matrix above points at them by group.
 
 4. [#124](../../../../issues/124) **More extractors.** Add `docx`, `epub`, and source-code files to the `Extractor` backends. The interface already exists — each backend is small and independently testable.
 
-32. [#115](../../../../issues/115),  [#116](../../../../issues/116), *[#117](../../../../issues/117)*Topics (tags).** *(user-requested)* Tag documents at ingest (`--topic x,y`) or later (`tbuk topic add`); scope `search`/`ask` with `--topic`; manage with `tbuk topic list/show/rename/delete`; `tbuk topic digest <x>` synthesizes everything under a topic via the LLM; `export --topic` writes an import-compatible archive of just that slice. First-class `topics` + `document_topics` tables (migration 002), filters composing with the existing metadata pre-filter. Subplan: **`32-topics.md`**. *(Numbered 32 to continue after 31.)*
+32. [#115](../../../../issues/115), [#116](../../../../issues/116), [#117](../../../../issues/117) **Topics (tags).** *(user-requested)* Tag documents at ingest (`--topic x,y`) or later (`tbuk topic add`); scope `search`/`ask` with `--topic`; manage with `tbuk topic list/show/rename/delete`; `tbuk digest --topic <x>` synthesizes everything under a topic via the LLM; `export --topic` writes an import-compatible archive of just that slice. Filters compose with the existing metadata pre-filter. **Built on the shared `labels` + `label_documents` tables, not on topics-only tables** — see "One label substrate" below; the earlier `topics`/`document_topics` + "migration 002" design is superseded. Subplan: **`32-topics.md`**. Reference corpus: the Helix editor documentation. *(Numbered 32 to continue after 31.)*
 
 ---
 
@@ -77,9 +77,51 @@ scattered across it; the matrix above points at them by group.
 
 9. **Embedding-model migration.** Changing embedding model/dimension currently forces a full `--force` re-ingest. Support re-embedding from the cached extracted text (skip re-extraction), track the embedding model per document, and detect/repair dimension mismatches gracefully.
 
-33. **Hybrid RAG**  Use: vector search for semantic similarity, graph/ontology traversal for exact relationships, the LLM to synthesize the retrieved subgraph.
+33. **Hybrid RAG — knowledge graph over the corpus.** Vector search for semantic
+similarity, graph traversal for exact relationships, the LLM to synthesize the
+retrieved subgraph. Concretely: a hand-written `ontology.yaml` naming the classes
+and predicates that matter, a deterministic gazetteer marking where those names
+appear in chunks, opt-in LLM extraction for the relations between them, and an
+off-by-default `--expand-entities` that pulls a traversed triple's evidence chunks
+into retrieval. Subplan: **`33-ontology.md`**. Reference corpus: an energy-industry
+knowledge base (turbines, operators, substations, PPAs). Gated on the eval split
+(#30) with a written kill criterion — if expansion does not beat the baseline, the
+browse commands ship and the expander does not.
 
-34. **Ontology-guided chunking**  Instead of arbitrary document chunks, organize retrieved material around ontology entities and relations.
+34. **Ontology-guided chunking**  Instead of arbitrary document chunks, organize
+retrieved material around ontology entities and relations. Needs #33's entities to
+exist first; not planned until they do.
+
+### One label substrate — how #32 and #33 relate
+
+They are **one mechanism at two settings**, not two features, and the roadmap
+should not be read as offering a choice between them.
+
+A *topic* and an *entity* differ on two orthogonal axes — where the label attaches
+(document vs. mention) and whether it carries a type:
+
+| | Reference corpus | Attaches to | Typed? | LLM needed |
+|---|---|---|---|---|
+| **#32 topics** | Helix editor docs — `search`, `multi-cursor`, `lsp` | a document, asserted by the user | no | none |
+| **#33 graph** | Energy industry — `Turbine`, `Operator`, `PPA` | a byte range in a chunk, derived | yes, with relations | optional, and only for relations |
+
+Both live in one `labels` table. A topic is a label with an empty type and a
+document attachment; an entity is a label with a class and mention attachments.
+One vocabulary, one repo, one filter — so the two corpora above share everything
+except the parts the energy one genuinely needs more of.
+
+**Order: #32 first, and it is not a close call.** #33 cannot start until the
+`labels` tables exist, and [#115](../../../../issues/115) is what creates them.
+#32 is also the only fully deterministic half — no model in the loop, no eval
+gate — and it clears the `reindex --topic` obligation that
+[#130](../../../../issues/130) deferred. The Helix corpus validates it and
+produces the evidence for #33's premise: document-grain labels are too coarse on
+large multi-feature pages, which is exactly what mention grain fixes.
+
+Three things stay document-grain-only however far #33 goes, which is why #32 is
+never subsumed: labels that are not in the text at all (`work-notes`,
+`official-docs`), the deterministic document set that `export --topic` and
+`reindex --topic` need, and `--infer-topics` from directory structure.
 
 ---
 
