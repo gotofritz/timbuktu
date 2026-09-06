@@ -43,6 +43,10 @@ type Options struct {
 	// Warn receives the diagnostic when a rewrite is given up on and the window
 	// plans the query instead.
 	Warn io.Writer
+	// Expand is how many extra wordings of the planned query to retrieve on,
+	// fused by RRF. 0 is off. Like ModeCondense it needs a Chat, and it
+	// composes with the mode rather than replacing it.
+	Expand int
 }
 
 // Planner turns a thread and the question in front of it into the queries
@@ -96,17 +100,38 @@ func ValidateMode(mode string) error {
 }
 
 // New returns the planner named by opts.Mode, which comes from the template
-// manifest's retrieval.rewrite key (or from --rewrite for one run). An empty
-// mode is the default (window), and a WindowTurns of zero or less takes
-// DefaultWindowTurns — "no window at all" is spelled `off`.
+// manifest's retrieval.rewrite key (or from --rewrite for one run), wrapped in
+// the expansion opts.Expand asks for. An empty mode is the default (window),
+// and a WindowTurns of zero or less takes DefaultWindowTurns — "no window at
+// all" is spelled `off`.
 //
-// `condense` without a Chat is an error rather than a silent window: a template
-// asking to be rewritten by a model should not quietly get the deterministic
-// planner instead. Once built, it can no longer fail — it falls back (D6).
+// `condense` (or an expansion) without a Chat is an error rather than a silent
+// window: a template asking to be rewritten by a model should not quietly get
+// the deterministic planner instead. Once built, neither can fail — they fall
+// back (D6).
 func New(opts Options) (Planner, error) {
 	if err := ValidateMode(opts.Mode); err != nil {
 		return nil, err
 	}
+	if err := ValidateExpand(opts.Expand); err != nil {
+		return nil, err
+	}
+	base, err := newBase(opts)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Expand <= 0 {
+		return base, nil
+	}
+	if opts.Chat == nil {
+		return nil, fmt.Errorf("rewrite: expand %d needs a model to write the alternative queries", opts.Expand)
+	}
+	return Expand{Base: base, Chat: opts.Chat, Opts: opts.CallOptions, N: opts.Expand, Warn: opts.Warn}, nil
+}
+
+// newBase builds the planner the mode names, which is what expansion (when
+// asked for) paraphrases.
+func newBase(opts Options) (Planner, error) {
 	if opts.Mode == ModeOff {
 		return Window{Turns: 0}, nil
 	}

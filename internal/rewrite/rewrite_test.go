@@ -176,3 +176,90 @@ func TestNew_condenseFallbackUsesTheManifestWindow(t *testing.T) {
 		t.Errorf("fallback = %+v, want a window of %d turns", c.Fallback, rewrite.DefaultWindowTurns)
 	}
 }
+
+// Expansion composes with the mode rather than replacing it: the planner named
+// by `rewrite` plans the query, and `expand` adds wordings of it.
+func TestNew_expandWrapsTheMode(t *testing.T) {
+	p, err := rewrite.New(rewrite.Options{
+		Mode:        "window",
+		WindowTurns: 2,
+		Expand:      2,
+		Chat:        chatReturning("slice growth\nappend reallocation"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	e, ok := p.(rewrite.Expand)
+	if !ok {
+		t.Fatalf("New(expand: 2) returned %T, want rewrite.Expand", p)
+	}
+	if w, ok := e.Base.(rewrite.Window); !ok || w.Turns != 2 {
+		t.Errorf("base = %+v, want the window the mode named", e.Base)
+	}
+	got, err := p.Queries(context.Background(), thread("prior question"), "follow-up")
+	if err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	want := []string{"prior question follow-up", "slice growth", "append reallocation"}
+	if len(got) != len(want) {
+		t.Fatalf("queries = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("query %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Like condense, expansion names a model call, so a build with no model to
+// spend says so at construction rather than quietly planning one query.
+func TestNew_expandNeedsAModel(t *testing.T) {
+	if _, err := rewrite.New(rewrite.Options{Mode: "window", Expand: 2}); err == nil {
+		t.Fatal("New(expand: 2) without a chat function: want an error, got nil")
+	}
+}
+
+// Zero expansion is the planner the mode named, unwrapped: off costs nothing
+// and is not a wrapper doing nothing.
+func TestNew_expandZeroIsOff(t *testing.T) {
+	p, err := rewrite.New(rewrite.Options{Mode: "window", Expand: 0, Chat: chatReturning("x")})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, ok := p.(rewrite.Window); !ok {
+		t.Errorf("New(expand: 0) returned %T, want a plain rewrite.Window", p)
+	}
+}
+
+// Both knobs at once: condense plans the standalone question, expand paraphrases
+// that, and the fallback windows are still in place underneath.
+func TestNew_condenseAndExpand(t *testing.T) {
+	p, err := rewrite.New(rewrite.Options{
+		Mode:   "condense",
+		Expand: 1,
+		Chat:   chatReturning("how do Go maps grow?"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	e, ok := p.(rewrite.Expand)
+	if !ok {
+		t.Fatalf("New returned %T, want rewrite.Expand", p)
+	}
+	if _, ok := e.Base.(rewrite.Condense); !ok {
+		t.Errorf("base = %T, want rewrite.Condense", e.Base)
+	}
+}
+
+// A negative count is a typo, and it fails where the manifest and the flag are
+// read rather than after a model call — the rule ValidateMode already follows.
+func TestValidateExpand(t *testing.T) {
+	if err := rewrite.ValidateExpand(-1); err == nil {
+		t.Error("ValidateExpand(-1): want an error, got nil")
+	}
+	for _, n := range []int{0, 1, 5} {
+		if err := rewrite.ValidateExpand(n); err != nil {
+			t.Errorf("ValidateExpand(%d): %v", n, err)
+		}
+	}
+}

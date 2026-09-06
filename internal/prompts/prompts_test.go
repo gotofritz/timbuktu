@@ -418,6 +418,40 @@ func TestManifest_rewrite(t *testing.T) {
 	}
 }
 
+// Expansion is a count of extra wordings, and it is a template key for the same
+// reason the mode is: it spends the template's model.
+func TestManifest_expand(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "wide", map[string]string{
+		"manifest.yaml": "name: wide\nretrieval:\n  top_k: 5\n  expand: 3\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+	writeTemplate(t, dir, "plain", map[string]string{
+		"manifest.yaml": "name: plain\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+
+	td := prompts.NewTemplateDir(dir)
+
+	wide, err := td.Load("wide")
+	if err != nil {
+		t.Fatalf("Load(wide): %v", err)
+	}
+	if got := wide.Manifest().Retrieval.Expand; got != 3 {
+		t.Errorf("retrieval.expand: want 3, got %d", got)
+	}
+
+	plain, err := td.Load("plain")
+	if err != nil {
+		t.Fatalf("Load(plain): %v", err)
+	}
+	if got := plain.Manifest().Retrieval.Expand; got != 0 {
+		t.Errorf("retrieval.expand default: want 0 (off), got %d", got)
+	}
+}
+
 // Every mode this build ships loads; the command decides whether it has a model
 // to spend on the ones that need one.
 func TestLoad_acceptsEveryRewriteMode(t *testing.T) {
@@ -450,6 +484,7 @@ func TestLoad_rejectsBadRewrite(t *testing.T) {
 	}{
 		{"unknown mode", "name: t\nretrieval:\n  rewrite: windwo\n", "windwo"},
 		{"negative window", "name: t\nretrieval:\n  rewrite: window\n  window_turns: -1\n", "window_turns"},
+		{"negative expansion", "name: t\nretrieval:\n  expand: -2\n", "expand"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

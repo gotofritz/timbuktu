@@ -23,6 +23,7 @@ func newChatCmd() *cobra.Command {
 		requireContext bool
 		sessionName    string
 		rewriteFlag    string
+		expandFlag     int
 	)
 
 	cmd := &cobra.Command{
@@ -42,6 +43,10 @@ func newChatCmd() *cobra.Command {
 				return fmt.Errorf("load template %q: %w", templateName, err)
 			}
 			mode, err := resolveRewriteMode(rewriteFlag, tmpl.Manifest())
+			if err != nil {
+				return err
+			}
+			expand, err := resolveExpand(expandFlag, cmd.Flags().Changed("expand"), tmpl.Manifest())
 			if err != nil {
 				return err
 			}
@@ -82,14 +87,15 @@ func newChatCmd() *cobra.Command {
 			}
 
 			// Every REPL turn is a turn in a thread, so the planner is built the
-			// way a threaded ask builds it — after the LLM, which condense spends.
-			planner, err := plannerFor(mode, tmpl.Manifest(), true, l.Chat, cmd.ErrOrStderr())
+			// way a threaded ask builds it — after the LLM, which condense and the
+			// expansion spend.
+			planner, err := plannerFor(mode, expand, tmpl.Manifest(), true, l.Chat, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 
 			return RunChat(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), ChatDeps{
-				Retrieve:     retrieval.New(search.New(app.DB(), emb)).Retrieve,
+				Retrieve:     retrieval.New(search.New(app.DB(), emb)).RetrieveMany,
 				Chat:         l.Chat,
 				Template:     tmpl,
 				Thread:       thread,
@@ -114,6 +120,7 @@ func newChatCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&requireContext, "require-context", false, "abort a turn instead of answering when no relevant context is found")
 	cmd.Flags().StringVar(&sessionName, "session", "", "record the conversation in a named thread (created if new); omit to keep it in memory")
 	cmd.Flags().StringVar(&rewriteFlag, "rewrite", "", "how the retrieval query is planned: off | window | condense (overrides the template)")
+	cmd.Flags().IntVar(&expandFlag, "expand", 0, "extra wordings of the query to retrieve on and fuse (overrides the template; 0 = off)")
 	return cmd
 }
 

@@ -25,6 +25,10 @@ type RetrievalConfig struct {
 	// WindowTurns is how many prior questions "window" folds in. 0 inherits
 	// rewrite.DefaultWindowTurns.
 	WindowTurns int `yaml:"window_turns"`
+	// Expand is how many extra wordings of the planned query to retrieve on,
+	// fused with the original by RRF. It spends one more model call, so it is
+	// off (0) unless a template asks for it.
+	Expand int `yaml:"expand"`
 }
 
 // VariableDefault holds a default value for a template variable.
@@ -68,6 +72,9 @@ func loadManifest(path string) (Manifest, error) {
 	if m.Retrieval.WindowTurns < 0 {
 		return Manifest{}, fmt.Errorf("manifest %s: retrieval window_turns must not be negative, got %d",
 			path, m.Retrieval.WindowTurns)
+	}
+	if err := rewrite.ValidateExpand(m.Retrieval.Expand); err != nil {
+		return Manifest{}, fmt.Errorf("manifest %s: retrieval %w", path, err)
 	}
 	return m, nil
 }

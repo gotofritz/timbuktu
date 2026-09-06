@@ -100,16 +100,16 @@ func TestRunChat_replaysTheGrowingThread(t *testing.T) {
 // Retrieval sees the thread too: a follow-up is planned against it, not sent
 // bare (D5).
 func TestRunChat_retrievesOnThePlannedQuery(t *testing.T) {
-	var query string
+	var queries []string
 	rec := &recorder{}
 	deps := chatDeps(t, rec, &conversation.Thread{})
-	deps.Retrieve = capturingRetrieve(&query, nil)
+	deps.Retrieve = capturingRetrieve(&queries, nil)
 	deps.Ask = []cli.AskOption{cli.WithPlanner(rewrite.Window{Turns: 2})}
 
 	scripted(t, deps, "how do slices grow?", "and maps?", "/exit")
 
-	if query != "how do slices grow? and maps?" {
-		t.Errorf("second retrieval query = %q, want the thread folded in", query)
+	if len(queries) != 1 || queries[0] != "how do slices grow? and maps?" {
+		t.Errorf("second retrieval queries = %q, want the thread folded in", queries)
 	}
 }
 

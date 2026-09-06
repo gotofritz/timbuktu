@@ -795,6 +795,52 @@ func TestRunDoctorTo_namesTemplatesThatCondense(t *testing.T) {
 	}
 }
 
+// An expanding template is a model call plus N extra searches on every ask, so
+// doctor names the templates that do it and how many wordings each asks for.
+func TestRunDoctorTo_namesTemplatesThatExpand(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\n")
+	writeTemplateAt(t, promptRoot, "wide", "name: wide\nretrieval:\n  expand: 3\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"expand", "wide", "3"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("doctor report missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// Expansion is off unless a template asks for it, and the line says so rather
+// than going quiet — "no line" and "no expansion" would look the same.
+func TestRunDoctorTo_reportsNoExpansion(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "expand") || !strings.Contains(out.String(), "off everywhere") {
+		t.Errorf("want an expansion line saying it is off:\n%s", out.String())
+	}
+}
+
 // The common case is every template on the deterministic default, and the line
 // says so rather than going quiet and leaving it to be inferred.
 func TestRunDoctorTo_reportsTheDefaultPlanner(t *testing.T) {

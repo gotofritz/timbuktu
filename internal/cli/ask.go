@@ -23,8 +23,11 @@ import (
 	"github.com/gotofritz/timbuktu/internal/storage"
 )
 
-// retrieverFn is the signature used for testable dependency injection.
-type retrieverFn func(ctx context.Context, query string, topK int, meta map[string]string) ([]retrieval.RetrievedChunk, error)
+// retrieverFn is the signature used for testable dependency injection. It takes
+// the whole plan rather than one query, because query expansion retrieves on
+// several wordings and fuses them; a plan of one is the single-shot search it
+// always was.
+type retrieverFn func(ctx context.Context, queries []string, topK int, meta map[string]string) ([]retrieval.RetrievedChunk, error)
 
 // chatFn is the signature used for testable dependency injection.
 type chatFn func(ctx context.Context, messages []llm.Message, opts ...llm.CallOptions) (<-chan llm.Token, error)
@@ -39,6 +42,7 @@ func newAskCmd() *cobra.Command {
 		sessionName     string
 		continueSession bool
 		rewriteFlag     string
+		expandFlag      int
 	)
 
 	cmd := &cobra.Command{
@@ -56,6 +60,10 @@ func newAskCmd() *cobra.Command {
 				return fmt.Errorf("load template %q: %w", templateName, err)
 			}
 			mode, err := resolveRewriteMode(rewriteFlag, tmpl.Manifest())
+			if err != nil {
+				return err
+			}
+			expand, err := resolveExpand(expandFlag, cmd.Flags().Changed("expand"), tmpl.Manifest())
 			if err != nil {
 				return err
 			}
@@ -97,8 +105,8 @@ func newAskCmd() *cobra.Command {
 				return err
 			}
 
-			// After the LLM, because `condense` spends it.
-			planner, err := plannerFor(mode, tmpl.Manifest(), threaded, l.Chat, cmd.ErrOrStderr())
+			// After the LLM, because `condense` and the expansion spend it.
+			planner, err := plannerFor(mode, expand, tmpl.Manifest(), threaded, l.Chat, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -109,7 +117,7 @@ func newAskCmd() *cobra.Command {
 			return RunAsk(
 				cmd.Context(),
 				os.Stdout,
-				ret.Retrieve,
+				ret.RetrieveMany,
 				l.Chat,
 				tmpl,
 				question,
@@ -129,6 +137,7 @@ func newAskCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sessionName, "session", "", "record this turn in a named conversation thread (created if new)")
 	cmd.Flags().BoolVarP(&continueSession, "continue", "c", false, "continue the most recently used conversation thread")
 	cmd.Flags().StringVar(&rewriteFlag, "rewrite", "", "how the retrieval query is planned: off | window | condense (overrides the template)")
+	cmd.Flags().IntVar(&expandFlag, "expand", 0, "extra wordings of the query to retrieve on and fuse (overrides the template; 0 = off)")
 	cmd.MarkFlagsMutuallyExclusive("session", "continue")
 	return cmd
 }
@@ -149,28 +158,47 @@ func resolveRewriteMode(flag string, manifest prompts.Manifest) (string, error) 
 	return flag, nil
 }
 
+// resolveExpand picks how many extra wordings to retrieve on: --expand when it
+// was given, the template's manifest otherwise. The flag has to be asked
+// whether it was set, since 0 is both its zero value and a meaningful answer —
+// "expand nothing", which is how a template's expansion is switched off for one
+// run.
+func resolveExpand(flag int, changed bool, manifest prompts.Manifest) (int, error) {
+	if !changed {
+		return manifest.Retrieval.Expand, nil
+	}
+	if err := rewrite.ValidateExpand(flag); err != nil {
+		return 0, fmt.Errorf("--expand: %w", err)
+	}
+	return flag, nil
+}
+
 // plannerFor builds the query planner for one run, or returns nil when nothing
 // could change the query.
 //
 // Outside a thread the deterministic modes are identities — a window over no
 // turns is the question, and `off` is the question by definition — so a
 // single-shot ask builds no planner at all and retrieves on exactly what was
-// typed, which is what `tbuk ask` has always done. `condense` is different: it
-// strips chit-chat and fixes typos, so it is worth a call even with nothing
-// behind the question, and a template (or a flag) that asks for it gets it.
+// typed, which is what `tbuk ask` has always done. `condense` and an expansion
+// are different: one strips chit-chat and fixes typos, the other reaches the
+// passages the question's own vocabulary missed, and both are worth a call with
+// nothing behind the question — so a template (or a flag) asking for either
+// gets it, thread or no thread.
 func plannerFor(
 	mode string,
+	expand int,
 	manifest prompts.Manifest,
 	threaded bool,
 	chat rewrite.ChatFn,
 	warn io.Writer,
 ) (rewrite.Planner, error) {
-	if !threaded && mode != rewrite.ModeCondense {
+	if !threaded && mode != rewrite.ModeCondense && expand <= 0 {
 		return nil, nil
 	}
 	p, err := rewrite.New(rewrite.Options{
 		Mode:        mode,
 		WindowTurns: manifest.Retrieval.WindowTurns,
+		Expand:      expand,
 		Chat:        chat,
 		// Query planning spends the template's model at the template's
 		// temperature; the answer's max_tokens is not its budget to spend.
@@ -283,6 +311,25 @@ func trimToTokenBudget(chunks []retrieval.RetrievedChunk, budget int) []retrieva
 		}
 	}
 	return chunks
+}
+
+// queryJoiner separates the queries a turn ran on where they are stored and
+// printed as one string. A plan is a handful of short queries and this keeps
+// `session show --verbose` to one line per turn; a query containing the
+// separator reads a little oddly there and nowhere else.
+const queryJoiner = " | "
+
+// nonBlank drops the queries there is nothing to search for. A blank query
+// matches the whole corpus in rank order, so one blank paraphrase would fuse
+// noise into every answer.
+func nonBlank(queries []string) []string {
+	out := make([]string, 0, len(queries))
+	for _, q := range queries {
+		if strings.TrimSpace(q) != "" {
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // AskOption configures optional RunAsk behaviour.
@@ -555,18 +602,21 @@ func RunAsk(
 	if cfg.thread != nil {
 		history = cfg.thread.Turns
 	}
-	query := question
+	queries := []string{question}
 	if cfg.planner != nil {
-		queries, err := cfg.planner.Queries(ctx, history, question)
+		planned, err := cfg.planner.Queries(ctx, history, question)
 		if err != nil {
 			return fmt.Errorf("plan query: %w", err)
 		}
-		if len(queries) > 0 && strings.TrimSpace(queries[0]) != "" {
-			query = queries[0]
+		// A plan of nothing usable leaves the question standing: an empty query
+		// matches the whole corpus in rank order, which is worse than the words
+		// the user chose.
+		if usable := nonBlank(planned); len(usable) > 0 {
+			queries = usable
 		}
 	}
 
-	chunks, err := retrieve(ctx, query, k, nil)
+	chunks, err := retrieve(ctx, queries, k, nil)
 	if err != nil {
 		return fmt.Errorf("retrieve: %w", err)
 	}
@@ -761,7 +811,7 @@ func RunAsk(
 		}
 		if err := cfg.appendTurn(ctx, cfg.thread.ID, conversation.Turn{
 			Question:  question,
-			Query:     query,
+			Query:     strings.Join(queries, queryJoiner),
 			Answer:    strings.TrimRight(answer.String(), "\n"),
 			Citations: citations,
 		}); err != nil {

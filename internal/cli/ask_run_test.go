@@ -56,8 +56,8 @@ output: text
 	return tmpl
 }
 
-func mockRetrieve(chunks []retrieval.RetrievedChunk, err error) func(context.Context, string, int, map[string]string) ([]retrieval.RetrievedChunk, error) {
-	return func(_ context.Context, _ string, _ int, _ map[string]string) ([]retrieval.RetrievedChunk, error) {
+func mockRetrieve(chunks []retrieval.RetrievedChunk, err error) func(context.Context, []string, int, map[string]string) ([]retrieval.RetrievedChunk, error) {
+	return func(_ context.Context, _ []string, _ int, _ map[string]string) ([]retrieval.RetrievedChunk, error) {
 		return chunks, err
 	}
 }
