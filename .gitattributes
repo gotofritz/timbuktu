@@ -1,0 +1,9 @@
+# Normalise line endings in the index and check every text file out with LF,
+# on Windows too. The test suite runs on windows-latest (issue #121), and a
+# CRLF checkout would rewrite fixtures, shell scripts and Go sources under the
+# runner's default core.autocrlf=true — changing bytes the tests hash and
+# compare.
+* text=auto eol=lf
+
+# Binary fixtures must never be touched by the text filters.
+*.pdf binary

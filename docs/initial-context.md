@@ -58,6 +58,14 @@ templates, config file) hangs off a single *root*, `config.DefaultRoot()`
 re-base all paths under `DIR`, and the no-arg `Defaults()`/`Load()`/`DefaultYAML()`
 are thin wrappers rooted at `DefaultRoot()`.
 
+**Home directory.** `DefaultRoot()` derives `~/.tbuk` from `os.UserHomeDir()`,
+which reads `$HOME` on Unix and `%USERPROFILE%` on Windows; when neither is set
+it returns a *relative* `.tbuk`, which follows the working directory. `tbuk
+doctor` prints the resolved home and flags that fallback under **Platform**
+(`cli.CheckHome`). Test fixtures must set both variables — the `setHome` helper
+in `internal/cli` and `internal/config` does — or the Windows suite writes into
+the real profile directory.
+
 **Per-component paths (relative or absolute).** Each data path in the config may
 be **relative to the root** or **absolute**. `Config.ResolvePaths(root)` rebases
 every relative data path onto the root and leaves absolute paths and empty values
@@ -932,6 +940,7 @@ tbuk import templates <archive>  prompt templates only; no embedding provider ne
 ## Patterns
 
 - Table-driven tests with `testing` stdlib only
+- CI runs the whole suite on `ubuntu-latest`, `macos-latest` and `windows-latest` (`.github/workflows/ci.yml`) — every platform a release binary ships for. Documents are keyed by absolute path, so separators, drive letters and home resolution are only ever wrong on Windows. Consequences for tests: `setHome` sets `HOME` *and* `USERPROFILE`; a "not found" message is taken from the OS (`notFoundText`) instead of hardcoded; `$EDITOR` is faked by re-executing the test binary through `TestMain` rather than by writing a `/bin/sh` script; POSIX-only assertions (the `0o600`/`0o700` modes) sit behind the build-tagged `wantPerm` helper (`perm_unix_test.go` / `perm_other_test.go`) so the test still runs off Unix instead of being skipped; and `.gitattributes` pins LF so a CRLF checkout cannot rewrite fixtures under the runner's `core.autocrlf`
 - HTTP providers mocked with `net/http/httptest`
 - In-memory SQLite (`:memory:`) for storage tests
 - Unit tests inject fakes at package seams; one CLI end-to-end test (`internal/cli/integration_test.go`) drives the real root command (`init → ingest → search → meta → stats → delete`) with only the embedding server faked, so the production wiring — `DefaultFileExtractor`, composition root, exit codes — is exercised assembled. `Execute`'s non-zero exit is checked via a re-exec-self subprocess (it calls `os.Exit`)
