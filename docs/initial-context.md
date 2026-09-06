@@ -13,7 +13,7 @@ cmd/tbuk/           cobra entry point
 
 internal/
   config/           Config struct, Load(), Validate(), Defaults(), DefaultYAML(), ExportYAML()
-  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, reindex, search, find, meta, export, import)
+  cli/              cobra root + subcommands (init, version, doctor, preprocess, ingest, reindex, search, find, meta, ask, chat, session, export, import)
   storage/          DB wrapper, RunMigrations, DocumentRepo, ChunkRepo, MetadataRepo, SessionRepo
   preprocess/       Extractor interface + backends; DetectMIME; SHA256 helpers
   chunking/         Chunker.Split — sentence-boundary search (rune-safe), Size/Overlap in tokens
@@ -770,6 +770,67 @@ teed into a `strings.Builder` **only when a session is active**, so the
 single-shot path allocates exactly what it did before; under a normalize
 pipeline the stored text is the normalized output — what the user saw.
 
+#### `tbuk chat` and the session commands
+
+`chat.go` is a REPL over `RunAsk` — the thread and the planner are the ones
+`ask --session` uses, so a chat and a threaded ask differ in how they are typed
+and in nothing else:
+
+```go
+type ChatDeps struct {
+    Retrieve retrieverFn; Chat chatFn; Template *prompts.Template
+    Thread *conversation.Thread          // never nil; an unsaved chat gets an in-memory one
+    Append AppendTurnFn                  // nil = unsaved: replayed, never written down
+    Open   func(ctx context.Context, name string) (*conversation.Thread, AppendTurnFn, error)
+    HistoryTurns int; Vars []string; TopK int; Ask []AskOption
+}
+
+func RunChat(ctx context.Context, in io.Reader, out io.Writer, deps ChatDeps) error
+```
+
+The loop hands `RunAsk` a *wrapper* around `deps.Append` rather than the store
+itself, and re-bounds `thread.Turns` with `conversation.Replay` after each
+completed turn. Without that the second question would be asked with the first
+already forgotten, which is the one thing a REPL is for. `deps.Open` is
+`openThread` curried with the repo, so `/new NAME` creates or resumes a stored
+thread the same way `--session NAME` does; it is nil when the knowledge base
+predates the tables, and `/new NAME` then says so rather than pretending to save.
+
+**Without `--session` a chat records nothing** (`Append` nil). Most
+conversations are not worth keeping, and a tool that accumulates every idle
+question makes `session list` useless within a week. The command language is
+`/sources`, `/new [name]`, `/forget`, `/help`, `/exit` and nothing else —
+anything larger is a shell. A turn that errors is printed and the loop
+continues: one unreachable provider should not cost the whole conversation.
+
+`session.go` holds the read/manage half, each with an exported `Run…` core over
+`*storage.SessionRepo`:
+
+```go
+func RunSessionList(ctx, out, repo) error
+func RunSessionShow(ctx, out, repo, name string, verbose bool) error
+func RunSessionRename(ctx, out, repo, oldName, newName string) error
+func RunSessionDelete(ctx, in, out, repo, name string, yes bool) error
+```
+
+Unlike `ask --session`, none of them creates a thread — there would be nothing
+in it — so `lookupSession` reports a miss as an error naming the threads that do
+exist. `rename` checks the destination first, so a collision reads as one rather
+than as a driver constraint error, and two conversations are never merged.
+`delete` reuses `ConfirmYes` like `tbuk delete`. `show --verbose` prints
+`session_turns.query`, which is where a planned query that fetched the wrong
+thing becomes visible rather than mysterious.
+
+`requireSessionTables` (in `session.go`) is the single gate every threaded
+command passes — `ask --session`'s `openThread`, `chat`, and each `session`
+subcommand — so a knowledge base built before #157 gets the script's name rather
+than a raw `no such table`.
+
+Stored answers echo document text, so `session show` and the REPL write through
+`sanitizeWriter` / `stripControl` exactly as `search` and `ask` do. Questions
+are stored verbatim and sanitized on the way *out*, so the store stays a
+faithful record of what was asked.
+
 #### Output normalization
 
 Long generations drift away from whatever shape `system.tmpl` asked for —
@@ -1036,6 +1097,11 @@ tbuk find <key=value>...       find docs by metadata filters (--limit N, --forma
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document
 tbuk ask <question>            RAG query: retrieve chunks → render template → stream LLM answer (--template qa, --var k=v, --top N, --no-stream, --require-context, --session NAME, -c/--continue)
+tbuk chat                      REPL over the same path, one turn per line (--template, --var, --top, --require-context, --session NAME); no --session = in memory, records nothing
+tbuk session list              conversation threads: name, turns, template, last used (most recent first)
+tbuk session show <name>       the thread turn by turn with its citations (--verbose adds the query retrieval ran)
+tbuk session rename <old> <new>  rename a thread, keeping its turns
+tbuk session delete <name>     delete a thread and, by cascade, its turns (--yes skips prompt)
 tbuk template list             list prompt templates in ~/.tbuk/prompts/
 tbuk template show <name>      print manifest + template files to stdout
 tbuk template edit <name>      open manifest in $EDITOR
@@ -1059,7 +1125,7 @@ tbuk import templates <archive>  prompt templates only; no embedding provider ne
 - A test is build-tagged out of a platform only when the case it covers cannot arise there — `export_unix_test.go` holds the named-pipe test and the two ENOTDIR stat-error tests, because Windows answers that stat with `ERROR_PATH_NOT_FOUND`, which Go maps to `fs.ErrNotExist`, making "component absent" the correct reading. Everything else runs everywhere
 - HTTP providers mocked with `net/http/httptest`
 - In-memory SQLite (`:memory:`) for storage tests
-- Unit tests inject fakes at package seams; one CLI end-to-end test (`internal/cli/integration_test.go`) drives the real root command (`init → ingest → search → meta → stats → delete`) with only the embedding server faked, so the production wiring — `DefaultFileExtractor`, composition root, exit codes — is exercised assembled. `Execute`'s non-zero exit is checked via a re-exec-self subprocess (it calls `os.Exit`)
+- Unit tests inject fakes at package seams; two CLI end-to-end tests (`internal/cli/integration_test.go`) drive the real root command with only the embedding and chat endpoints faked, so the production wiring — `DefaultFileExtractor`, composition root, exit codes — is exercised assembled: `init → ingest → search → meta → stats → delete`, and `init → ingest → ask --session → ask -c → chat --session → session show → session delete`. `Execute`'s non-zero exit is checked via a re-exec-self subprocess (it calls `os.Exit`)
 - `fmt.Errorf("context: %w", err)` for error wrapping
 - Sentinel errors (e.g. `storage.ErrNotFound`) matched with `errors.Is`, not string comparison
 - No `init()`, no global mutable state, no `interface{}` — CLI config is loaded in the root `PersistentPreRunE` and threaded through the cobra command context (`configFrom`/`configPathFrom`), not package-level vars

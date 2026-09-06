@@ -556,8 +556,8 @@ round-trips so large ingests finish faster. Lower it to `1` (fully serial) if
 your embedding server is rate-limited or easily overloaded; raising it past a
 handful rarely helps and can trip provider rate limits. Must be at least `1`.
 
-The `session:` block bounds conversation threads (`tbuk ask --session`, see
-[Having a conversation](#having-a-conversation)). `history_turns` is how many
+The `session:` block bounds conversation threads (`tbuk ask --session` and
+`tbuk chat`, see [Having a conversation](#having-a-conversation)). `history_turns` is how many
 earlier question/answer pairs are replayed into the prompt — six is enough for
 a follow-up to make sense without crowding out the passages retrieved for it;
 `0` still records the thread but replays none of it. `max_turns` caps how many
@@ -963,6 +963,79 @@ A turn is recorded only when the answer finishes. Press `Ctrl-C` half way, or
 have the model fail, and nothing is written — a half-finished answer replayed
 later is worse than a missing one, because the model reads it as something it
 meant to say.
+
+### Chatting instead of typing `tbuk ask` each time
+
+`tbuk chat` is the same thing without the retyping: one question per line, until
+you leave.
+
+```bash
+tbuk chat                     # a conversation that is not saved
+tbuk chat --session alpha     # the "alpha" thread, saved as you go
+```
+
+```
+tbuk chat — thread "alpha".
+/help for commands, /exit to leave.
+
+> What are the action items for Project Alpha?
+Three are listed in the January review: …
+
+Sources:
+  [1] /notes/alpha-review.md §2
+
+> Who is doing the second one?
+…
+```
+
+**Without `--session`, a chat is not saved.** The conversation still works
+normally — follow-ups resolve exactly as they do above — it just leaves nothing
+behind when you leave. That is deliberate: most conversations are not worth
+keeping, and a tool that quietly filed every idle question would make your list
+of threads useless within a week. If a chat turns out to be worth keeping,
+`/new NAME` starts recording from that point.
+
+Five commands, and no more:
+
+| Type | To |
+|---|---|
+| `/sources` | see the citations behind the last answer again |
+| `/new` | start over in a fresh, unsaved conversation |
+| `/new NAME` | switch to the saved thread `NAME`, starting it if it is new |
+| `/forget` | make it forget the conversation so far, without deleting anything |
+| `/help` | list these |
+| `/exit` | leave (`Ctrl-D` does the same) |
+
+`/forget` is the one to reach for when you change subject: the earlier questions
+stop being replayed and stop widening the search, so a new topic is not dragged
+back towards the old one. Nothing already recorded is lost.
+
+If a question fails — the model server is down, say — the error is printed and
+the conversation carries on. One timeout should not cost you the thread.
+
+### Looking after your threads
+
+```bash
+tbuk session list                    # what you have, most recently used first
+tbuk session show alpha              # the whole conversation, with its sources
+tbuk session show alpha --verbose    # …and what was actually searched for, per turn
+tbuk session rename alpha q1-review  # keeps every turn
+tbuk session delete alpha            # asks first; --yes skips the question
+```
+
+`tbuk session show --verbose` answers "why did it fetch *that*?". Alongside each
+question it prints the search that was actually run — your follow-up with the
+previous questions folded in — which is usually where a surprising answer is
+explained.
+
+Unlike `tbuk ask --session`, these four never invent a thread: a name you have
+not used is an error, and it lists the threads you do have, since the usual
+cause is a typo.
+
+One thing worth knowing before you share a knowledge base: `tbuk export` copies
+the database whole, so your threads travel inside the archive. (`tbuk import`
+never reads them, so they do not land on anyone else's machine — but the text is
+in the file.) `tbuk session delete` first if that matters.
 
 ### Saving output to a file
 
@@ -1743,8 +1816,11 @@ down.
   have ingested. Run `tbuk ingest` after updating your documents.
 - **A follow-up question without a thread.** `tbuk ask "and maps?"` on its own
   searches for the words "and maps" and nothing else — it has no idea what came
-  before. Use `--session` / `-c` for anything conversational (see [Having a
-  conversation](#having-a-conversation)).
+  before. Use `--session` / `-c`, or `tbuk chat`, for anything conversational
+  (see [Having a conversation](#having-a-conversation)).
+- **A `tbuk chat` you forgot to name.** Without `--session` a chat is not saved,
+  by design; when you leave it, it is gone. `/new NAME` part-way through starts
+  recording from there, but does not go back for what came before.
 
 ### Tuning chunk size
 

@@ -73,24 +73,39 @@ func TestContextCommand_advertisesOnlyRealFlags(t *testing.T) {
 	}
 
 	// Lines look like: "tbuk import <archive>   restore … (--merge, --force-data)"
-	line := regexp.MustCompile(`(?m)^tbuk (\w+)\b.*$`)
+	// The second word is captured too, so a two-level command (session show,
+	// import data) is checked against the subcommand that owns its flags.
+	line := regexp.MustCompile(`(?m)^tbuk (\w+)(?: (\w+))?\b.*$`)
 	flag := regexp.MustCompile(`--([a-z][a-z0-9-]*)`)
 	checked := 0
 	for _, m := range line.FindAllStringSubmatch(out.String(), -1) {
 		sub, ok := byName[m[1]]
 		if !ok {
-			continue // sub-subcommands (template list, meta set) are described inline
+			continue // not a command at all (a prose line that opens with "tbuk")
+		}
+		// The chain the flags may live on: the subcommand named, its parent, and
+		// the root's persistent flags.
+		chain := []*cobra.Command{sub}
+		for _, c := range sub.Commands() {
+			if c.Name() == m[2] {
+				chain = append([]*cobra.Command{c}, chain...)
+				break
+			}
 		}
 		for _, f := range flag.FindAllStringSubmatch(m[0], -1) {
 			name := f[1]
 			// LocalFlags merges a command's own persistent flags; Flags does
 			// not until it has parsed, which would hide a real mismatch on any
 			// command that declares its flags persistently (import does).
-			if sub.LocalFlags().Lookup(name) != nil || cli.New().PersistentFlags().Lookup(name) != nil {
+			found := cli.New().PersistentFlags().Lookup(name) != nil
+			for _, c := range chain {
+				found = found || c.LocalFlags().Lookup(name) != nil
+			}
+			if found {
 				checked++
 				continue
 			}
-			t.Errorf("context advertises --%s for %q, which has no such flag", name, m[1])
+			t.Errorf("context advertises --%s for %q, which has no such flag", name, strings.TrimSpace(m[1]+" "+m[2]))
 		}
 	}
 	if checked == 0 {

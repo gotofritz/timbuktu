@@ -130,6 +130,70 @@ func TestIngestCommand_archivesRawSource(t *testing.T) {
 	}
 }
 
+// TestCLI_conversationEndToEnd drives a whole thread through the assembled root
+// command — init → ingest → ask --session → ask -c → session show → chat →
+// session delete — with only the embedding and chat endpoints faked. It is the
+// path a person actually walks, and the one place the store, the planner, the
+// REPL and the session commands are exercised against each other.
+func TestCLI_conversationEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	srv := fakeLLMServer(t)
+
+	mustRun(t, "init")
+	writeConfig(t, filepath.Join(home, ".tbuk", "config.yaml"), config.Config{
+		Database:   config.DatabaseConfig{Path: filepath.Join(home, ".tbuk", "tbuk.sqlite")},
+		LLM:        config.LLMConfig{Provider: "llama", MaxTokens: 256, BaseURL: srv.URL},
+		Embedding:  config.EmbeddingConfig{Provider: "llama", Dimension: 4, BaseURL: srv.URL},
+		Chunking:   config.ChunkingConfig{Size: 800, Overlap: 100},
+		Preprocess: config.PreprocessConfig{OutputDir: filepath.Join(home, ".tbuk", "extracted")},
+		Ingest:     config.IngestConfig{EmbedConcurrency: 1},
+		Prompts:    config.PromptsConfig{Dir: filepath.Join(home, ".tbuk", "prompts")},
+		Session:    config.SessionConfig{HistoryTurns: 6},
+	})
+
+	fixture := filepath.Join(home, "go.md")
+	writeFile(t, fixture, "# Go\n\nSlices grow by doubling their capacity. Maps rehash when they fill.\n")
+	mustRun(t, "ingest", fixture)
+
+	mustRun(t, "ask", "--session", "go", "how do slices grow?")
+	mustRun(t, "ask", "-c", "and maps?")
+	mustRunStdin(t, "and channels?\n/exit\n", "chat", "--session", "go")
+
+	if out := mustRun(t, "session", "list"); !strings.Contains(out, "go") {
+		t.Fatalf("session list = %q, want the thread the ask created", out)
+	}
+
+	// --verbose shows the query retrieval ran, which is where the thread being
+	// folded into a follow-up becomes visible.
+	out := mustRun(t, "session", "show", "go", "--verbose")
+	for _, want := range []string{"how do slices grow?", "and maps?", "and channels?", "go.md"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("session show is missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "[query] how do slices grow? and maps?") {
+		t.Fatalf("the follow-up did not retrieve on the folded query:\n%s", out)
+	}
+
+	// Plain Enter is not a yes, and the thread survives it.
+	if out := mustRunStdin(t, "\n", "session", "delete", "go"); !strings.Contains(out, "Aborted") {
+		t.Fatalf("session delete without confirmation = %q", out)
+	}
+	if out := mustRun(t, "session", "show", "go"); !strings.Contains(out, "and channels?") {
+		t.Fatalf("the aborted delete lost the thread:\n%s", out)
+	}
+
+	mustRun(t, "session", "delete", "go", "--yes")
+	if out := mustRun(t, "session", "list"); !strings.Contains(out, "No conversation threads") {
+		t.Fatalf("session list after delete = %q", out)
+	}
+	// Turns go with the thread, by the schema's cascade.
+	if out := mustRun(t, "doctor"); !strings.Contains(out, "0 threads") {
+		t.Fatalf("doctor after delete = %q, want no threads left", out)
+	}
+}
+
 // TestExecute_success covers the exported Execute wrapper on a non-erroring
 // command (it must not call os.Exit).
 func TestExecute_success(t *testing.T) {
@@ -185,7 +249,22 @@ func mustRun(t *testing.T, args ...string) string {
 	return out
 }
 
+// mustRunStdin is mustRun with a scripted stdin, for the commands that read one.
+func mustRunStdin(t *testing.T, stdin string, args ...string) string {
+	t.Helper()
+	out, err := runRootStdin(t, stdin, args...)
+	if err != nil {
+		t.Fatalf("run %v: %v\noutput:\n%s", args, err, out)
+	}
+	return out
+}
+
 func runRoot(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	return runRootStdin(t, "", args...)
+}
+
+func runRootStdin(t *testing.T, stdin string, args ...string) (string, error) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -199,6 +278,7 @@ func runRoot(t *testing.T, args ...string) (string, error) {
 	root.SetArgs(args)
 	root.SetOut(w)
 	root.SetErr(w)
+	root.SetIn(strings.NewReader(stdin))
 	runErr := root.ExecuteContext(context.Background())
 
 	_ = w.Close()
