@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -73,6 +74,11 @@ func RunDoctorTo(w io.Writer, client *http.Client, cfg config.Config, cfgPath st
 }
 
 func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath string) error {
+	printSection(w, "Platform")
+	printCheck(w, "os", runtime.GOOS+"/"+runtime.GOARCH, "")
+	homeMsg, homeStatus := CheckHome()
+	printCheck(w, "home", homeMsg, homeStatus)
+
 	printSection(w, "Config")
 	printCheck(w, "path", cfgPath, "")
 	msg, ok := CheckConfig(cfgPath)
@@ -248,6 +254,20 @@ func staleTokenizerMsg(tokenizer string) string {
 		what = "'-' locks hyphenated words into one term"
 	}
 	return fmt.Sprintf("%s — %s; run scripts/retokenize-fts/", tokenizer, what)
+}
+
+// CheckHome reports the home directory the default data root is derived from —
+// $HOME on Unix, %USERPROFILE% on Windows. When it cannot be resolved,
+// config.DefaultRoot falls back to a relative ".tbuk", which quietly moves the
+// whole knowledge base with the working directory, so that case is a failure
+// rather than a note.
+func CheckHome() (msg, status string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Sprintf("unresolved (%v) — every default path falls back to a relative %q "+
+			"under the working directory; pass --root or set the home variable", err, config.DefaultRoot()), "✗"
+	}
+	return home, "✓"
 }
 
 // CheckLLMModel tries GET {baseURL}/v1/models and returns the first model ID.

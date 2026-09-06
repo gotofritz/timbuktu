@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -873,6 +874,59 @@ func TestRunDoctorTo_reportsChunkingSection(t *testing.T) {
 	for _, want := range []string{"Chunking", "size", "estimator", "script-aware", "reindex"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// ── checkHome ─────────────────────────────────────────────────────────────────
+
+// The default data root hangs off the user's home directory, which is $HOME on
+// Unix and %USERPROFILE% on Windows. Reporting the resolved directory is what
+// tells a user on either platform where `tbuk init` actually put things.
+func TestCheckHome_reportsResolvedDirectory(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+
+	msg, status := cli.CheckHome()
+	if msg != home {
+		t.Errorf("CheckHome msg = %q, want %q", msg, home)
+	}
+	if status != "✓" {
+		t.Errorf("CheckHome status = %q, want ✓", status)
+	}
+}
+
+// With no home directory to resolve, config.DefaultRoot falls back to a
+// relative ".tbuk" — so the knowledge base follows the working directory.
+// Nothing else in the report would say so.
+func TestCheckHome_flagsFallback(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+
+	msg, status := cli.CheckHome()
+	if status != "✗" {
+		t.Errorf("CheckHome status = %q, want ✗ when the home directory cannot be resolved", status)
+	}
+	if !strings.Contains(msg, ".tbuk") {
+		t.Errorf("CheckHome msg = %q, want it to name the relative fallback", msg)
+	}
+}
+
+// A path-keyed store behaves differently per OS, so a bug report needs to say
+// which one it came from — and where the default root resolved to there.
+func TestRunDoctor_reportsPlatform(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	cfg := config.DefaultsForRoot(filepath.Join(home, ".tbuk"))
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, filepath.Join(home, "config.yaml")); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"Platform", runtime.GOOS + "/" + runtime.GOARCH, home} {
+		if !strings.Contains(got, want) {
+			t.Errorf("doctor report missing %q:\n%s", want, got)
 		}
 	}
 }
