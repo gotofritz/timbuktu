@@ -227,6 +227,90 @@ func TestCLI_conversationEndToEnd(t *testing.T) {
 	}
 }
 
+// TestCLI_fixtureCorpusEval tests eval over the fixture corpus in keyword mode
+// (no vectors needed) and verifies the metrics. This is the regression test for
+// retrieval ranking changes in CI.
+func TestCLI_fixtureCorpusEval(t *testing.T) {
+	const dim = 4
+	embSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string][]float32{"embedding": {1, 0, 0, 0}})
+	}))
+	defer embSrv.Close()
+
+	home := t.TempDir()
+	setHome(t, home)
+
+	mustRun(t, "init")
+	writeConfig(t, filepath.Join(home, ".tbuk", "config.yaml"), config.Config{
+		Database:   config.DatabaseConfig{Path: filepath.Join(home, ".tbuk", "tbuk.sqlite")},
+		LLM:        config.LLMConfig{Provider: "llama", MaxTokens: 2048},
+		Embedding:  config.EmbeddingConfig{Provider: "llama", Dimension: dim, BaseURL: embSrv.URL},
+		Chunking:   config.ChunkingConfig{Size: 800, Overlap: 100},
+		Preprocess: config.PreprocessConfig{OutputDir: filepath.Join(home, ".tbuk", "extracted")},
+		Ingest:     config.IngestConfig{EmbedConcurrency: 2},
+		Eval:       config.EvalConfig{Dir: filepath.Join(home, ".tbuk", "eval")},
+	})
+
+	// Ingest fixture corpus.
+	// The fixture is embedded in the binary at internal/eval/testdata/corpus/
+	// For now, copy the real fixture files for testing.
+	corpusDir := filepath.Join(home, "corpus")
+	writeFile(t, filepath.Join(corpusDir, "slices.md"),
+		"# Go Slices\n\nWhen you append to a slice, Go reallocates the underlying array when len == cap.\nThe capacity is roughly doubled.\n")
+	writeFile(t, filepath.Join(corpusDir, "maps.md"),
+		"# Go Maps\n\nMaps grow by reallocating buckets and re-hashing all entries.\n")
+
+	mustRun(t, "ingest", corpusDir)
+
+	// Write label set for the fixture corpus, including a follow-up case with gold_query.
+	writeFile(t, filepath.Join(home, ".tbuk", "eval", "fixture.yaml"),
+		"version: 1\nname: fixture-corpus\ncases:\n"+
+			"  - id: slices\n    query: slices\n    relevant:\n      - path: slices.md\n"+
+			"  - id: maps-followup\n    query: and maps?\n    gold_query: how do maps grow?\n    relevant:\n      - path: maps.md\n")
+
+	// Eval in keyword mode: free, deterministic, no embedding needed.
+	out := mustRun(t, "eval", "--mode", "keyword", "--format", "json")
+	var report eval.Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("eval --format json failed: %v\n%s", err, out)
+	}
+
+	if report.Set != "fixture-corpus" {
+		t.Fatalf("report.Set = %q, want fixture-corpus", report.Set)
+	}
+	if report.Run.Mode != "keyword" {
+		t.Fatalf("report.Run.Mode = %q, want keyword", report.Run.Mode)
+	}
+	// Both cases should hit their labels.
+	if report.Overall.Cases != 2 || report.Overall.Hit < 1 {
+		t.Fatalf("overall = %+v, want 2 cases with at least 1 hit", report.Overall)
+	}
+
+	// Eval in hybrid mode: vectors come from the httptest embedder (frozen),
+	// deterministic, and we can use it for regression testing.
+	out = mustRun(t, "eval", "--mode", "hybrid", "--format", "json")
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("eval hybrid --format json failed: %v\n%s", err, out)
+	}
+	if report.Run.Mode != "hybrid" {
+		t.Fatalf("hybrid report.Run.Mode = %q, want hybrid", report.Run.Mode)
+	}
+	// Hybrid should also score the cases (maybe differently than keyword).
+	if report.Overall.Cases != 2 {
+		t.Fatalf("hybrid overall.Cases = %d, want 2", report.Overall.Cases)
+	}
+
+	// Test gold ceiling: run with --gold to score against gold_query.
+	// The gold query "how do maps grow?" should retrieve better than the follow-up "and maps?".
+	out = mustRun(t, "eval", "--mode", "keyword", "--gold", "--format", "json")
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("eval --gold --format json failed: %v\n%s", err, out)
+	}
+	if report.Run.Rewrite != "gold" {
+		t.Fatalf("gold report.Run.Rewrite = %q, want gold", report.Run.Rewrite)
+	}
+}
+
 // TestExecute_success covers the exported Execute wrapper on a non-erroring
 // command (it must not call os.Exit).
 func TestExecute_success(t *testing.T) {

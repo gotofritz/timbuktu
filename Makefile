@@ -72,6 +72,9 @@ check-ci: lint ## Full CI gate: lint + build + coverage >= 85%
 	go build ./...
 	@./scripts/check-coverage.sh
 
+eval-record: ## Record frozen vectors for the fixture corpus (run with real embedder)
+	go test -tags=record -run TestRecordFixtureVectors ./internal/eval
+
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and
 # GITHUB_TOKEN in env.
