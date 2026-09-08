@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring, pure, no DB/LLM/cobra
+  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
@@ -1014,12 +1014,26 @@ declares the pipeline above; `anki` is the only template that calls its records
 
 ## Evaluation
 
-`internal/eval` scores retrieval against a labelled set, so a change to
-chunking, fusion, ranking or query planning is argued from numbers instead of
-from an anecdote. It is pure — no DB, no LLM, no cobra — so every metric is
-arithmetic over a handwritten ranking. `internal/cli/eval.go` fills it with
-real results: `RunEval` takes the set, a retriever and the options, so the
-whole command is exercised without a database, an embedding server or a model.
+`internal/eval` scores retrieval and generation against a labelled set, so a
+change to chunking, fusion, ranking or query planning is argued from numbers
+instead of from an anecdote. Every metric is arithmetic over a handwritten
+ranking or a handwritten answer — no DB and no cobra — and the one thing that
+does spend a model, the judge, sits behind a `ChatFn` seam a three-line fake
+drives. `internal/cli/eval.go` fills it with real results: `RunEval` takes the
+set, a retriever, an `AnswerFn` and the options, so the whole command is
+exercised without a database, an embedding server or a model.
+
+**Two stages, scored separately** (`--stage retrieval|generation|both`,
+default `retrieval`), because attribution is the point: an answer that got
+worse because retrieval got worse is a different bug from one that got worse on
+the same evidence. Retrieval costs an embedding call a query and no model at
+all; generation costs a model call an answer, and another under `--judge`. A
+free stage people actually run beats a complete one they do not, which is why
+the free one is the default.
+
+Each stage has its own skip rule, so a case carrying only one half is scored by
+that half rather than counted as a zero in the other. The denominators
+therefore differ between the two blocks of one report, and both are printed.
 
 `tbuk eval` reads the knowledge base and writes nothing to it. A case's thread
 is replayed to the query planner exactly as a stored one would be and is never
@@ -1112,20 +1126,95 @@ getting it right is not a perfect nDCG over a set of five labels.
 A case with no labels scores zero rather than perfect: it is a generation-only
 case, and what its retrieval was worth is a question with no answer.
 
+### Generation scoring
+
+`ScoreAnswer(answer, case, indexed)` marks a completion with no model involved;
+`AggregateGen` macro-averages it. Each rate is averaged over the cases that had
+something to score rather than over all of them, and `GenMetrics` carries those
+denominators alongside the rates — a case with no `must_include` scores 0 out
+of 0, and averaged in as a zero it reads exactly like an answer that omitted
+everything it was asked for.
+
+| Metric | Definition |
+|---|---|
+| includes | `must_include` substrings present ÷ required (folded like `contains`) |
+| citations | citations the answer emitted that resolve to an indexed document ÷ emitted |
+| groundedness | distinct content words of the answer appearing in the passages |
+| correctness | judge, 0–2 against `answer:`, rescaled (needs `--judge`) |
+| faithfulness | judge, 0–2 against the passages, rescaled (needs `--judge`) |
+
+`ExtractCitations` reads a citation as a filename-shaped token — a two-to-eight
+character extension carrying a letter, on a base of at least two — which
+excludes `e.g.` and version numbers and keeps a bare `notes.md`, since a model
+shown `Source: path §index` cites by path with the marker and without.
+`ResolveCitations` splits them into resolved and unresolved, and `--verbose`
+prints the unresolved ones: a hallucinated source and a filename mentioned in
+passing are identical as a number and nothing alike as a list.
+
+Groundedness counts **distinct** content words after a closed-class English
+stop list, because an answer repeating one word from a passage forty times has
+not become forty times more grounded. Nothing that changes what a sentence
+claims is on that list — no negations, no modals, no quantifiers — since an
+answer saying "does not" where the passage says "does" is exactly the
+ungrounded answer being looked for. It is a crude proxy and says so; the judge
+covers what it cannot reach.
+
+It scores against the passages that **reached the prompt**, not the ones
+retrieval returned: the context ladder drops passages to make a prompt fit, and
+groundedness asks what the model could have read. `EvalAnswerFn` is therefore
+`ask` without the terminal — the same template, the same `fitToContext` ladder,
+the same normalization — because the stage measures the answers people actually
+get, and a prompt assembled differently here would measure a prompt nobody runs.
+
+### The judge
+
+`--judge` adds a model's marks on the two axes arithmetic cannot reach. It is
+opt-in and never replaces the deterministic scores, which run alongside it: a
+metric needing a model and an API key is a metric that never runs in CI, and
+one whose value drifts when the judge model is updated underneath it.
+
+`JudgeSystem` is a **constant in the package**, not a user template. A tunable,
+exportable, overridable rubric is a way for two runs to be scored by two
+different instruments and compared anyway; `--judge --verbose` prints it, so a
+number is always traceable to the question that produced it. The report records
+the judge model separately from the answering one, and `Diff` warns when it
+changes, so a judge upgrade reads as a judge upgrade.
+
+Every judge failure — no model, a refused call, a timeout, a completion that is
+not a verdict, a score off the 0–2 scale, a case with no reference `answer:` —
+leaves the case **unjudged**, with the reason on the row. None of them is a
+zero: a judge that failed is not evidence that the answer was wrong, and
+scoring it as one would make an outage look like a regression. A failed
+*answer*, by contrast, fails the run, because a report over the three cases
+that happened to succeed is exactly the number this harness exists to stop
+people quoting.
+
 ### Reports
 
-`NewReport` derives the headline from the rows, so a report cannot carry a
+`NewReport` derives both headlines from the rows, so a report cannot carry a
 summary that disagrees with the cases printed underneath it. It records the
-**instrument** as well as the numbers — mode, top-k, rewrite, expansion, and
-which embedding and chat models answered — because two runs are comparable only
-to the extent that block matches. Latency is median and p95 rather than a mean,
-so one cold start does not become the headline.
+**instrument** as well as the numbers — mode, top-k, rewrite, expansion, stage,
+and which embedding, chat and judge models answered — because two runs are
+comparable only to the extent that block matches. Latency is median and p95
+rather than a mean, so one cold start does not become the headline, and the
+generation half carries a latency of its own: a model call an answer is a
+different order of expense from an embedding call a query, and #28's kill
+criterion is stated in correctness and latency together.
+
+A row scored on generation alone carries no retrieval metrics and stays out of
+the retrieval average; a run that scored no retrieval at all prints no
+retrieval headline, since a row of zeroes reads exactly like the failure this
+harness exists to find. `Report.Generation` is absent rather than zero when the
+stage did not run — nobody asked, so nothing was measured.
 
 `Diff(current, baseline)` subtracts two reports, because "A/B'd with evidence"
 otherwise depends on someone subtracting nDCG in their head, and they stop by
 Thursday. A baseline from a different label set is an error — comparing two
 corpora is not a comparison. A swept knob is never a warning (sweeping is the
-point); a different corpus size, embedder or model is.
+point); a different corpus size, embedder, model or judge is. The judged axes
+are diffed only when both runs judged: a run without `--judge` scores them zero,
+and a zero minus a zero says nothing while looking exactly like a delta that
+says something.
 
 ---
 
@@ -1326,7 +1415,7 @@ tbuk doctor                    probe config, DB (with doc/chunk/thread counts), 
 tbuk preprocess <path>         extract text → save to extracted store (--dry-run, --output-dir)
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
 tbuk search <query>            search chunks; query read as an expression — "phrase", -exclude (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
-tbuk eval [set]                score retrieval against a labelled set (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format text|json, --verbose); reads the KB, writes nothing to it
+tbuk eval [set]                score retrieval and generation against a labelled set (--stage retrieval|generation|both, --judge, --mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format text|json, --verbose); reads the KB, writes nothing to it
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document

@@ -21,7 +21,7 @@ no AI background required.
 12. [Keeping Your Knowledge Base Up to Date](#12-keeping-up-to-date)
 13. [More Complex Use Cases](#13-complex-use-cases)
 14. [Tips and Limitations](#14-tips-and-limitations)
-15. [Measuring How Well Retrieval Works](#15-measuring-retrieval)
+15. [Measuring How Well It Works](#15-measuring-retrieval)
 
 ---
 
@@ -2026,7 +2026,7 @@ tbuk ingest --force ~/notes/
 
 <a name="15-measuring-retrieval"></a>
 
-## 15. Measuring How Well Retrieval Works
+## 15. Measuring How Well It Works
 
 This section is for when you start changing settings — chunk size, search mode,
 how follow-up questions are searched for — and want to know whether a change
@@ -2043,7 +2043,9 @@ You write down some questions and, for each one, which of your documents
 *should* come back. Timbuktu then runs those questions and scores itself
 against your answer key.
 
-Nothing about your knowledge base changes. `tbuk eval` only searches it.
+Nothing about your knowledge base changes. `tbuk eval` searches it, and — when
+you ask it to score answers as well — asks it questions. It never writes a
+thread, a turn or a row.
 
 ### Writing your first label set
 
@@ -2186,6 +2188,122 @@ spends an extra AI call on every question) has little left to win. If the gap is
 large, it is probably worth turning on. Either way, `--gold` costs nothing to
 run.
 
+### Scoring the answers, not just the search
+
+Everything above measures whether the right *documents* came back. That is half
+the question. The other half is whether the answer built out of them was any
+good — and the two fail in different ways, which is why they are scored
+separately:
+
+```bash
+tbuk eval my-notes --stage generation     # score the answers
+tbuk eval my-notes --stage both           # score both halves
+```
+
+`--stage retrieval` is the default, and it is the free one. `--stage generation`
+asks the model a question per case, so it costs what an equivalent number of
+`tbuk ask` runs would.
+
+To score an answer, a case needs something to be marked against. Add either or
+both:
+
+```yaml
+  - id: alpha-decision
+    query: what did we decide about the database?
+    relevant:
+      - path: project-alpha.md
+    answer: |
+      We chose PostgreSQL over MySQL, mainly for the JSON support.
+    must_include: [PostgreSQL]
+```
+
+`answer:` is the reference — what a good answer would say. `must_include:` is
+the handful of words or phrases that have to appear at all; capitals and line
+breaks do not matter.
+
+A case with only `relevant:` is scored by the retrieval stage and skipped by the
+generation one, and a case with only `answer:` is skipped the other way round.
+That is why the report prints two case counts rather than one.
+
+```
+my-notes — 6 cases, 8 labels
+  mode hybrid   top 5   rewrite window
+
+  hit@5 1.00   recall@5 0.88   P@5 0.30   MRR 0.92   nDCG@5 0.90
+  latency  median 84ms   p95 210ms
+
+  generation — 4 answers
+    includes 1.00   citations 0.75 (of 3)   groundedness 0.61
+    latency  median 1840ms   p95 3100ms
+```
+
+Three numbers, none of which needs an AI grader:
+
+| Number | Plain English |
+|---|---|
+| **includes** | how many of your `must_include` phrases actually appeared |
+| **citations** | of the documents the answer named, how many you actually have indexed |
+| **groundedness** | how much of the answer's vocabulary came from the passages it was given |
+
+`citations` is the hallucination check: an answer confidently citing a file that
+is not in your knowledge base is the classic failure, and this catches it for
+free. `--verbose` lists the names that resolved to nothing, so you can see
+whether it was a made-up source or just a filename mentioned in passing.
+
+`groundedness` is crude on purpose — it is word overlap, so an answer that
+quotes scores well and an answer that paraphrases well scores lower than it
+deserves. Watch it move rather than reading the absolute number. If it drops
+sharply after a change, the answers stopped being built out of your documents,
+and that is worth knowing without paying for a grader.
+
+`(of 3)` next to a number means only three of the four answers had anything to
+score there — one answer emitted no citations at all, so it is not counted
+either way.
+
+### Asking an AI to grade the answers
+
+For the two things arithmetic cannot reach — is the answer *right*, and is it
+*supported* — add `--judge`:
+
+```bash
+tbuk eval my-notes --stage generation --judge --verbose
+```
+
+```
+  generation — 4 answers
+    includes 1.00   citations 0.75 (of 3)   groundedness 0.61
+    correctness 0.88   faithfulness 0.75   (4 of 4 judged)
+    latency  median 1840ms   p95 3100ms
+
+  judge:
+    alpha-decision
+      correctness 2 — names PostgreSQL and the reason, as the reference does
+      faithfulness 1 — the JSON claim is not in the retrieved passages
+```
+
+The judge grades each answer twice, 0–2, and gives a reason both times.
+**Correctness** is against your `answer:`; **faithfulness** is against the
+passages, and it is deliberately blind to correctness — an answer that is right
+for a reason your documents never gave is unfaithful, and that is a real problem
+even though nothing about it is wrong.
+
+Four things worth knowing before you trust the number:
+
+- It costs a second model call per case, on top of the answer. A 30-case set is
+  60 calls
+- A case needs an `answer:` to be judged; `must_include` alone is not something
+  to grade correctness against
+- The free numbers keep running alongside it. If a model upgrade moves
+  `correctness` while `groundedness` stays put, the grader changed, not the
+  answers
+- If the judge fails — times out, replies with prose instead of a verdict — the
+  case is **unjudged**, not zero. `(4 of 4 judged)` is how you check; a report
+  that quietly scored a failed judge as 0 would turn an outage into a regression
+
+`--judge --verbose` also prints the exact prompt the judge was given. It is
+compiled into `tbuk` rather than configurable on purpose: a rubric you could
+tune is a way to score two runs with two different rulers and then compare them.
+
 ### When the numbers look wrong
 
 Run `tbuk doctor` and look at the **Eval** section:
@@ -2211,3 +2329,6 @@ for a bug in the search.
   written to flatter the system measures nothing
 - Forgetting `tbuk reindex` after changing chunk size or the embedding model —
   otherwise you are scoring the old index and concluding the change did nothing
+- Reading a generation score as a retrieval score. If the answers got worse,
+  run `--stage both`: when the retrieval numbers moved too, the answers are
+  innocent and the search is where to look

@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
+	"github.com/gotofritz/timbuktu/internal/conversation"
 	"github.com/gotofritz/timbuktu/internal/eval"
+	"github.com/gotofritz/timbuktu/internal/llm"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
 	"github.com/gotofritz/timbuktu/internal/rewrite"
 )
@@ -520,4 +522,284 @@ cases:
 			t.Error("no label sets is not a fault")
 		}
 	})
+}
+
+const genSet = `
+version: 1
+name: go-docs
+cases:
+  - id: slices
+    query: how do slices grow?
+    relevant:
+      - path: go/slices.md
+    answer: append reallocates when len == cap, roughly doubling capacity.
+    must_include: [append, cap]
+  - id: retrieval-only
+    query: and maps?
+    relevant:
+      - path: go/maps.md
+`
+
+// fixedAnswer answers every case with text, echoing back the chunks it was
+// given as the ones that reached the prompt.
+func fixedAnswer(text string) cli.AnswerFn {
+	return func(_ context.Context, _ string, _ []conversation.Turn, chunks []retrieval.RetrievedChunk) (string, []retrieval.RetrievedChunk, error) {
+		return text, chunks, nil
+	}
+}
+
+func TestRunEval_generationStageScoresAnswers(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, genSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
+			Answer:  fixedAnswer("append reallocates when len == cap; the capacity is doubled."),
+			Indexed: []string{"/n/go/slices.md"},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+
+	if report.Generation == nil {
+		t.Fatal("no generation half in the report")
+	}
+	// Only the case carrying a reference answer is scored; the retrieval-only
+	// one has nothing this stage can mark.
+	if report.Generation.Overall.Cases != 1 {
+		t.Errorf("generation cases = %d, want 1", report.Generation.Overall.Cases)
+	}
+	if got := report.Generation.Overall.Includes; got != 1 {
+		t.Errorf("includes = %.2f, want 1.00 — the answer carries both required substrings", got)
+	}
+	// The retrieval half was not asked for, so it is not reported.
+	if report.Overall.Cases != 0 {
+		t.Errorf("Overall.Cases = %d, want 0 under --stage generation", report.Overall.Cases)
+	}
+	if len(report.Skipped) != 1 || report.Skipped[0].ID != "retrieval-only" {
+		t.Errorf("skipped = %+v, want the retrieval-only case", report.Skipped)
+	}
+	if report.Run.Stage != eval.StageGeneration {
+		t.Errorf("Run.Stage = %q, want %q", report.Run.Stage, eval.StageGeneration)
+	}
+}
+
+func TestRunEval_bothStagesScoreBothHalves(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, genSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageBoth,
+			Answer: fixedAnswer("append reallocates when len == cap."),
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	// Both cases scored on retrieval; only the one with a reference answer on
+	// generation. Attribution is the point: the denominators differ and say so.
+	if report.Overall.Cases != 2 {
+		t.Errorf("Overall.Cases = %d, want 2", report.Overall.Cases)
+	}
+	if report.Generation == nil || report.Generation.Overall.Cases != 1 {
+		t.Fatalf("Generation = %+v, want one answer scored", report.Generation)
+	}
+	if len(report.Skipped) != 0 {
+		t.Errorf("skipped = %+v, want none — every case was scored by one stage or the other", report.Skipped)
+	}
+}
+
+func TestRunEval_generationNeedsAnAnswerFunction(t *testing.T) {
+	var seen [][]string
+	_, err := cli.RunEval(context.Background(), evalSet(t, genSet),
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration})
+	if err == nil {
+		t.Fatal("RunEval scored the generation stage with nothing to answer with")
+	}
+}
+
+func TestRunEval_generationGroundsOnWhatReachedThePrompt(t *testing.T) {
+	// The context ladder can drop passages between retrieval and the prompt.
+	// Groundedness asks what the model could have read, so it has to score
+	// against what was actually sent.
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, genSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
+			Answer: func(_ context.Context, _ string, _ []conversation.Turn, _ []retrieval.RetrievedChunk) (string, []retrieval.RetrievedChunk, error) {
+				return "capacity doubled", nil, nil // everything was dropped
+			},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if got := report.Generation.Overall.Groundedness; got != 0 {
+		t.Errorf("groundedness = %.2f, want 0 — no passage reached the prompt", got)
+	}
+}
+
+func TestRunEval_judgeScoresAndFailsSoftly(t *testing.T) {
+	set := evalSet(t, `
+version: 1
+name: go-docs
+cases:
+  - id: a
+    query: q1
+    answer: a reference
+  - id: b
+    query: q2
+    answer: another reference
+`)
+	var calls int
+	judge := &eval.Judge{Chat: func(_ context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		calls++
+		ch := make(chan llm.Token, 1)
+		if calls == 1 {
+			ch <- llm.Token{Text: `{"correctness": 2, "correctness_reason": "right",
+				"faithfulness": 0, "faithfulness_reason": "unsupported"}`, Done: true}
+		} else {
+			ch <- llm.Token{Text: "I think it's fine", Done: true} // not a verdict
+		}
+		close(ch)
+		return ch, nil
+	}}
+
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), set,
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
+			Answer: fixedAnswer("an answer"), Judge: judge, JudgeModel: "llama/llama3",
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	g := report.Generation.Overall
+	if g.Judged != 1 {
+		t.Fatalf("judged = %d of 2, want 1 — the malformed verdict is unjudged, not zero", g.Judged)
+	}
+	// Averaged over the one case actually judged, not over both.
+	if g.Correctness != 1 || g.Faithfulness != 0 {
+		t.Errorf("correctness/faithfulness = %.2f/%.2f, want 1.00/0.00", g.Correctness, g.Faithfulness)
+	}
+	if report.Cases[0].Judge == nil || report.Cases[0].Judge.Correctness.Reason != "right" {
+		t.Errorf("case a judge = %+v, want the verdict and its reason", report.Cases[0].Judge)
+	}
+	if report.Cases[1].Unjudged == "" {
+		t.Error("case b has no reason for being unjudged")
+	}
+	if report.Run.Judge != "llama/llama3" {
+		t.Errorf("Run.Judge = %q, want llama/llama3", report.Run.Judge)
+	}
+}
+
+func TestRunEval_unresolvedCitationsAreNamed(t *testing.T) {
+	set := evalSet(t, `
+version: 1
+name: go-docs
+cases:
+  - id: a
+    query: q
+    answer: a reference
+`)
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), set,
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
+			Answer:  fixedAnswer("See go/slices.md and go/generics.md."),
+			Indexed: []string{"/n/go/slices.md"},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if got := report.Cases[0].UnresolvedCitations; len(got) != 1 || got[0] != "go/generics.md" {
+		t.Errorf("unresolved citations = %v, want [go/generics.md]", got)
+	}
+	if got := report.Generation.Overall.Citations; got != 0.5 {
+		t.Errorf("citations = %.2f, want 0.50", got)
+	}
+}
+
+func TestRunEval_generationCaseCarriesItsThread(t *testing.T) {
+	set := evalSet(t, `
+version: 1
+name: go-docs
+cases:
+  - id: followup
+    thread:
+      - question: how do slices grow?
+        answer: they double
+    query: and maps?
+    answer: maps rehash their buckets
+`)
+	var gotThread []conversation.Turn
+	var seen [][]string
+	if _, err := cli.RunEval(context.Background(), set,
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
+			Answer: func(_ context.Context, _ string, thread []conversation.Turn, chunks []retrieval.RetrievedChunk) (string, []retrieval.RetrievedChunk, error) {
+				gotThread = thread
+				return "maps rehash", chunks, nil
+			},
+		}); err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if len(gotThread) != 1 || gotThread[0].Question != "how do slices grow?" {
+		t.Errorf("thread handed to the answer = %+v, want the one turn behind the question", gotThread)
+	}
+}
+
+func TestEvalAnswerFn_rendersThePromptAskWouldAndReturnsTheAnswer(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var seen []llm.Message
+	answer := cli.EvalAnswerFn(tmpl, func(_ context.Context, msgs []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		seen = msgs
+		ch := make(chan llm.Token, 2)
+		ch <- llm.Token{Text: "a slice "}
+		ch <- llm.Token{Text: "doubles", Done: true}
+		close(ch)
+		return ch, nil
+	}, 0, 0)
+
+	chunks := []retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}
+	text, used, err := answer(context.Background(), "how do slices grow?",
+		[]conversation.Turn{{Question: "what is a slice?", Answer: "a view over an array"}}, chunks)
+	if err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	if text != "a slice doubles" {
+		t.Errorf("answer = %q, want the whole stream joined", text)
+	}
+	if len(used) != 1 {
+		t.Errorf("passages that reached the prompt = %d, want 1", len(used))
+	}
+	// The question, the thread and the retrieved text all reach the model, the
+	// way `ask` sends them — the generation stage has to measure the prompt
+	// people actually run.
+	joined := ""
+	for _, m := range seen {
+		joined += m.Content + "\n"
+	}
+	for _, want := range []string{"how do slices grow?", "what is a slice?", "the capacity is doubled"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestEvalAnswerFn_streamErrorFailsTheCase(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	answer := cli.EvalAnswerFn(tmpl, func(_ context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		ch := make(chan llm.Token, 1)
+		ch <- llm.Token{Error: errors.New("the provider hung up")}
+		close(ch)
+		return ch, nil
+	}, 0, 0)
+
+	if _, _, err := answer(context.Background(), "q", nil, nil); err == nil {
+		t.Fatal("a stream error scored the case instead of failing it")
+	}
 }
