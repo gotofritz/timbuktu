@@ -873,3 +873,47 @@ func TestDefaultYAML_documentsSession(t *testing.T) {
 		t.Errorf("DefaultYAML missing session.max_turns:\n%s", yamlStr)
 	}
 }
+
+func TestEvalDir_defaultAndRootResolution(t *testing.T) {
+	// eval.dir holds label sets, so it belongs under the data root and moves
+	// with --root like every other component.
+	root := filepath.Join(t.TempDir(), "kb")
+	cfg := config.DefaultsForRoot(root)
+	if want := filepath.Join(root, "eval"); cfg.Eval.Dir != want {
+		t.Errorf("eval.dir = %q, want %q", cfg.Eval.Dir, want)
+	}
+}
+
+func TestEvalDir_absolutePathSurvivesRootResolution(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "shared-labels")
+	cfg := config.Config{Eval: config.EvalConfig{Dir: abs}}.ResolvePaths(filepath.Join(t.TempDir(), "kb"))
+	if cfg.Eval.Dir != abs {
+		t.Errorf("eval.dir = %q, want the absolute path left alone", cfg.Eval.Dir)
+	}
+}
+
+func TestFillMissingDefaults_addsEvalSection(t *testing.T) {
+	// A knowledge base configured before tbuk eval existed gets the key back on
+	// the next `tbuk init`, rather than needing a hand edit.
+	_, added, err := config.FillMissingDefaults([]byte("chunking:\n  size: 999\n"))
+	if err != nil {
+		t.Fatalf("FillMissingDefaults: %v", err)
+	}
+	have := map[string]bool{}
+	for _, a := range added {
+		have[a] = true
+	}
+	if !have["eval"] {
+		t.Errorf("added = %v, want it to include \"eval\"", added)
+	}
+}
+
+func TestValidate_emptyEvalDirIsFine(t *testing.T) {
+	// No label sets is the state of every knowledge base until someone writes
+	// one; it is not a misconfiguration.
+	cfg := config.Defaults()
+	cfg.Eval.Dir = ""
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate with no eval.dir = %v, want nil", err)
+	}
+}

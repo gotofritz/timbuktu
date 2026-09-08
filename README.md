@@ -88,6 +88,9 @@ tbuk ingest <path>       # read extracted text → chunk → embed → store in 
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
                          #   query is an expression: "a phrase", -exclude, main_consumption as one term
                          #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
+tbuk eval [set]          # score retrieval against a labelled set of cases
+                         #   (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format, --verbose)
+                         #   --mode keyword needs no embedder and no model at all
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
 tbuk meta set <path> k=v # attach metadata to a document (one value per key; distinct keys per call)
 tbuk meta list <path>    # list all metadata for a document
@@ -758,6 +761,75 @@ the threads which do exist, the typo being the usual cause. `--verbose` on
 rather than mysterious. Stored answers echo document text, so everything these
 commands print goes through the same control-character filter as `search` and
 `ask`.
+
+### Measuring retrieval
+
+`tbuk eval` scores retrieval against a labelled set of cases, so a change to
+chunking, fusion, ranking or query planning is argued from numbers rather than
+from an anecdote:
+
+```bash
+tbuk eval                              # every set in ~/.tbuk/eval
+tbuk eval go-docs                      # one set, by name
+tbuk eval go-docs --format json > before.json
+tbuk eval go-docs --rewrite condense --baseline before.json   # the deltas
+```
+
+It reports hit@k, recall@k, precision@k, MRR and nDCG@k, macro-averaged over
+cases, alongside median and p95 latency. It searches the knowledge base and
+writes nothing to it — a case's thread is replayed to the query planner and is
+never stored as a conversation.
+
+A label set is YAML under `eval.dir`:
+
+```yaml
+version: 1
+name: go-docs
+cases:
+  - id: slices-growth
+    query: how do slices grow?
+    relevant:
+      - path: go/slices.md              # a path suffix, never a chunk id
+        contains: capacity is doubled   # optional: which passage was meant
+        grade: 2                        # optional, default 1; nDCG uses it
+  - id: maps-followup
+    thread:                             # replayed to the planner, not stored
+      - question: how do slices grow?
+        answer: append reallocates when len == cap
+    query: and maps?
+    gold_query: how do Go maps grow?    # the ceiling a rewrite reaches for
+```
+
+**A label names a document, not a chunk.** Chunk ids are renumbered by every
+re-ingest and every `tbuk reindex`, and a chunk index moves whenever chunking
+changes — which is the first thing an eval is wanted for, so a label that could
+not survive it would be useless. Paths match as a suffix on a separator
+boundary and case-folded, so `go/slices.md` finds the document wherever this
+machine keeps it, and `slices.md` never quietly credits `go-slices.md`. A
+`contains:` anchor folds case and collapses whitespace, so a reflowed chunk
+boundary does not fail a case, but punctuation is left alone: `len == cap` does
+not match `len==cap`.
+
+Each label is credited at most once, so a retriever cannot score well by
+returning the same document twice, and a case with no `relevant:` paths is
+skipped rather than scored zero — the report says how many were skipped and
+why.
+
+**What a run costs.** `--mode keyword` uses FTS5 and no embedder at all;
+`--gold` and `--rewrite window` add nothing to that. Only `--mode vector`,
+`--mode hybrid`, `--rewrite condense` and `--expand N` reach a server. Since
+query planning changes the query *string*, and the keyword leg is a function of
+that string, comparing `window` against `off` against the `--gold` ceiling is a
+real, repeatable measurement that costs nothing.
+
+`--baseline` prints deltas rather than leaving you to subtract nDCG in your
+head. A baseline from a different label set is an error — comparing two corpora
+is not a comparison — and a knob you deliberately swept is never warned about,
+though a changed embedder, model or case count is.
+
+`tbuk doctor` has an **Eval** section listing the sets it found and, more
+usefully, any label naming a document that is not in the index: that label
+scores zero on every run and reads exactly like a retrieval failure.
 
 ### Encoding code for search
 

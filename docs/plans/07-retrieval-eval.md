@@ -283,6 +283,12 @@ The same column doubles as a regression check on the planners themselves: a
 `condense` that scores *below* the window is a broken rewrite, not a subtle one,
 and it says so without a human reading rewritten queries.
 
+It is spelled `--gold`, a flag of its own, rather than as a `--rewrite gold`
+mode: `--rewrite`'s value space is shared with `ask` and with the manifest key
+that template load validates, and the ceiling is not a planner. The report
+records `rewrite: gold` all the same, so a run is never mistaken for a
+window one.
+
 ---
 
 ## Label set format
@@ -422,6 +428,7 @@ tbuk eval [set]                    a label set, by path or by name under eval.di
   --top N                          retrieval depth the metrics are cut at (default 5)
   --rewrite off|window|condense    as on ask (D12)
   --expand N                       as on ask (D12)
+  --gold                           retrieve on each case's gold_query (D14)
   --case ID                        one case, for iterating
   --baseline FILE                  a previous --format json report, diffed (D9)
   --format text|json               default text
@@ -491,7 +498,8 @@ section (D13).
 | # | PR | Delivers | Depends on |
 |---|---|---|---|
 | 1 | `feat(eval): label sets and retrieval metrics` — `internal/eval` parsing, matching, metrics, aggregation, report + `Diff`. Pure package, no CLI | the instrument | — |
-| 2 | `feat(eval): tbuk eval over the knowledge base` — the command, sweep flags, text/JSON, `--baseline`, config key, doctor section, fixture corpus, frozen vectors + `make eval-record` (D8), keyword and ceiling metrics in `check-ci` | #126's acceptance | 1 |
+| 2 | `feat(eval): tbuk eval over the knowledge base` — the command, sweep flags, `--gold`, text/JSON, `--baseline`, `eval.dir`, doctor's Eval section, and the docs | #126's acceptance | 1 |
+| 2b | `test(eval): a fixture corpus scored in CI` — fixture corpus, frozen vectors + `make eval-record` (D8), keyword and ceiling metrics in `check-ci`. Split out of 2: pure test infrastructure with no production surface, and one reviewable diff each | regression cover | 2 |
 | 3 | `feat(eval): generation scoring and an LLM judge` — deterministic answer scoring, `--stage`, `--judge` | #30's split | 2 |
 | 4 | `docs(eval): measure the deferred defaults` — a `docs/eval/` set over this repo's own docs, the numbers for `window` vs `condense` (#24) and `expand` (#25), and the resulting default decision; archive this plan | the payoff | 3 |
 

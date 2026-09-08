@@ -1017,10 +1017,19 @@ declares the pipeline above; `anki` is the only template that calls its records
 `internal/eval` scores retrieval against a labelled set, so a change to
 chunking, fusion, ranking or query planning is argued from numbers instead of
 from an anecdote. It is pure — no DB, no LLM, no cobra — so every metric is
-arithmetic over a handwritten ranking. The `tbuk eval` command that fills it
-with real results is milestone 2 of `docs/plans/07-retrieval-eval.md`; the
-package exists first because the instrument has to be right before it is
-pointed at anything.
+arithmetic over a handwritten ranking. `internal/cli/eval.go` fills it with
+real results: `RunEval` takes the set, a retriever and the options, so the
+whole command is exercised without a database, an embedding server or a model.
+
+`tbuk eval` reads the knowledge base and writes nothing to it. A case's thread
+is replayed to the query planner exactly as a stored one would be and is never
+persisted — a run that left conversation threads behind would change the corpus
+it is measuring.
+
+The template is read only when something needs what it holds: the model and
+temperature a rewrite spends, or a `window_turns` asked for by naming a
+template. So `--mode keyword --rewrite window` needs no prompt directory, no
+embedder and no model, which is what makes a retrieval eval affordable in CI.
 
 ### Label sets
 
@@ -1317,6 +1326,7 @@ tbuk doctor                    probe config, DB (with doc/chunk/thread counts), 
 tbuk preprocess <path>         extract text → save to extracted store (--dry-run, --output-dir)
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
 tbuk search <query>            search chunks; query read as an expression — "phrase", -exclude (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
+tbuk eval [set]                score retrieval against a labelled set (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format text|json, --verbose); reads the KB, writes nothing to it
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document

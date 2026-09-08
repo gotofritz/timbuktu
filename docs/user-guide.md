@@ -21,6 +21,7 @@ no AI background required.
 12. [Keeping Your Knowledge Base Up to Date](#12-keeping-up-to-date)
 13. [More Complex Use Cases](#13-complex-use-cases)
 14. [Tips and Limitations](#14-tips-and-limitations)
+15. [Measuring How Well Retrieval Works](#15-measuring-retrieval)
 
 ---
 
@@ -2020,3 +2021,193 @@ tbuk ingest --force ~/notes/
   documents — for general knowledge questions, use the AI model directly
 - Setting `--top` very high (e.g. 50) — this slows the model down and can
   degrade answer quality by flooding the context with loosely related material
+
+---
+
+<a name="15-measuring-retrieval"></a>
+
+## 15. Measuring How Well Retrieval Works
+
+This section is for when you start changing settings — chunk size, search mode,
+how follow-up questions are searched for — and want to know whether a change
+actually helped.
+
+The honest answer is that you cannot tell by trying two questions. Retrieval
+either found the right passage or it did not, and one or two examples will
+happily agree with whatever you were hoping. `tbuk eval` gives you a number
+instead.
+
+### The idea
+
+You write down some questions and, for each one, which of your documents
+*should* come back. Timbuktu then runs those questions and scores itself
+against your answer key.
+
+Nothing about your knowledge base changes. `tbuk eval` only searches it.
+
+### Writing your first label set
+
+Label sets live in `~/.tbuk/eval/`. Create one:
+
+```bash
+mkdir -p ~/.tbuk/eval
+```
+
+Then put this in `~/.tbuk/eval/my-notes.yaml`, adjusted to your own documents:
+
+```yaml
+version: 1
+name: my-notes
+cases:
+  - id: alpha-deadline
+    query: when is the second Project Alpha action item due?
+    relevant:
+      - path: project-alpha.md
+  - id: alpha-decision
+    query: what did we decide about the database?
+    relevant:
+      - path: project-alpha.md
+        contains: we chose PostgreSQL
+```
+
+Two things are worth knowing about `path:`.
+
+You write **part** of the path, not the whole thing. `project-alpha.md` matches
+`/home/you/notes/project-alpha.md`, and `notes/project-alpha.md` matches it
+too. The match has to start at a `/`, so `alpha.md` would *not* match
+`project-alpha.md` — that is deliberate, because a label that quietly credited
+the wrong document would flatter your setup rather than test it.
+
+You name a **document**, never a chunk number. Chunk numbers change every time
+you re-ingest or change the chunk size, and changing the chunk size is one of
+the main things you would use this for.
+
+`contains:` is optional. Add it when a document is long and you care that a
+*particular* passage comes back rather than any part of the file. Capitals and
+line breaks do not matter; punctuation does.
+
+### Running it
+
+```bash
+tbuk eval my-notes
+```
+
+```
+my-notes — 2 cases, 2 labels
+  mode hybrid   top 5   rewrite window
+  embedding llama/nomic-embed-text
+
+  hit@5 1.00   recall@5 1.00   P@5 0.40   MRR 0.75   nDCG@5 0.82
+  latency  median 84ms   p95 210ms
+```
+
+Reading those:
+
+| Number | Plain English |
+|---|---|
+| **hit@5** | how often the right document appeared at all, in the top 5 |
+| **recall@5** | what fraction of the documents you labelled came back |
+| **P@5** | how much of what came back was actually relevant |
+| **MRR** | how near the top the first right answer was — 1.00 means first every time |
+| **nDCG@5** | the same idea, but crediting the best passages for being ranked highest |
+
+`hit` and `MRR` are the two to watch at first. If `hit@5` is 1.00, retrieval is
+finding your documents; if `MRR` is well below 1.00, it is finding them but
+burying them under things you did not want.
+
+A low `P@5` is often not a problem. If you labelled one document and asked for
+five results, four of the five slots have nothing correct that could fill them.
+The report says so on its own, working out the best score actually reachable.
+
+Add `--verbose` for a line per question, which is how you find *which* question
+is dragging the average down.
+
+### Comparing two settings
+
+This is the part that earns the effort. Save a run, change something, compare:
+
+```bash
+tbuk eval my-notes --format json > before.json
+
+# change chunking.size in ~/.tbuk/config.yaml, then:
+tbuk reindex
+tbuk eval my-notes --baseline before.json
+```
+
+```
+my-notes — this run against the baseline
+  metric             current  baseline     delta
+  hit                   1.00      1.00     +0.00
+  recall                1.00      0.50     +0.50
+  mrr                   0.88      0.75     +0.13
+```
+
+A `+` means this run is better. Now you know, rather than suspect.
+
+### Trying it without an AI model running
+
+`--mode keyword` searches with the keyword index only, so it needs no embedding
+server and no AI model at all:
+
+```bash
+tbuk eval my-notes --mode keyword
+```
+
+The numbers will be lower than hybrid search gives you — that is expected, it is
+half the search — but it runs anywhere, instantly, and it is a genuine
+measurement rather than a mock.
+
+### Follow-up questions, and the "gold" ceiling
+
+If you use conversation threads (section 9), you can test those too. Give the
+case the questions that came before it, and optionally the question a person
+*would* have typed instead of the shorthand:
+
+```yaml
+  - id: maps-followup
+    thread:
+      - question: how do slices grow?
+        answer: append reallocates when len == cap
+    query: and maps?
+    gold_query: how do Go maps grow as they fill up?
+```
+
+Now compare what Timbuktu does with the follow-up against what a perfect
+rewording would have achieved:
+
+```bash
+tbuk eval my-notes --format json > window.json
+tbuk eval my-notes --gold --baseline window.json
+```
+
+If the gap is small, the automatic handling of follow-ups is already doing
+nearly as well as it possibly could, and the `--rewrite condense` option (which
+spends an extra AI call on every question) has little left to win. If the gap is
+large, it is probably worth turning on. Either way, `--gold` costs nothing to
+run.
+
+### When the numbers look wrong
+
+Run `tbuk doctor` and look at the **Eval** section:
+
+```
+Eval
+  dir:       /home/you/.tbuk/eval
+  sets:      ✓ 1 set (my-notes) — 2 cases
+  labels:    ✗ 1 not in the index (project-beta.md)
+```
+
+That last line is the one to watch. A label naming a document you never ingested
+scores zero forever, and on the report it looks exactly like a retrieval
+failure. If a case stubbornly scores nothing, check here before you go looking
+for a bug in the search.
+
+### Common mistakes
+
+- Judging a change on three or four cases — a single case moving is worth
+  0.25 of the average on a four-case set. Twenty is a much better place to be
+- Labelling the passage you *hoped* would come back rather than the one that
+  actually answers the question; the label is the answer key, and an answer key
+  written to flatter the system measures nothing
+- Forgetting `tbuk reindex` after changing chunk size or the embedding model —
+  otherwise you are scoring the old index and concluding the change did nothing

@@ -86,6 +86,17 @@ type Config struct {
 	Ingest     IngestConfig     `yaml:"ingest"`
 	Prompts    PromptsConfig    `yaml:"prompts"`
 	Session    SessionConfig    `yaml:"session"`
+	Eval       EvalConfig       `yaml:"eval"`
+}
+
+// EvalConfig says where `tbuk eval` looks for label sets when it is given
+// no path of its own. A set is scoped to the corpus it grades, so the
+// directory sits under the data root and --root moves both together.
+type EvalConfig struct {
+	// Dir holds the label sets. Empty means there is no default set —
+	// which is the state of every knowledge base until someone writes one,
+	// so it is not an error, and `tbuk eval <path>` works regardless.
+	Dir string `yaml:"dir"`
 }
 
 // SessionConfig bounds a conversation thread: how much of it `tbuk ask
@@ -234,6 +245,9 @@ func relativeDefaults() Config {
 			HistoryTurns: 6,
 			MaxTurns:     0,
 		},
+		Eval: EvalConfig{
+			Dir: "./eval",
+		},
 	}
 }
 
@@ -257,6 +271,7 @@ func (c Config) ResolvePaths(root string) Config {
 	c.Preprocess.OutputDir = resolveUnderRoot(c.Preprocess.OutputDir, root)
 	c.Ingest.RawDir = resolveUnderRoot(c.Ingest.RawDir, root)
 	c.Prompts.Dir = resolveUnderRoot(c.Prompts.Dir, root)
+	c.Eval.Dir = resolveUnderRoot(c.Eval.Dir, root)
 	return c
 }
 
@@ -356,6 +371,9 @@ func defaultConfigNode() (*yaml.Node, error) {
 
 	mapKey(mapValue(&node, "session"), "max_turns").HeadComment =
 		"max_turns: turns kept per thread, oldest dropped first; 0 keeps everything"
+
+	mapKey(mapValue(&node, "eval"), "dir").HeadComment =
+		"dir: where tbuk eval looks for label sets when given no path"
 
 	return &node, nil
 }

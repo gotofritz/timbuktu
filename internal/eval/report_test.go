@@ -147,8 +147,8 @@ func TestReportWriteText_precisionCeilingFootnote(t *testing.T) {
 	if err := r.WriteText(&sb, false); err != nil {
 		t.Fatalf("WriteText: %v", err)
 	}
-	if !strings.Contains(sb.String(), "0.40") || !strings.Contains(sb.String(), "bounded") {
-		t.Errorf("want a note that precision is bounded above by 0.40:\n%s", sb.String())
+	if !strings.Contains(sb.String(), "0.40") || !strings.Contains(sb.String(), "cannot exceed") {
+		t.Errorf("want a note that precision cannot exceed 0.40:\n%s", sb.String())
 	}
 }
 
@@ -232,5 +232,190 @@ func TestDiff_warnings(t *testing.T) {
 	}
 	if !strings.Contains(joined, "embedding") {
 		t.Errorf("want a warning that the embedder changed: %v", d.Warnings)
+	}
+}
+
+func TestReportWriteText_skippedCasesAreNamed(t *testing.T) {
+	r := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	// A case the run could not score shrinks the denominator of every average,
+	// so it is reported rather than quietly dropped.
+	r.Skipped = []eval.SkippedCase{
+		{ID: "maps-followup", Reason: "no gold_query"},
+		{ID: "chit-chat", Reason: "no labels"},
+	}
+
+	var plain strings.Builder
+	if err := r.WriteText(&plain, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(plain.String(), "skipped 2") {
+		t.Errorf("summary should say how many cases were skipped:\n%s", plain.String())
+	}
+	// The names are detail, so they wait for --verbose.
+	if strings.Contains(plain.String(), "maps-followup") {
+		t.Errorf("summary should not list the skipped ids:\n%s", plain.String())
+	}
+
+	var verbose strings.Builder
+	if err := r.WriteText(&verbose, true); err != nil {
+		t.Fatalf("WriteText verbose: %v", err)
+	}
+	for _, want := range []string{"maps-followup", "no gold_query", "chit-chat", "no labels"} {
+		if !strings.Contains(verbose.String(), want) {
+			t.Errorf("verbose report is missing %q:\n%s", want, verbose.String())
+		}
+	}
+}
+
+func TestReportWriteText_noSkippedLineWhenNoneSkipped(t *testing.T) {
+	r := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	var sb strings.Builder
+	if err := r.WriteText(&sb, true); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if strings.Contains(sb.String(), "skipped") {
+		t.Errorf("a run that scored every case should not mention skipping:\n%s", sb.String())
+	}
+}
+
+func TestReportWriteJSON_roundTripsSkipped(t *testing.T) {
+	r := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	r.Skipped = []eval.SkippedCase{{ID: "chit-chat", Reason: "no labels"}}
+
+	var sb strings.Builder
+	if err := r.WriteJSON(&sb); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var back eval.Report
+	if err := json.Unmarshal([]byte(sb.String()), &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(back.Skipped) != 1 || back.Skipped[0].ID != "chit-chat" || back.Skipped[0].Reason != "no labels" {
+		t.Errorf("round-tripped skipped = %+v", back.Skipped)
+	}
+}
+
+func TestReportWriteText_precisionCeilingUsesWhatCameBack(t *testing.T) {
+	// A small corpus returns fewer passages than the cutoff, and precision's
+	// denominator is what came back. A ceiling computed from k alone lands
+	// below the precision actually scored — a footnote contradicting the number
+	// directly above it is worse than no footnote.
+	cases := []eval.CaseResult{
+		{ID: "one", Metrics: eval.Metrics{Precision: 1, Cases: 1, Labels: 1, Retrieved: 1}},
+		{ID: "two", Metrics: eval.Metrics{Precision: 0.5, Cases: 1, Labels: 1, Retrieved: 2}},
+	}
+	r := eval.NewReport("small", sampleRun(), cases)
+
+	var sb strings.Builder
+	if err := r.WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := sb.String()
+	// min(1, 1/1) and min(1, 1/2) average to 0.75 — exactly the precision
+	// scored, so the note has to say 0.75 and not 0.20.
+	if strings.Contains(out, "0.20") {
+		t.Errorf("ceiling was computed from k rather than from what was retrieved:\n%s", out)
+	}
+	if !strings.Contains(out, "0.75") {
+		t.Errorf("want a ceiling of 0.75:\n%s", out)
+	}
+}
+
+func TestReportWriteText_noCeilingNoteWhenPrecisionCanReachOne(t *testing.T) {
+	// Enough labels to fill every retrieved slot: nothing to explain.
+	cases := []eval.CaseResult{
+		{ID: "one", Metrics: eval.Metrics{Precision: 1, Cases: 1, Labels: 5, Retrieved: 5}},
+	}
+	r := eval.NewReport("dense", sampleRun(), cases)
+	var sb strings.Builder
+	if err := r.WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if strings.Contains(sb.String(), "cannot exceed") {
+		t.Errorf("no note is due when precision can reach 1:\n%s", sb.String())
+	}
+}
+
+func TestReportWriteText_pluralisesCounts(t *testing.T) {
+	one := eval.NewReport("s", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 1)})
+	var sb strings.Builder
+	if err := one.WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(sb.String(), "1 case,") || !strings.Contains(sb.String(), "1 label\n") {
+		t.Errorf("a single case and label should read in the singular:\n%s", sb.String())
+	}
+
+	two := eval.NewReport("s", sampleRun(), []eval.CaseResult{
+		caseResult("a", 1, 1, 10, 2), caseResult("b", 1, 1, 10, 2),
+	})
+	sb.Reset()
+	if err := two.WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(sb.String(), "2 cases, 4 labels") {
+		t.Errorf("plurals:\n%s", sb.String())
+	}
+}
+
+func TestDiff_sweptModeExplainsTheMissingEmbedder(t *testing.T) {
+	// hybrid vs keyword is the most ordinary A/B there is, and keyword uses no
+	// embedder by definition. Warning that "the embedding model changed" there
+	// is a false positive, and false positives teach people to skip warnings.
+	hybrid := sampleRun()
+	keyword := sampleRun()
+	keyword.Mode = "keyword"
+	keyword.Embedding = ""
+
+	baseline := eval.NewReport("go-docs", hybrid, []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	current := eval.NewReport("go-docs", keyword, []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	for _, w := range d.Warnings {
+		if strings.Contains(w, "embedding") {
+			t.Errorf("swept mode should explain the embedder difference, got: %q", w)
+		}
+	}
+}
+
+func TestDiff_embeddingChangeUnderTheSameModeStillWarns(t *testing.T) {
+	base := sampleRun()
+	changed := sampleRun()
+	changed.Embedding = "openai/text-embedding-3-small"
+
+	baseline := eval.NewReport("go-docs", base, []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	current := eval.NewReport("go-docs", changed, []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !strings.Contains(strings.Join(d.Warnings, "\n"), "embedding") {
+		t.Errorf("same mode, different embedder is a real instrument change: %v", d.Warnings)
+	}
+}
+
+func TestDiffWriteText_columnsLineUp(t *testing.T) {
+	r := eval.NewReport("s", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	d, err := eval.Diff(r, r)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	var sb strings.Builder
+	if err := d.WriteText(&sb); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
+	width := len(lines[1]) // the header row
+	for _, l := range lines[2:] {
+		if l == "" || strings.Contains(l, "warning") {
+			continue
+		}
+		if len(l) != width {
+			t.Errorf("row %q is %d wide, header is %d — the columns do not line up", l, len(l), width)
+		}
 	}
 }

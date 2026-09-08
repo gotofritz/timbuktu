@@ -99,6 +99,7 @@ func New() *cobra.Command {
 	root.AddCommand(newPreprocessCmd())
 	root.AddCommand(newIngestCmd())
 	root.AddCommand(newSearchCmd())
+	root.AddCommand(newEvalCmd())
 	root.AddCommand(newFindCmd())
 	root.AddCommand(newMetaCmd())
 	root.AddCommand(newAskCmd())
