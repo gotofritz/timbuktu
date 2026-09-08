@@ -22,6 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
+  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring, pure, no DB/LLM/cobra
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
@@ -1008,6 +1009,114 @@ whole records, so those templates cannot stream. Templates that declare nothing
 (`qa`, `brief`) are untouched, streaming included. The builtin `anki` template
 declares the pipeline above; `anki` is the only template that calls its records
 "cards", and that name lives in its prompt, not in the mechanism.
+
+---
+
+## Evaluation
+
+`internal/eval` scores retrieval against a labelled set, so a change to
+chunking, fusion, ranking or query planning is argued from numbers instead of
+from an anecdote. It is pure — no DB, no LLM, no cobra — so every metric is
+arithmetic over a handwritten ranking. The `tbuk eval` command that fills it
+with real results is milestone 2 of `docs/plans/07-retrieval-eval.md`; the
+package exists first because the instrument has to be right before it is
+pointed at anything.
+
+### Label sets
+
+YAML, versioned, one file per set. `ParseSet` rejects unknown keys: a typo in a
+key would otherwise leave a set that parses, runs, and quietly measures
+something other than what was written down — the one failure an eval harness
+cannot afford, because its output looks identical either way.
+
+```yaml
+version: 1
+name: go-docs
+cases:
+  - id: slices-growth
+    query: how do slices grow?
+    relevant:
+      - path: go/slices.md          # matched as a suffix; never a chunk id
+        contains: capacity is doubled   # optional passage anchor
+        grade: 2                        # optional, default 1; nDCG uses it
+    answer: append reallocates when len == cap.   # generation stage
+    must_include: [append, cap]                   # generation stage
+  - id: maps-followup
+    thread:                          # replayed to the planner, never persisted
+      - question: how do slices grow?
+        answer: A slice grows when append finds len == cap.
+    query: and maps?
+    gold_query: how do Go maps grow as they fill up?
+    relevant:
+      - path: go/maps.md
+```
+
+Everything structural is rejected before a single search runs — a set that
+fails on its twentieth case after nineteen model calls has spent them for
+nothing.
+
+### Why a label names a document, not a chunk
+
+`chunks.id` is renumbered by every re-ingest and every `tbuk reindex`, and
+`path §index` moves whenever chunking changes — which is the first thing this
+package exists to measure. So a label names a document plus an optional text
+anchor: the judgment is at chunk granularity, the label is at a granularity
+that survives re-chunking.
+
+- **`MatchesPath`** matches a suffix on a separator boundary, case-folded, with
+  separators levelled. `go/slices.md` matches `/home/u/notes/go/slices.md` and
+  `D:\notes\go\slices.md` alike, and `slices.md` does *not* match
+  `go-slices.md` — without the boundary rule a label would silently credit a
+  neighbouring document, in the direction that flatters the retriever.
+- **`MatchesText`** folds case and reads any run of whitespace as one space, so
+  a reflowed chunk boundary does not fail a case; nothing else is normalised,
+  because punctuation is signal (`len == cap` does not match `len==cap`).
+- **`Set.CheckPaths`** resolves every label against the documents actually
+  indexed, reporting those matching nothing (they score zero forever and read
+  like a retrieval failure) and those matching more than one (scoring against
+  whichever sorted first is how a harness quietly starts lying).
+
+### Metrics
+
+`Score(results, labels, k)` marks one ranked list cut at depth k; `Aggregate`
+macro-averages per case, so a case with eight labels does not outvote one with
+two. Rates and counts travel together: precision at a k larger than the number
+of labels is bounded above by `labels/k`, a property of the label set rather
+than of the retriever, and a report that printed the rate alone would invite a
+hunt for a bug that is not there.
+
+| Metric | Definition |
+|---|---|
+| hit@k | 1 if any labelled passage is in the top k |
+| recall@k | distinct labels satisfied ÷ labels |
+| precision@k | retrieved chunks satisfying some label ÷ retrieved |
+| MRR | 1 ÷ rank of the first satisfying chunk |
+| nDCG@k | Σ (2^grade − 1)/log₂(rank+1), normalised by the ideal ordering |
+
+Each label is credited **at most once**. Two chunks of one labelled document
+are both genuinely relevant and both count towards precision, but only the
+first earns gain — otherwise nDCG could exceed 1, and a retriever could score
+well by returning the same document twice. The ideal DCG is bounded by the
+cutoff rather than by how many results came back, so returning one passage and
+getting it right is not a perfect nDCG over a set of five labels.
+
+A case with no labels scores zero rather than perfect: it is a generation-only
+case, and what its retrieval was worth is a question with no answer.
+
+### Reports
+
+`NewReport` derives the headline from the rows, so a report cannot carry a
+summary that disagrees with the cases printed underneath it. It records the
+**instrument** as well as the numbers — mode, top-k, rewrite, expansion, and
+which embedding and chat models answered — because two runs are comparable only
+to the extent that block matches. Latency is median and p95 rather than a mean,
+so one cold start does not become the headline.
+
+`Diff(current, baseline)` subtracts two reports, because "A/B'd with evidence"
+otherwise depends on someone subtracting nDCG in their head, and they stop by
+Thursday. A baseline from a different label set is an error — comparing two
+corpora is not a comparison. A swept knob is never a warning (sweeping is the
+point); a different corpus size, embedder or model is.
 
 ---
 
