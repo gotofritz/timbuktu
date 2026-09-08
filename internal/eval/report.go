@@ -18,11 +18,19 @@ type Run struct {
 	TopK    int    `json:"top_k"`
 	Rewrite string `json:"rewrite,omitempty"`
 	Expand  int    `json:"expand,omitempty"`
+	// Stage is what was measured: retrieval, generation, or both. A report that
+	// does not say which half it scored is a report whose empty block cannot be
+	// told from a failing one.
+	Stage string `json:"stage,omitempty"`
 	// Embedding and LLM name the models. A frozen-vector run names the fixture
 	// it replayed, so a number is always traceable to an instrument.
-	Embedding string    `json:"embedding,omitempty"`
-	LLM       string    `json:"llm,omitempty"`
-	At        time.Time `json:"at"`
+	Embedding string `json:"embedding,omitempty"`
+	LLM       string `json:"llm,omitempty"`
+	// Judge names the model that graded the answers, recorded separately from
+	// the one that wrote them: a judge upgrade has to be visible as a judge
+	// upgrade rather than as a quality change.
+	Judge string    `json:"judge,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 // CaseResult is one case's row: what was asked, what retrieval actually ran on,
@@ -32,9 +40,27 @@ type CaseResult struct {
 	Query string `json:"query"`
 	// Queries is what retrieval ran after planning — several, under an
 	// expansion. It is where a bad rewrite becomes visible.
-	Queries   []string `json:"queries,omitempty"`
-	Metrics   Metrics  `json:"metrics"`
-	LatencyMS float64  `json:"latency_ms"`
+	Queries []string `json:"queries,omitempty"`
+	// Metrics is the retrieval score. A row with Cases 0 was not scored on
+	// retrieval at all — a generation-only case, under --stage generation —
+	// and it stays out of the retrieval average rather than dragging it down
+	// with zeroes it never earned.
+	Metrics   Metrics `json:"metrics"`
+	LatencyMS float64 `json:"latency_ms"`
+
+	// Generation is the answer's score, absent when the stage did not run.
+	Generation   *GenMetrics `json:"generation,omitempty"`
+	GenLatencyMS float64     `json:"gen_latency_ms,omitempty"`
+	// Judge is what the judge said, when it said anything.
+	Judge *Judgement `json:"judge,omitempty"`
+	// Unjudged is why the judge did not score this case, when one was asked
+	// for and did not arrive. It is recorded instead of a zero: a judge that
+	// failed is not evidence that the answer was wrong.
+	Unjudged string `json:"unjudged,omitempty"`
+	// UnresolvedCitations are the documents the answer named that the index
+	// does not hold — the rows behind a citations score, so a surprising one
+	// can be traced rather than argued with.
+	UnresolvedCitations []string `json:"unresolved_citations,omitempty"`
 }
 
 // Latency summarises what the run cost. Median and p95 rather than a mean: one
@@ -50,13 +76,25 @@ type SkippedCase struct {
 	Reason string `json:"reason"`
 }
 
+// GenerationReport is the generation stage's half of a run: what the answers
+// scored, and what they cost. Its latency is its own, because a model call an
+// answer is a different order of expense from an embedding call a query, and
+// #28's kill criterion is stated in correctness and latency together.
+type GenerationReport struct {
+	Overall GenMetrics `json:"overall"`
+	Latency Latency    `json:"latency"`
+}
+
 // Report is a whole run: the instrument, the headline, and every row behind it.
 type Report struct {
-	Set     string       `json:"set"`
-	Run     Run          `json:"run"`
-	Overall Metrics      `json:"overall"`
-	Latency Latency      `json:"latency"`
-	Cases   []CaseResult `json:"cases"`
+	Set     string  `json:"set"`
+	Run     Run     `json:"run"`
+	Overall Metrics `json:"overall"`
+	Latency Latency `json:"latency"`
+	// Generation is present only when the generation stage ran. Absent is not
+	// zero: nobody asked, so nothing was measured.
+	Generation *GenerationReport `json:"generation,omitempty"`
+	Cases      []CaseResult      `json:"cases"`
 	// Skipped are the cases this run had nothing to score — a generation-only
 	// case under the retrieval stage, or one with no gold query under the
 	// ceiling. Every skip shrinks the denominator of every average above, so
@@ -70,19 +108,59 @@ type Report struct {
 // Overall is derived rather than passed in, so a report cannot carry a summary
 // that disagrees with the cases printed underneath it.
 func NewReport(set string, run Run, cases []CaseResult) Report {
-	ms := make([]Metrics, len(cases))
-	latencies := make([]float64, len(cases))
+	var (
+		ms        []Metrics
+		latencies = make([]float64, len(cases))
+		gens      []GenMetrics
+		genLat    []float64
+	)
 	for i, c := range cases {
-		ms[i] = c.Metrics
+		// A row scored on generation alone carries no retrieval metrics, and
+		// counting its zeroes would print a retrieval failure that never
+		// happened. Retrieval latency is kept either way: retrieval ran, it is
+		// what produced the evidence, and it cost what it cost.
+		if c.Metrics.Cases > 0 {
+			ms = append(ms, c.Metrics)
+		}
 		latencies[i] = c.LatencyMS
+		if c.Generation != nil {
+			gens = append(gens, *c.Generation)
+			genLat = append(genLat, c.GenLatencyMS)
+		}
 	}
-	return Report{
+
+	report := Report{
 		Set:     set,
 		Run:     run,
 		Overall: Aggregate(ms),
-		Latency: Latency{MedianMS: percentile(latencies, 0.5), P95MS: percentile(latencies, 0.95)},
+		Latency: latencyOf(latencies),
 		Cases:   cases,
 	}
+	if len(gens) > 0 {
+		report.Generation = &GenerationReport{
+			Overall: AggregateGen(gens),
+			Latency: latencyOf(genLat),
+		}
+	}
+	return report
+}
+
+func latencyOf(ms []float64) Latency {
+	return Latency{MedianMS: percentile(ms, 0.5), P95MS: percentile(ms, 0.95)}
+}
+
+// headlineCounts names what the run actually scored. A generation-only run has
+// no retrieval cases, and heading it "0 cases" would be a claim about the run
+// rather than a fact about the set.
+func (r Report) headlineCounts() string {
+	if r.Overall.Cases == 0 && r.Generation != nil {
+		return Plural(r.Generation.Overall.Cases, "answer")
+	}
+	counts := fmt.Sprintf("%s, %s", Plural(r.Overall.Cases, "case"), Plural(r.Overall.Labels, "label"))
+	if r.Generation != nil && r.Generation.Overall.Cases != r.Overall.Cases {
+		counts += ", " + Plural(r.Generation.Overall.Cases, "answer")
+	}
+	return counts
 }
 
 // percentile returns the p-th percentile of xs by nearest rank, except at the
@@ -128,8 +206,7 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	var b strings.Builder
 	k := r.Run.TopK
 
-	fmt.Fprintf(&b, "%s — %s, %s\n", r.Set,
-		Plural(r.Overall.Cases, "case"), Plural(r.Overall.Labels, "label"))
+	fmt.Fprintf(&b, "%s — %s\n", r.Set, r.headlineCounts())
 	fmt.Fprintf(&b, "  mode %s   top %d", r.Run.Mode, k)
 	if r.Run.Rewrite != "" {
 		fmt.Fprintf(&b, "   rewrite %s", r.Run.Rewrite)
@@ -144,31 +221,50 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	if r.Run.LLM != "" {
 		fmt.Fprintf(&b, "  llm %s\n", r.Run.LLM)
 	}
+	if r.Run.Judge != "" {
+		fmt.Fprintf(&b, "  judge %s\n", r.Run.Judge)
+	}
 	if !r.Run.At.IsZero() {
 		fmt.Fprintf(&b, "  run %s\n", r.Run.At.UTC().Format(time.RFC3339))
 	}
 
-	o := r.Overall
-	fmt.Fprintf(&b, "\n  hit@%d %.2f   recall@%d %.2f   P@%d %.2f   MRR %.2f   nDCG@%d %.2f\n",
-		k, o.Hit, k, o.Recall, k, o.Precision, o.MRR, k, o.NDCG)
+	// The retrieval headline is printed only when something was scored on
+	// retrieval. Under --stage generation the numbers would all be zero, and a
+	// row of zeroes reads exactly like the failure this harness exists to find.
+	if r.Overall.Cases > 0 {
+		o := r.Overall
+		fmt.Fprintf(&b, "\n  hit@%d %.2f   recall@%d %.2f   P@%d %.2f   MRR %.2f   nDCG@%d %.2f\n",
+			k, o.Hit, k, o.Recall, k, o.Precision, o.MRR, k, o.NDCG)
+	}
 	fmt.Fprintf(&b, "  latency  median %.0fms   p95 %.0fms\n", r.Latency.MedianMS, r.Latency.P95MS)
 
 	if n := len(r.Skipped); n > 0 {
-		fmt.Fprintf(&b, "  skipped %d of %s with nothing to score\n", n, Plural(r.Overall.Cases+n, "case"))
+		fmt.Fprintf(&b, "  skipped %d of %s with nothing to score\n", n, Plural(len(r.Cases)+n, "case"))
 	}
 
-	if note := precisionCeiling(r.Cases, k); note != "" {
-		fmt.Fprintf(&b, "\n  %s\n", note)
+	if r.Overall.Cases > 0 {
+		if note := precisionCeiling(r.Cases, k); note != "" {
+			fmt.Fprintf(&b, "\n  %s\n", note)
+		}
 	}
 
-	if verbose && len(r.Cases) > 0 {
+	r.writeGeneration(&b)
+
+	if verbose && r.Overall.Cases > 0 {
 		fmt.Fprintf(&b, "\n  %-28s %6s %7s %7s %7s %7s %8s\n",
 			"case", "hit", "recall", "P", "MRR", "nDCG", "ms")
 		for _, c := range r.Cases {
+			if c.Metrics.Cases == 0 {
+				continue
+			}
 			m := c.Metrics
 			fmt.Fprintf(&b, "  %-28s %6.2f %7.2f %7.2f %7.2f %7.2f %8.0f\n",
 				truncate(c.ID, 28), m.Hit, m.Recall, m.Precision, m.MRR, m.NDCG, c.LatencyMS)
 		}
+	}
+
+	if verbose && r.Generation != nil {
+		r.writeGenerationCases(&b)
 	}
 
 	if verbose && len(r.Skipped) > 0 {
@@ -182,6 +278,113 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		return fmt.Errorf("eval: write report: %w", err)
 	}
 	return nil
+}
+
+// writeGeneration prints the generation half, when the stage ran.
+//
+// Every rate is printed with the number of answers behind it whenever that
+// differs from the number scored, because these denominators genuinely differ
+// case by case: a set where six of twelve cases carry must_include reports what
+// those six scored, and a reader who assumed twelve would read it as half.
+func (r Report) writeGeneration(b *strings.Builder) {
+	if r.Generation == nil {
+		return
+	}
+	g := r.Generation.Overall
+	fmt.Fprintf(b, "\n  generation — %s\n", Plural(g.Cases, "answer"))
+	fmt.Fprintf(b, "    includes %s   citations %s   groundedness %s\n",
+		rateOver(g.Includes, g.WithIncludes, g.Cases),
+		rateOver(g.Citations, g.WithCitations, g.Cases),
+		rateOver(g.Groundedness, g.WithWords, g.Cases))
+	if g.Judged > 0 {
+		fmt.Fprintf(b, "    correctness %.2f   faithfulness %.2f   (%d of %d judged)\n",
+			g.Correctness, g.Faithfulness, g.Judged, g.Cases)
+	}
+	fmt.Fprintf(b, "    latency  median %.0fms   p95 %.0fms\n",
+		r.Generation.Latency.MedianMS, r.Generation.Latency.P95MS)
+}
+
+// rateOver renders a rate, naming its denominator when it is not the whole set.
+// A rate over nothing prints as a dash rather than as 0.00: nothing asked for
+// it, so nothing failed it.
+func rateOver(rate float64, over, cases int) string {
+	switch over {
+	case 0:
+		return "   —"
+	case cases:
+		return fmt.Sprintf("%.2f", rate)
+	default:
+		return fmt.Sprintf("%.2f (of %d)", rate, over)
+	}
+}
+
+// writeGenerationCases prints the per-case generation rows, then whatever the
+// judge said about them. The reasons are the point of a judged number: without
+// them a 1 is an oracle, and an oracle cannot be argued with or debugged.
+func (r Report) writeGenerationCases(b *strings.Builder) {
+	fmt.Fprintf(b, "\n  %-28s %8s %8s %8s %6s %7s %8s\n",
+		"answer", "includes", "cites", "grounded", "corr", "faith", "ms")
+	for _, c := range r.Cases {
+		if c.Generation == nil {
+			continue
+		}
+		g := c.Generation
+		fmt.Fprintf(b, "  %-28s %8.2f %8.2f %8.2f %6s %7s %8.0f\n",
+			truncate(c.ID, 28), g.Includes, g.Citations, g.Groundedness,
+			judgedCell(g.Correctness, g.Judged), judgedCell(g.Faithfulness, g.Judged), c.GenLatencyMS)
+	}
+
+	var judged, unjudged []CaseResult
+	for _, c := range r.Cases {
+		switch {
+		case c.Judge != nil:
+			judged = append(judged, c)
+		case c.Unjudged != "":
+			unjudged = append(unjudged, c)
+		}
+	}
+	if len(judged) > 0 {
+		b.WriteString("\n  judge:\n")
+		for _, c := range judged {
+			fmt.Fprintf(b, "    %s\n", c.ID)
+			fmt.Fprintf(b, "      correctness %d — %s\n", c.Judge.Correctness.Score, orNoReason(c.Judge.Correctness.Reason))
+			fmt.Fprintf(b, "      faithfulness %d — %s\n", c.Judge.Faithfulness.Score, orNoReason(c.Judge.Faithfulness.Reason))
+		}
+	}
+	if len(unjudged) > 0 {
+		b.WriteString("\n  unjudged:\n")
+		for _, c := range unjudged {
+			fmt.Fprintf(b, "    %-28s %s\n", truncate(c.ID, 28), c.Unjudged)
+		}
+	}
+
+	var unresolved []CaseResult
+	for _, c := range r.Cases {
+		if len(c.UnresolvedCitations) > 0 {
+			unresolved = append(unresolved, c)
+		}
+	}
+	if len(unresolved) > 0 {
+		b.WriteString("\n  citations naming no indexed document:\n")
+		for _, c := range unresolved {
+			fmt.Fprintf(b, "    %-28s %s\n", truncate(c.ID, 28), strings.Join(c.UnresolvedCitations, ", "))
+		}
+	}
+}
+
+// judgedCell renders a judged score, or a dash when the judge did not score it.
+func judgedCell(v float64, judged int) string {
+	if judged == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.2f", v)
+}
+
+func orNoReason(s string) string {
+	if s == "" {
+		return "(no reason given)"
+	}
+	return s
 }
 
 // precisionCeiling explains a precision that cannot reach 1 however good the
@@ -248,6 +451,10 @@ type ReportDiff struct {
 	Metrics       []MetricDelta `json:"metrics"`
 	LatencyMedian MetricDelta   `json:"latency_median"`
 	LatencyP95    MetricDelta   `json:"latency_p95"`
+	// Generation is empty unless both runs scored the generation stage —
+	// there is no delta between a number and the absence of one.
+	Generation       []MetricDelta `json:"generation,omitempty"`
+	GenLatencyMedian *MetricDelta  `json:"generation_latency_median,omitempty"`
 	// Warnings name the ways the two runs are not quite comparable. A swept
 	// knob is never one of them — sweeping is the point — but a different
 	// corpus, a different embedder or a different model is.
@@ -287,6 +494,13 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 			"the two runs cover different numbers of cases (%d now, %d in the baseline), "+
 				"so the averages are over different questions", c.Cases, b.Cases))
 	}
+	d.Generation, d.GenLatencyMedian = diffGeneration(current, baseline)
+	if (current.Generation == nil) != (baseline.Generation == nil) {
+		d.Warnings = append(d.Warnings, fmt.Sprintf(
+			"only one of the two runs scored the generation stage (%s now, %s in the baseline), "+
+				"so there is nothing to compare on the answers",
+			ranOrNot(current.Generation != nil), ranOrNot(baseline.Generation != nil)))
+	}
 	// A swept knob is never a warning — sweeping is the point — and switching
 	// --mode to or from keyword drops the embedder by definition, so that
 	// difference is already explained by the sweep the reader asked for.
@@ -301,7 +515,48 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 			"the model changed (%s, was %s): generation scores and latency move with it",
 			orNone(current.Run.LLM), orNone(baseline.Run.LLM)))
 	}
+	// A judge upgrade has to read as a judge upgrade. Without this the judged
+	// numbers move, the deterministic ones do not, and the obvious conclusion
+	// is about the answers rather than about the instrument.
+	if current.Run.Judge != baseline.Run.Judge {
+		d.Warnings = append(d.Warnings, fmt.Sprintf(
+			"the judge changed (%s, was %s): correctness and faithfulness are two different "+
+				"instruments here, and the deterministic scores are the ones still comparable",
+			orNone(current.Run.Judge), orNone(baseline.Run.Judge)))
+	}
 	return d, nil
+}
+
+// diffGeneration compares the generation halves, or returns nothing when only
+// one run has one.
+func diffGeneration(current, baseline Report) ([]MetricDelta, *MetricDelta) {
+	if current.Generation == nil || baseline.Generation == nil {
+		return nil, nil
+	}
+	c, b := current.Generation.Overall, baseline.Generation.Overall
+	deltas := []MetricDelta{
+		newDelta("includes", c.Includes, b.Includes),
+		newDelta("citations", c.Citations, b.Citations),
+		newDelta("groundedness", c.Groundedness, b.Groundedness),
+	}
+	// The judged axes are compared only when both runs actually judged. A run
+	// without --judge scores them zero, and a zero minus a zero is a delta that
+	// says nothing while looking exactly like one that says something.
+	if c.Judged > 0 && b.Judged > 0 {
+		deltas = append(deltas,
+			newDelta("correctness", c.Correctness, b.Correctness),
+			newDelta("faithfulness", c.Faithfulness, b.Faithfulness))
+	}
+	latency := newDelta("gen latency median",
+		current.Generation.Latency.MedianMS, baseline.Generation.Latency.MedianMS)
+	return deltas, &latency
+}
+
+func ranOrNot(ran bool) string {
+	if ran {
+		return "it did"
+	}
+	return "it did not"
 }
 
 func newDelta(name string, current, baseline float64) MetricDelta {
@@ -324,7 +579,14 @@ func (d ReportDiff) WriteText(w io.Writer) error {
 	for _, m := range d.Metrics {
 		fmt.Fprintf(&b, "  %-16s %9.2f %9.2f %+9.2f\n", m.Name, m.Current, m.Baseline, m.Delta)
 	}
-	for _, m := range []MetricDelta{d.LatencyMedian, d.LatencyP95} {
+	for _, m := range d.Generation {
+		fmt.Fprintf(&b, "  %-16s %9.2f %9.2f %+9.2f\n", m.Name, m.Current, m.Baseline, m.Delta)
+	}
+	latencies := []MetricDelta{d.LatencyMedian, d.LatencyP95}
+	if d.GenLatencyMedian != nil {
+		latencies = append(latencies, *d.GenLatencyMedian)
+	}
+	for _, m := range latencies {
 		fmt.Fprintf(&b, "  %-16s %7.0fms %7.0fms %+7.0fms\n", m.Name, m.Current, m.Baseline, m.Delta)
 	}
 	for _, warning := range d.Warnings {
