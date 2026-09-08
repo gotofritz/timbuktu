@@ -19,18 +19,31 @@ import (
 	"github.com/gotofritz/timbuktu/internal/embeddings"
 	"github.com/gotofritz/timbuktu/internal/eval"
 	"github.com/gotofritz/timbuktu/internal/llm"
+	"github.com/gotofritz/timbuktu/internal/normalize"
 	"github.com/gotofritz/timbuktu/internal/prompts"
 	"github.com/gotofritz/timbuktu/internal/retrieval"
 	"github.com/gotofritz/timbuktu/internal/rewrite"
 	"github.com/gotofritz/timbuktu/internal/search"
 )
 
-// EvalOptions configures one run of the retrieval stage.
+// AnswerFn produces one case's answer from the passages retrieval found.
+//
+// It returns the completion and the chunks that actually reached the prompt,
+// which are not always the ones retrieval returned: the context ladder drops
+// passages to make a prompt fit. Groundedness asks what the model could have
+// read, so it has to be scored against what the model was shown.
+type AnswerFn func(ctx context.Context, question string, thread []conversation.Turn,
+	chunks []retrieval.RetrievedChunk) (string, []retrieval.RetrievedChunk, error)
+
+// EvalOptions configures one run.
 type EvalOptions struct {
 	Mode    string
 	TopK    int
 	Rewrite string
 	Expand  int
+	// Stage is which halves are scored: eval.StageRetrieval (the default and
+	// the free one), eval.StageGeneration, or eval.StageBoth.
+	Stage string
 	// Gold retrieves on each case's gold_query — the standalone question a
 	// competent human would have typed — instead of planning one. It is the
 	// ceiling a rewrite is trying to reach, and reaching for it costs no model
@@ -40,10 +53,23 @@ type EvalOptions struct {
 	// Planner turns a case's thread and its question into the queries
 	// retrieval runs. Nil retrieves on the question exactly as written.
 	Planner rewrite.Planner
-	// Embedding and LLM name the models that answered, for the report's
-	// instrument block: two runs are comparable only as far as that matches.
-	Embedding string
-	LLM       string
+	// Answer produces a case's completion. Required by the generation stage
+	// and unused by the retrieval one, which is what keeps a retrieval eval
+	// free of a model.
+	Answer AnswerFn
+	// Judge adds the model's marks to the deterministic scoring. Nil is the
+	// default: a metric that needs a model and an API key is a metric that
+	// never runs in CI, so it is opt-in and it never replaces the free ones.
+	Judge *eval.Judge
+	// Indexed is every document path the knowledge base holds, for resolving
+	// the citations an answer emitted.
+	Indexed []string
+	// Embedding, LLM and JudgeModel name the models that answered, for the
+	// report's instrument block: two runs are comparable only as far as that
+	// matches.
+	Embedding  string
+	LLM        string
+	JudgeModel string
 }
 
 // RunEval scores a label set's retrieval and returns the report.
@@ -62,6 +88,10 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			return eval.Report{}, err
 		}
 	}
+	if eval.ScoresGeneration(opts.Stage) && opts.Answer == nil {
+		return eval.Report{}, fmt.Errorf(
+			"eval: the %s stage needs a model to answer with, and none was configured", opts.Stage)
+	}
 
 	var (
 		scored  []eval.CaseResult
@@ -72,12 +102,14 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		if opts.CaseID != "" && c.ID != opts.CaseID {
 			continue
 		}
-		// Scoring a generation-only case for retrieval is a question with no
-		// answer. Counted as a zero it would drag every average and read on the
-		// report exactly like a retrieval failure.
-		if len(c.Relevant) == 0 {
-			skipped = append(skipped, eval.SkippedCase{
-				ID: c.ID, Reason: "no relevant labels to score retrieval against"})
+		// A case neither stage asked for is skipped rather than scored zero: a
+		// generation-only case under --stage retrieval has no ranked list to
+		// mark, and counted as a zero it would drag every average and read on
+		// the report exactly like a retrieval failure.
+		scoreRetrieval := eval.ScoresRetrieval(opts.Stage) && len(c.Relevant) > 0
+		scoreGeneration := eval.ScoresGeneration(opts.Stage) && scorableAnswer(c)
+		if !scoreRetrieval && !scoreGeneration {
+			skipped = append(skipped, eval.SkippedCase{ID: c.ID, Reason: nothingToScore(opts.Stage)})
 			continue
 		}
 
@@ -97,13 +129,21 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			return eval.Report{}, fmt.Errorf("eval: case %q: retrieve: %w", c.ID, err)
 		}
 
-		scored = append(scored, eval.CaseResult{
+		row := eval.CaseResult{
 			ID:        c.ID,
 			Query:     c.Query,
 			Queries:   queries,
-			Metrics:   eval.Score(evalResults(chunks), c.Relevant, opts.TopK),
 			LatencyMS: float64(elapsed.Microseconds()) / 1000,
-		})
+		}
+		if scoreRetrieval {
+			row.Metrics = eval.Score(evalResults(chunks), c.Relevant, opts.TopK)
+		}
+		if scoreGeneration {
+			if err := scoreAnswer(ctx, &row, c, chunks, opts); err != nil {
+				return eval.Report{}, err
+			}
+		}
+		scored = append(scored, row)
 	}
 
 	report := eval.NewReport(set.Name, eval.Run{
@@ -111,12 +151,78 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		TopK:      opts.TopK,
 		Rewrite:   rewriteLabel(opts),
 		Expand:    opts.Expand,
+		Stage:     stageLabel(opts.Stage),
 		Embedding: opts.Embedding,
 		LLM:       opts.LLM,
+		Judge:     opts.JudgeModel,
 		At:        time.Now().UTC(),
 	}, scored)
 	report.Skipped = skipped
 	return report, nil
+}
+
+// scoreAnswer produces the case's answer, marks it, and — under --judge —
+// records what the judge made of it.
+//
+// A failed answer fails the run: an outage is not evidence that an answer was
+// bad, and a report over the three cases that happened to succeed is exactly
+// the kind of number this harness exists to stop people quoting. A failed
+// judge is different, and stops at the case: the deterministic scores are still
+// real, and the row says why it went unjudged.
+func scoreAnswer(ctx context.Context, row *eval.CaseResult, c eval.Case,
+	chunks []retrieval.RetrievedChunk, opts EvalOptions) error {
+	start := time.Now()
+	text, used, err := opts.Answer(ctx, c.Query, threadOf(c), chunks)
+	row.GenLatencyMS = float64(time.Since(start).Microseconds()) / 1000
+	if err != nil {
+		return fmt.Errorf("eval: case %q: answer: %w", c.ID, err)
+	}
+
+	answer := eval.Answer{Text: text, Passages: evalResults(used)}
+	metrics := eval.ScoreAnswer(answer, c, opts.Indexed)
+	_, row.UnresolvedCitations = eval.ResolveCitations(text, opts.Indexed)
+
+	if opts.Judge != nil {
+		verdict, err := opts.Judge.Judge(ctx, c, answer)
+		if err != nil {
+			row.Unjudged = err.Error()
+		} else {
+			row.Judge = &verdict
+			metrics = metrics.WithJudgement(verdict)
+		}
+	}
+	row.Generation = &metrics
+	return nil
+}
+
+// scorableAnswer reports whether the generation stage has anything to mark this
+// case's answer against.
+func scorableAnswer(c eval.Case) bool {
+	return c.Answer != "" || len(c.MustInclude) > 0
+}
+
+// nothingToScore names why a case fell out of the run, in the terms of the
+// stage that was asked for — "no relevant labels" on a generation-only case
+// would send the reader looking for a label set problem that is not there.
+func nothingToScore(stage string) string {
+	switch {
+	case eval.ScoresRetrieval(stage) && eval.ScoresGeneration(stage):
+		return "no relevant labels and no reference answer to score against"
+	case eval.ScoresGeneration(stage):
+		return "no answer or must_include to score the completion against"
+	default:
+		return "no relevant labels to score retrieval against"
+	}
+}
+
+// stageLabel is what the report records as the stage that ran. An unset stage
+// is the retrieval default, and a report that said nothing would leave an empty
+// generation block indistinguishable from a failing one.
+func stageLabel(stage string) string {
+	if stage == "" {
+		return eval.StageRetrieval
+	}
+	return stage
 }
 
 // planCase returns the queries to retrieve on, or the reason this case cannot
@@ -318,6 +424,81 @@ func LoadBaselineReport(path string) (eval.Report, error) {
 	return report, nil
 }
 
+// EvalAnswerFn returns the answer function the generation stage runs: the same
+// prompt `ask` renders, the same context ladder, the same normalization, and no
+// output.
+//
+// It is `ask` without the terminal rather than a second answering path, because
+// the generation stage measures the answers people actually get. A prompt
+// assembled differently here would measure a prompt nobody runs, and the
+// difference would be invisible in the numbers.
+//
+// Exported for testing.
+func EvalAnswerFn(tmpl *prompts.Template, chat chatFn, contextWindow, outputReserve int) AnswerFn {
+	return func(ctx context.Context, question string, thread []conversation.Turn,
+		chunks []retrieval.RetrievedChunk) (string, []retrieval.RetrievedChunk, error) {
+		manifest := tmpl.Manifest()
+
+		variables := make(map[string]string, len(manifest.Variables))
+		for name, v := range manifest.Variables {
+			variables[name] = v.Default
+		}
+		chunks = trimToTokenBudget(chunks, manifest.Retrieval.MaxTokens)
+
+		build := func(hs []conversation.Turn, cs []retrieval.RetrievedChunk) ([]llm.Message, error) {
+			system, user, err := tmpl.Render(prompts.TemplateData{
+				Question: question, Chunks: cs, Variables: variables})
+			if err != nil {
+				return nil, fmt.Errorf("render template: %w", err)
+			}
+			return conversation.Messages(system, user, hs), nil
+		}
+
+		window := manifest.ContextTokens
+		if window <= 0 {
+			window = contextWindow
+		}
+		reserve := manifest.MaxTokens
+		if reserve <= 0 {
+			reserve = outputReserve
+		}
+
+		fitted := fittedPrompt{chunks: chunks}
+		var err error
+		if window > 0 {
+			fitted, err = fitToContext(build, thread, chunks, window-reserve)
+		} else {
+			fitted.messages, err = build(thread, chunks)
+		}
+		if err != nil {
+			return "", nil, err
+		}
+
+		tokens, err := chat(ctx, fitted.messages, llm.CallOptions{
+			Model: manifest.Model, Temperature: manifest.Temperature, MaxTokens: manifest.MaxTokens})
+		if err != nil {
+			return "", nil, fmt.Errorf("LLM chat: %w", err)
+		}
+		var sb strings.Builder
+		for tok := range tokens {
+			if tok.Error != nil {
+				return "", nil, fmt.Errorf("LLM stream: %w", tok.Error)
+			}
+			sb.WriteString(tok.Text)
+			if tok.Done {
+				break
+			}
+		}
+		// The normalized text, not the raw completion: a case is scored on what
+		// the user would have seen.
+		text, err := normalize.Apply(sb.String(), manifest.Normalize)
+		if err != nil {
+			return "", nil, fmt.Errorf("normalize output: %w", err)
+		}
+		return strings.TrimSpace(text), fitted.chunks, nil
+	}
+}
+
 // modeSearcher adapts a search.Searcher to the single-method interface the
 // retriever wants, running whichever leg --mode names.
 //
@@ -357,6 +538,8 @@ func newEvalCmd() *cobra.Command {
 		expandFlag   int
 		gold         bool
 		caseID       string
+		stage        string
+		judgeFlag    bool
 		baselinePath string
 		format       string
 		verbose      bool
@@ -379,7 +562,22 @@ comparing two settings is two runs of one command rather than two builds:
 
 --gold retrieves on each case's gold_query instead — the standalone question a
 human would have typed, and the ceiling a rewrite is trying to reach. It costs
-no model call, so the gap a rewrite has left to close is free to measure.`,
+no model call, so the gap a rewrite has left to close is free to measure.
+
+--stage picks what is scored. Retrieval is the default and costs no model call
+at all; generation answers each case and marks the completion, which costs one.
+They are separate because attribution is: an answer that got worse because
+retrieval got worse is a different bug from one that got worse on the same
+evidence.
+
+  tbuk eval go-docs --stage both
+  tbuk eval go-docs --stage generation --judge --verbose
+
+--judge adds a model's marks — correctness against the case's answer, and
+faithfulness against the passages — to the deterministic scoring, which always
+runs alongside it. The judge's prompt is versioned with this binary rather than
+configurable, so two runs cannot be scored by two different instruments;
+--judge --verbose prints it.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
@@ -395,6 +593,16 @@ no model call, so the gap a rewrite has left to close is free to measure.`,
 			}
 			if err := rewrite.ValidateExpand(expandFlag); err != nil {
 				return fmt.Errorf("--expand: %w", err)
+			}
+			if err := eval.ValidateStage(stage); err != nil {
+				return fmt.Errorf("--stage: %w", err)
+			}
+			// A judge with no answers to judge would open a model connection,
+			// score nothing, and print a report that looks exactly like one
+			// where the judge disagreed with nothing.
+			if judgeFlag && !eval.ScoresGeneration(stage) {
+				return fmt.Errorf("--judge marks the generation stage, but --stage is %q; "+
+					"add --stage generation or --stage both", stage)
 			}
 
 			cfg := configFrom(cmd)
@@ -450,10 +658,53 @@ no model call, so the gap a rewrite has left to close is free to measure.`,
 
 			runOpts := EvalOptions{
 				Mode: mode, TopK: topK, Rewrite: rewriteFlag, Expand: expandFlag,
-				Gold: gold, CaseID: caseID,
+				Gold: gold, CaseID: caseID, Stage: stage,
 			}
 			if mode != "keyword" {
 				runOpts.Embedding = modelLabel(cfg.Embedding.Provider, cfg.Embedding.Model)
+			}
+
+			// Zero, not the template's: a grader that disagrees with itself
+			// between two runs of the same set is not a measuring instrument.
+			judgeTemperature := 0.0
+			if eval.ScoresGeneration(stage) {
+				// The indexed paths are what a citation resolves against, and
+				// they are read once for the whole run rather than a query a
+				// case: the index does not change under an eval (D7).
+				docs, err := app.Docs().List(cmd.Context())
+				if err != nil {
+					return fmt.Errorf("eval: read the indexed documents: %w", err)
+				}
+				runOpts.Indexed = make([]string, len(docs))
+				for i, d := range docs {
+					runOpts.Indexed[i] = d.Path
+				}
+
+				tmpl, err := prompts.NewTemplateDir(cfg.Prompts.Dir).Load(templateName)
+				if err != nil {
+					return fmt.Errorf("load template %q: %w", templateName, err)
+				}
+				l, err := app.LLM()
+				if err != nil {
+					return err
+				}
+				runOpts.Answer = EvalAnswerFn(tmpl, l.Chat, cfg.LLM.ContextTokens, cfg.LLM.MaxTokens)
+				runOpts.LLM = modelLabel(cfg.LLM.Provider, cfg.LLM.Model)
+
+				if judgeFlag {
+					manifest := tmpl.Manifest()
+					// The judge is spent at the template's model, at a
+					// temperature of its own.
+					runOpts.Judge = &eval.Judge{
+						Chat: l.Chat,
+						Opts: llm.CallOptions{Model: manifest.Model, Temperature: &judgeTemperature},
+					}
+					runOpts.JudgeModel = modelLabel(cfg.LLM.Provider, cfg.LLM.Model)
+					if verbose {
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+							"the judge is asked this, and nothing else:\n\n%s\n\n", eval.JudgeSystem)
+					}
+				}
 			}
 
 			// The planner is built last, and each of its dependencies only when
@@ -525,6 +776,10 @@ no model call, so the gap a rewrite has left to close is free to measure.`,
 	cmd.Flags().IntVar(&expandFlag, "expand", 0, "extra wordings of the query to retrieve on and fuse (0 = off)")
 	cmd.Flags().BoolVar(&gold, "gold", false, "retrieve on each case's gold_query — the ceiling a rewrite is reaching for")
 	cmd.Flags().StringVar(&caseID, "case", "", "score only the case with this id")
+	cmd.Flags().StringVar(&stage, "stage", eval.StageRetrieval,
+		"what to score: retrieval | generation | both (generation costs a model call a case)")
+	cmd.Flags().BoolVar(&judgeFlag, "judge", false,
+		"add an LLM judge's correctness and faithfulness marks to the generation stage")
 	cmd.Flags().StringVar(&baselinePath, "baseline", "", "a previous --format json report to diff against")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text or json")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print a row per case, and the skipped ones")

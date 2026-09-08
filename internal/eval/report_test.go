@@ -419,3 +419,238 @@ func TestDiffWriteText_columnsLineUp(t *testing.T) {
 		}
 	}
 }
+
+// genCase builds a case row that was scored on generation as well as retrieval.
+func genCase(id string, includes, ground, ms float64) eval.CaseResult {
+	c := caseResult(id, 1, 1, 10, 2)
+	c.Generation = &eval.GenMetrics{
+		Includes: includes, WithIncludes: 1,
+		Citations: 1, WithCitations: 1,
+		Groundedness: ground, WithWords: 1,
+		Cases: 1,
+	}
+	c.GenLatencyMS = ms
+	return c
+}
+
+func TestNewReport_generationHalfIsDerivedFromTheRows(t *testing.T) {
+	r := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{
+		genCase("a", 1, 0.5, 1000),
+		genCase("b", 0.5, 1, 3000),
+	})
+	if r.Generation == nil {
+		t.Fatal("Generation is nil; the rows carry generation scores")
+	}
+	almost(t, "Generation.Includes", r.Generation.Overall.Includes, 0.75)
+	almost(t, "Generation.Groundedness", r.Generation.Overall.Groundedness, 0.75)
+	if r.Generation.Overall.Cases != 2 {
+		t.Errorf("Generation.Cases = %d, want 2", r.Generation.Overall.Cases)
+	}
+	// Generation costs a model call a case, so it has a latency of its own —
+	// #28's kill criterion is stated in correctness and latency together.
+	almost(t, "generation median", r.Generation.Latency.MedianMS, 2000)
+}
+
+func TestNewReport_noGenerationHalfWhenTheStageDidNotRun(t *testing.T) {
+	r := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	if r.Generation != nil {
+		t.Errorf("Generation = %+v, want nil when no row was scored on generation", r.Generation)
+	}
+}
+
+func TestNewReport_generationOnlyRunHasNoRetrievalHeadline(t *testing.T) {
+	// Under --stage generation a case carries no retrieval metrics. Averaging
+	// its absent scores in as zeroes would print a retrieval failure that never
+	// happened.
+	row := eval.CaseResult{ID: "a", Query: "q", LatencyMS: 10, GenLatencyMS: 500,
+		Generation: &eval.GenMetrics{Cases: 1, Groundedness: 1, WithWords: 1}}
+	r := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{row})
+
+	if r.Overall.Cases != 0 {
+		t.Errorf("Overall.Cases = %d, want 0 — no case was scored on retrieval", r.Overall.Cases)
+	}
+	if r.Generation == nil || r.Generation.Overall.Cases != 1 {
+		t.Fatalf("Generation = %+v, want one answer scored", r.Generation)
+	}
+	var sb strings.Builder
+	if err := r.WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if strings.Contains(sb.String(), "hit@") {
+		t.Errorf("a generation-only run printed retrieval metrics:\n%s", sb.String())
+	}
+	if !strings.Contains(sb.String(), "groundedness") {
+		t.Errorf("a generation-only run printed no generation metrics:\n%s", sb.String())
+	}
+}
+
+func TestReportWriteText_generationBlock(t *testing.T) {
+	cases := []eval.CaseResult{genCase("slices-growth", 1, 0.5, 1000), genCase("maps", 0.5, 1, 3000)}
+	cases[0].Judge = &eval.Judgement{
+		Correctness:  eval.Verdict{Score: 2, Reason: "says what the reference says"},
+		Faithfulness: eval.Verdict{Score: 1, Reason: "one claim is not in the passages"},
+	}
+	cases[0].Generation = ptrGen(cases[0].Generation.WithJudgement(*cases[0].Judge))
+	cases[1].Unjudged = "the judge did not return a verdict"
+
+	run := sampleRun()
+	run.Stage = "both"
+	run.Judge = "llama/llama3"
+	r := eval.NewReport("go-docs", run, cases)
+
+	var sb strings.Builder
+	if err := r.WriteText(&sb, true); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := sb.String()
+	for _, want := range []string{
+		"generation", "includes", "citations", "groundedness",
+		"correctness", "faithfulness",
+		"judge llama/llama3",
+		// The judge's reasons are what make a judged number arguable.
+		"says what the reference says", "one claim is not in the passages",
+		// A case the judge could not score says so rather than scoring zero.
+		"the judge did not return a verdict",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("verbose report is missing %q:\n%s", want, out)
+		}
+	}
+	// One of two cases was judged, and the report says which denominator the
+	// judged numbers are over.
+	if !strings.Contains(out, "1 of 2") {
+		t.Errorf("report does not say how many cases were judged:\n%s", out)
+	}
+}
+
+func ptrGen(m eval.GenMetrics) *eval.GenMetrics { return &m }
+
+func TestReportWriteJSON_roundTripsGeneration(t *testing.T) {
+	run := sampleRun()
+	run.Stage = "both"
+	r := eval.NewReport("go-docs", run, []eval.CaseResult{genCase("a", 1, 0.5, 1000)})
+
+	var buf strings.Builder
+	if err := r.WriteJSON(&buf); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var back eval.Report
+	if err := json.Unmarshal([]byte(buf.String()), &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Generation == nil {
+		t.Fatal("the generation half did not survive the round trip")
+	}
+	almost(t, "Generation.Includes", back.Generation.Overall.Includes, 1)
+	if back.Run.Stage != "both" {
+		t.Errorf("Run.Stage = %q, want both", back.Run.Stage)
+	}
+	if back.Cases[0].Generation == nil {
+		t.Error("the per-case generation scores did not survive the round trip")
+	}
+}
+
+func TestDiff_generationDeltas(t *testing.T) {
+	run := sampleRun()
+	run.Stage = "both"
+	baseline := eval.NewReport("go-docs", run, []eval.CaseResult{genCase("a", 0.5, 0.5, 1000)})
+	current := eval.NewReport("go-docs", run, []eval.CaseResult{genCase("a", 1, 0.75, 1000)})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	byName := map[string]eval.MetricDelta{}
+	for _, m := range d.Generation {
+		byName[m.Name] = m
+	}
+	if got := byName["includes"]; !closeTo(got.Delta, 0.5) {
+		t.Errorf("includes delta = %+v, want +0.50", got)
+	}
+	if got := byName["groundedness"]; !closeTo(got.Delta, 0.25) {
+		t.Errorf("groundedness delta = %+v, want +0.25", got)
+	}
+
+	var sb strings.Builder
+	if err := d.WriteText(&sb); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(sb.String(), "includes") {
+		t.Errorf("the diff does not print the generation deltas:\n%s", sb.String())
+	}
+}
+
+func TestDiff_generationOnOneSideOnlyWarns(t *testing.T) {
+	baseline := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{caseResult("a", 1, 1, 10, 2)})
+	current := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{genCase("a", 1, 1, 1000)})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(d.Generation) != 0 {
+		t.Errorf("Generation deltas = %+v, want none when the baseline has no generation half", d.Generation)
+	}
+	if !containsSubstring(d.Warnings, "generation") {
+		t.Errorf("warnings = %v, want one naming the missing generation half", d.Warnings)
+	}
+}
+
+func TestDiff_judgeChangeWarns(t *testing.T) {
+	base, cur := sampleRun(), sampleRun()
+	base.Judge, cur.Judge = "llama/llama3", "openai/gpt-4o"
+	baseline := eval.NewReport("go-docs", base, []eval.CaseResult{genCase("a", 1, 1, 10)})
+	current := eval.NewReport("go-docs", cur, []eval.CaseResult{genCase("a", 1, 1, 10)})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !containsSubstring(d.Warnings, "judge") {
+		t.Errorf("warnings = %v, want one naming the judge change", d.Warnings)
+	}
+}
+
+func containsSubstring(haystack []string, want string) bool {
+	for _, s := range haystack {
+		if strings.Contains(s, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReportWriteText_headlineCountsWhatActuallyRan(t *testing.T) {
+	// A generation-only run scored no retrieval, so "0 cases" would be a lie
+	// about the run rather than a fact about the set.
+	genOnly := eval.CaseResult{ID: "a", Query: "q", GenLatencyMS: 500,
+		Generation: &eval.GenMetrics{Cases: 1, Groundedness: 1, WithWords: 1}}
+	var sb strings.Builder
+	if err := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{genOnly}).WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if strings.Contains(sb.String(), "0 cases") {
+		t.Errorf("a generation-only run headlines as 0 cases:\n%s", sb.String())
+	}
+	if !strings.Contains(sb.String(), "1 answer") {
+		t.Errorf("headline does not count the answers scored:\n%s", sb.String())
+	}
+}
+
+func TestReportWriteText_skippedCountIsOverEveryCaseConsidered(t *testing.T) {
+	// One case scored on retrieval, one on generation alone, one skipped: the
+	// run looked at three, and the line has to say three.
+	report := eval.NewReport("go-docs", sampleRun(), []eval.CaseResult{
+		caseResult("a", 1, 1, 10, 2),
+		{ID: "b", Query: "q", Generation: &eval.GenMetrics{Cases: 1}},
+	})
+	report.Skipped = []eval.SkippedCase{{ID: "c", Reason: "nothing to score"}}
+
+	var sb strings.Builder
+	if err := report.WriteText(&sb, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(sb.String(), "skipped 1 of 3 cases") {
+		t.Errorf("want \"skipped 1 of 3 cases\":\n%s", sb.String())
+	}
+}

@@ -88,9 +88,11 @@ tbuk ingest <path>       # read extracted text → chunk → embed → store in 
 tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top, --min-score, --format)
                          #   query is an expression: "a phrase", -exclude, main_consumption as one term
                          #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
-tbuk eval [set]          # score retrieval against a labelled set of cases
+tbuk eval [set]          # score retrieval and generation against a labelled set of cases
                          #   (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format, --verbose)
-                         #   --mode keyword needs no embedder and no model at all
+                         #   --stage retrieval|generation|both picks what is scored (default retrieval)
+                         #   --judge adds an LLM judge's correctness and faithfulness to the generation stage
+                         #   --mode keyword with the retrieval stage needs no embedder and no model at all
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
 tbuk meta set <path> k=v # attach metadata to a document (one value per key; distinct keys per call)
 tbuk meta list <path>    # list all metadata for a document
@@ -762,23 +764,25 @@ rather than mysterious. Stored answers echo document text, so everything these
 commands print goes through the same control-character filter as `search` and
 `ask`.
 
-### Measuring retrieval
+### Measuring retrieval and generation
 
-`tbuk eval` scores retrieval against a labelled set of cases, so a change to
-chunking, fusion, ranking or query planning is argued from numbers rather than
-from an anecdote:
+`tbuk eval` scores retrieval and generation against a labelled set of cases, so
+a change to chunking, fusion, ranking or query planning is argued from numbers
+rather than from an anecdote:
 
 ```bash
 tbuk eval                              # every set in ~/.tbuk/eval
 tbuk eval go-docs                      # one set, by name
 tbuk eval go-docs --format json > before.json
 tbuk eval go-docs --rewrite condense --baseline before.json   # the deltas
+tbuk eval go-docs --stage both --judge --verbose              # answers too
 ```
 
 It reports hit@k, recall@k, precision@k, MRR and nDCG@k, macro-averaged over
 cases, alongside median and p95 latency. It searches the knowledge base and
 writes nothing to it — a case's thread is replayed to the query planner and is
-never stored as a conversation.
+never stored as a conversation, and neither is an answer the generation stage
+produced.
 
 A label set is YAML under `eval.dir`:
 
@@ -798,6 +802,8 @@ cases:
         answer: append reallocates when len == cap
     query: and maps?
     gold_query: how do Go maps grow?    # the ceiling a rewrite reaches for
+    answer: maps rehash as they fill    # generation stage: the reference
+    must_include: [rehash]              # generation stage: substrings required
 ```
 
 **A label names a document, not a chunk.** Chunk ids are renumbered by every
@@ -815,9 +821,35 @@ returning the same document twice, and a case with no `relevant:` paths is
 skipped rather than scored zero — the report says how many were skipped and
 why.
 
+**Two stages, scored apart.** `--stage retrieval` (the default) marks the ranked
+list; `--stage generation` answers each case and marks the completion;
+`--stage both` does both. They are separate because an answer that got worse
+because retrieval got worse is a different bug from one that got worse on the
+same evidence, and only the first block tells you which you have. A case
+carrying only one half is scored by that half and skipped by the other, so the
+two blocks of one report have different denominators and both print theirs.
+
+The generation stage is free of opinions before it is anything else: `includes`
+is the `must_include` substrings present, `citations` is how many of the
+documents the answer named are actually indexed, and `groundedness` is how much
+of the answer's vocabulary appears in the passages it was given. All three are
+arithmetic, all three run without an API key, and `--verbose` prints the
+citations that resolved to nothing so a low number can be traced.
+
+`--judge` adds a model's marks on top — correctness against the case's
+`answer:`, faithfulness against the passages, each 0–2 with a reason. The
+deterministic scores keep running alongside it, so a judge upgrade shows up as
+the judged numbers moving while the free ones stay put. The judge's prompt is
+compiled into the binary rather than configurable, so two runs cannot be scored
+by two different instruments and compared anyway; `--judge --verbose` prints it.
+A judge that fails, times out or answers with prose leaves the case *unjudged*
+and says so — never scored zero, because a judge that failed is not evidence
+that the answer was wrong.
+
 **What a run costs.** `--mode keyword` uses FTS5 and no embedder at all;
 `--gold` and `--rewrite window` add nothing to that. Only `--mode vector`,
-`--mode hybrid`, `--rewrite condense` and `--expand N` reach a server. Since
+`--mode hybrid`, `--rewrite condense` and `--expand N` reach a server, and the
+generation stage spends a model call an answer (two under `--judge`). Since
 query planning changes the query *string*, and the keyword leg is a function of
 that string, comparing `window` against `off` against the `--gold` ceiling is a
 real, repeatable measurement that costs nothing.
@@ -825,7 +857,7 @@ real, repeatable measurement that costs nothing.
 `--baseline` prints deltas rather than leaving you to subtract nDCG in your
 head. A baseline from a different label set is an error — comparing two corpora
 is not a comparison — and a knob you deliberately swept is never warned about,
-though a changed embedder, model or case count is.
+though a changed embedder, model, judge or case count is.
 
 `tbuk doctor` has an **Eval** section listing the sets it found and, more
 usefully, any label naming a document that is not in the index: that label
