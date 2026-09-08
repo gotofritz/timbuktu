@@ -90,11 +90,21 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	printCheck(w, "path", cfg.Database.Path, "")
 	msg, dbOK := CheckDB(cfg.Database.Path)
 	printCheck(w, "status", msg, boolToStatus(dbOK))
+	// Collected here, where the database is open, and spent by the Eval
+	// section below — a label naming a document has to be checked against the
+	// documents that are actually indexed.
+	var indexedPaths []string
 	if dbOK {
 		db, err := storage.Open(cfg.Database.Path)
 		if err == nil {
 			sqlDB := db.DB()
 			ctx := context.Background()
+			if docs, err := storage.NewDocumentRepo(sqlDB).List(ctx); err == nil {
+				indexedPaths = make([]string, len(docs))
+				for i, d := range docs {
+					indexedPaths[i] = d.Path
+				}
+			}
 			if n, err := storage.NewDocumentRepo(sqlDB).Count(ctx); err == nil {
 				printCheck(w, "documents", fmt.Sprintf("%d", n), "")
 			}
@@ -199,6 +209,17 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		printCheck(w, "budgets", budgetMsg, budgetStatus)
 		printCheck(w, "rewrite", rewriteModesMsg(manifests), "")
 		printCheck(w, "expand", expandMsg(manifests), "")
+	}
+
+	printSection(w, "Eval")
+	if cfg.Eval.Dir != "" {
+		printCheck(w, "dir", cfg.Eval.Dir, "")
+	}
+	setsMsg, setsStatus, sets := CheckEvalSets(cfg.Eval.Dir)
+	printCheck(w, "sets", setsMsg, setsStatus)
+	if len(sets) > 0 {
+		labelsMsg, labelsStatus := CheckEvalLabels(sets, indexedPaths)
+		printCheck(w, "labels", labelsMsg, labelsStatus)
 	}
 
 	return nil

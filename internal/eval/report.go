@@ -44,6 +44,12 @@ type Latency struct {
 	P95MS    float64 `json:"p95_ms"`
 }
 
+// SkippedCase is a case the run could not score, and why.
+type SkippedCase struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
 // Report is a whole run: the instrument, the headline, and every row behind it.
 type Report struct {
 	Set     string       `json:"set"`
@@ -51,6 +57,12 @@ type Report struct {
 	Overall Metrics      `json:"overall"`
 	Latency Latency      `json:"latency"`
 	Cases   []CaseResult `json:"cases"`
+	// Skipped are the cases this run had nothing to score — a generation-only
+	// case under the retrieval stage, or one with no gold query under the
+	// ceiling. Every skip shrinks the denominator of every average above, so
+	// the count is printed rather than left to be inferred from a case total
+	// the reader would have to go and look up.
+	Skipped []SkippedCase `json:"skipped,omitempty"`
 }
 
 // NewReport assembles a report, computing the headline from the rows.
@@ -116,7 +128,8 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	var b strings.Builder
 	k := r.Run.TopK
 
-	fmt.Fprintf(&b, "%s — %d cases, %d labels\n", r.Set, r.Overall.Cases, r.Overall.Labels)
+	fmt.Fprintf(&b, "%s — %s, %s\n", r.Set,
+		Plural(r.Overall.Cases, "case"), Plural(r.Overall.Labels, "label"))
 	fmt.Fprintf(&b, "  mode %s   top %d", r.Run.Mode, k)
 	if r.Run.Rewrite != "" {
 		fmt.Fprintf(&b, "   rewrite %s", r.Run.Rewrite)
@@ -140,7 +153,11 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		k, o.Hit, k, o.Recall, k, o.Precision, o.MRR, k, o.NDCG)
 	fmt.Fprintf(&b, "  latency  median %.0fms   p95 %.0fms\n", r.Latency.MedianMS, r.Latency.P95MS)
 
-	if note := precisionCeiling(o, k); note != "" {
+	if n := len(r.Skipped); n > 0 {
+		fmt.Fprintf(&b, "  skipped %d of %s with nothing to score\n", n, Plural(r.Overall.Cases+n, "case"))
+	}
+
+	if note := precisionCeiling(r.Cases, k); note != "" {
 		fmt.Fprintf(&b, "\n  %s\n", note)
 	}
 
@@ -154,6 +171,13 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		}
 	}
 
+	if verbose && len(r.Skipped) > 0 {
+		b.WriteString("\n  skipped:\n")
+		for _, s := range r.Skipped {
+			fmt.Fprintf(&b, "    %-28s %s\n", truncate(s.ID, 28), s.Reason)
+		}
+	}
+
 	if _, err := io.WriteString(w, b.String()); err != nil {
 		return fmt.Errorf("eval: write report: %w", err)
 	}
@@ -161,19 +185,44 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 }
 
 // precisionCeiling explains a precision that cannot reach 1 however good the
-// retriever is: with fewer labels a case than the depth, most of the slots have
-// nothing that could legitimately fill them. Saying so costs one line and saves
-// the bug report it would otherwise produce.
-func precisionCeiling(o Metrics, k int) string {
-	if k <= 0 || o.Cases == 0 || o.Labels == 0 {
+// retriever is: with fewer labels a case than passages returned for it, some of
+// the slots have nothing that could legitimately fill them. Saying so costs one
+// line and saves the bug report it would otherwise produce.
+//
+// The bound is computed per case from what actually came back, not from k. A
+// small corpus returns fewer passages than the cutoff, and precision is divided
+// by what was retrieved — so a ceiling derived from k alone lands below the
+// precision printed directly above it, and a footnote contradicting its own
+// report is worse than no footnote.
+func precisionCeiling(cases []CaseResult, k int) string {
+	if k <= 0 || len(cases) == 0 {
 		return ""
 	}
-	perCase := float64(o.Labels) / float64(o.Cases)
-	if perCase >= float64(k) {
+	var ceiling, labels, retrieved float64
+	for _, c := range cases {
+		labels += float64(c.Metrics.Labels)
+		retrieved += float64(c.Metrics.Retrieved)
+		if c.Metrics.Retrieved == 0 {
+			continue
+		}
+		ceiling += math.Min(1, float64(c.Metrics.Labels)/float64(c.Metrics.Retrieved))
+	}
+	n := float64(len(cases))
+	ceiling /= n
+	if ceiling >= 1 {
 		return ""
 	}
-	return fmt.Sprintf("note: %.1f labels a case at top %d, so P@%d is bounded above by %.2f",
-		perCase, k, k, perCase/float64(k))
+	return fmt.Sprintf("note: %.1f labels and %.1f retrieved passages a case, so P@%d cannot exceed %.2f here",
+		labels/n, retrieved/n, k, ceiling)
+}
+
+// Plural renders a count with its noun, so a one-case run does not report
+// "1 cases" in the first line a reader sees.
+func Plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func truncate(s string, n int) string {
@@ -238,7 +287,10 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 			"the two runs cover different numbers of cases (%d now, %d in the baseline), "+
 				"so the averages are over different questions", c.Cases, b.Cases))
 	}
-	if current.Run.Embedding != baseline.Run.Embedding {
+	// A swept knob is never a warning — sweeping is the point — and switching
+	// --mode to or from keyword drops the embedder by definition, so that
+	// difference is already explained by the sweep the reader asked for.
+	if current.Run.Embedding != baseline.Run.Embedding && current.Run.Mode == baseline.Run.Mode {
 		d.Warnings = append(d.Warnings, fmt.Sprintf(
 			"the embedding model changed (%s, was %s): this compares two instruments, "+
 				"and the latency deltas are not comparable at all",
@@ -273,7 +325,7 @@ func (d ReportDiff) WriteText(w io.Writer) error {
 		fmt.Fprintf(&b, "  %-16s %9.2f %9.2f %+9.2f\n", m.Name, m.Current, m.Baseline, m.Delta)
 	}
 	for _, m := range []MetricDelta{d.LatencyMedian, d.LatencyP95} {
-		fmt.Fprintf(&b, "  %-16s %8.0fms %8.0fms %+8.0fms\n", m.Name, m.Current, m.Baseline, m.Delta)
+		fmt.Fprintf(&b, "  %-16s %7.0fms %7.0fms %+7.0fms\n", m.Name, m.Current, m.Baseline, m.Delta)
 	}
 	for _, warning := range d.Warnings {
 		fmt.Fprintf(&b, "\n  warning: %s\n", warning)

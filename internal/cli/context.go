@@ -40,6 +40,7 @@ tbuk chat --session <name>       the same, recording into a named thread (create
 tbuk chat --rewrite <mode>       as on ask, for every turn of the REPL
 tbuk chat --expand <N>           as on ask, for every turn of the REPL
 tbuk search "<query>"            return matching chunks without calling the LLM
+tbuk eval [set]                  score retrieval against a labelled set of cases
 tbuk search --mode vector|keyword|hybrid ...   search mode (default: hybrid)
 
 Query syntax (tbuk search only; tbuk ask reads a question, not an expression):
@@ -132,6 +133,83 @@ topic too. Like condense it cannot fail the ask — an error, a timeout (20s) or
 an empty completion retrieves on the planned query alone and warns. It costs one
 model call plus one search per wording, so it is off by default.
 
+## Measuring retrieval
+
+tbuk eval scores retrieval against a labelled set, so a change to chunking,
+fusion, ranking or query planning is argued from numbers rather than anecdote.
+
+tbuk eval                        run every set in eval.dir
+tbuk eval go-docs                one set, by name under eval.dir
+tbuk eval ./sets/go-docs.yaml    one set, by path
+  --mode vector|keyword|hybrid   as on search (default hybrid)
+  --top N                        depth the metrics are cut at (default 5)
+  --rewrite off|window|condense  as on ask (default window)
+  --expand N                     as on ask (0 = off)
+  --gold                         retrieve on each case's gold_query instead
+  --case ID                      score one case, for iterating
+  --baseline FILE                a previous --format json report, diffed
+  --format text|json             json is what --baseline reads back
+  --verbose                      a row per case, and the skipped ones
+
+It searches the knowledge base and writes nothing to it: a case's thread is
+replayed to the query planner and never stored as a conversation.
+
+A label set is YAML under eval.dir (~/.tbuk/eval by default):
+
+  version: 1
+  name: go-docs
+  cases:
+    - id: slices-growth
+      query: how do slices grow?
+      relevant:
+        - path: go/slices.md          # matched as a path suffix, never a chunk id
+          contains: capacity is doubled   # optional: which passage was meant
+          grade: 2                        # optional, default 1; nDCG uses it
+    - id: maps-followup
+      thread:                             # replayed to the planner, not stored
+        - question: how do slices grow?
+          answer: append reallocates when len == cap
+      query: and maps?
+      gold_query: how do Go maps grow?    # the ceiling a rewrite reaches for
+
+A label names a document, not a chunk: chunk ids are renumbered by every
+re-ingest and reindex, and a chunk index moves whenever chunking changes —
+which is the first thing an eval is wanted for. Paths match as a suffix on a
+separator boundary, case-folded, so notes/go/slices.md matches wherever the
+knowledge base has it and slices.md never matches go-slices.md. Anchors fold
+case and collapse whitespace, so a reflowed chunk boundary does not fail a
+case; punctuation is left alone, so "len == cap" does not match "len==cap".
+
+Metrics are hit@k, recall@k, precision@k, MRR and nDCG@k, macro-averaged over
+cases, alongside median and p95 latency. Each label is credited once, so a
+retriever cannot score well by returning one document twice. A case with no
+relevant paths is skipped rather than scored zero, and the report says how many
+were skipped.
+
+## What costs a model, and what does not
+
+  --mode keyword                 nothing: FTS5 only, no embedder at all
+  --gold                         nothing beyond the labels
+  --rewrite window | off         nothing: the window is deterministic
+  --mode vector | hybrid         an embedding call per query
+  --rewrite condense, --expand N a model call per case
+  a template                     read only for condense/expand, or with -t
+
+Query planning changes the query string, and the keyword leg is a function of
+that string — so window against off against the gold ceiling is a real,
+repeatable measurement that costs nothing at all.
+
+## Comparing two runs
+
+  tbuk eval go-docs --format json > before.json
+  tbuk eval go-docs --rewrite condense --baseline before.json
+
+--baseline prints the deltas: text shows the run and then the differences, json
+emits the diff, which carries both sides' values. A baseline from a different
+label set is an error, because comparing two corpora is not a comparison. A
+knob you swept is never warned about — sweeping is the point — but a changed
+embedder, model or case count is.
+
 ## Knowledge base
 
 tbuk stats                       document and chunk counts, DB size
@@ -177,6 +255,7 @@ chunking.overlap       overlap between consecutive chunks (default 50)
 ingest.embed_concurrency  parallel embed requests per file (default 4)
 session.history_turns  prior Q/A pairs replayed into the prompt (default 6; 0 = replay none)
 session.max_turns      turns kept per thread, oldest dropped first (default 0 = keep everything)
+eval.dir               where tbuk eval looks for label sets (default ~/.tbuk/eval)
 
 ## Gotchas
 
@@ -230,6 +309,19 @@ session.max_turns      turns kept per thread, oldest dropped first (default 0 = 
 - tbuk ask suddenly costs two model calls per question: a template sets
   retrieval.rewrite: condense. By design. tbuk doctor's Prompts / rewrite line
   names them; --rewrite window skips it for one run.
+- tbuk doctor "labels: ✗ N not in the index (...)": a label names a document
+  that was never ingested. It scores zero on every run and reads on the report
+  exactly like a retrieval failure. Fix: ingest it, or correct the path.
+- tbuk doctor "labels: ✗ N matching several documents": a label path is a
+  suffix of two indexed documents, so which one it means is undecided. Fix:
+  lengthen the path until it names one.
+- "eval: no label set named X in ...": the name has no .yaml or .yml file under
+  eval.dir; the error lists the sets that do exist. A path is used as given, so
+  a set can live anywhere.
+- tbuk eval P@5 looks low and will not rise: with fewer labels a case than
+  passages retrieved, most slots have nothing that could legitimately fill
+  them. The report says the ceiling it can actually reach, computed from what
+  came back rather than from --top.
 - tbuk doctor "tokenizer: ✗ ...": the index was built under an earlier
   tokenizer. "default unicode61" splits every term at _; "tokenchars '_-'"
   keeps - inside a token, which locks hyphenated prose into one term.

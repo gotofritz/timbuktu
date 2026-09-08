@@ -15,6 +15,7 @@ import (
 
 	"github.com/gotofritz/timbuktu/internal/cli"
 	"github.com/gotofritz/timbuktu/internal/config"
+	"github.com/gotofritz/timbuktu/internal/eval"
 	"github.com/gotofritz/timbuktu/internal/preprocess"
 )
 
@@ -48,6 +49,7 @@ func TestCLI_endToEnd(t *testing.T) {
 		Chunking:   config.ChunkingConfig{Size: 800, Overlap: 100},
 		Preprocess: config.PreprocessConfig{OutputDir: filepath.Join(home, ".tbuk", "extracted")},
 		Ingest:     config.IngestConfig{EmbedConcurrency: 2},
+		Eval:       config.EvalConfig{Dir: filepath.Join(home, ".tbuk", "eval")},
 	})
 
 	// ingest the real fixture through the production DefaultFileExtractor.
@@ -66,6 +68,37 @@ func TestCLI_endToEnd(t *testing.T) {
 
 	if out := mustRun(t, "stats"); !strings.Contains(out, "Documents") {
 		t.Fatalf("stats output = %q, want a Documents line", out)
+	}
+
+	// eval, in keyword mode: the whole retrieval stage runs with no embedding
+	// call at all, which is the claim that makes an eval affordable in CI.
+	writeFile(t, filepath.Join(home, ".tbuk", "eval", "smoke.yaml"),
+		"version: 1\nname: smoke\ncases:\n"+
+			"  - id: fox\n    query: fox\n    relevant:\n      - path: notes.md\n"+
+			"  - id: unlabelled\n    query: anything\n    answer: a reference answer\n")
+
+	out := mustRun(t, "eval", "--mode", "keyword", "--format", "json")
+	var report eval.Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("eval --format json did not produce a report: %v\n%s", err, out)
+	}
+	if report.Set != "smoke" || report.Run.Mode != "keyword" {
+		t.Fatalf("report = %+v", report)
+	}
+	if report.Overall.Hit != 1 || report.Overall.Cases != 1 {
+		t.Fatalf("overall = %+v, want the one labelled case scored and hit", report.Overall)
+	}
+	// The generation-only case is skipped rather than counted as a zero.
+	if len(report.Skipped) != 1 || report.Skipped[0].ID != "unlabelled" {
+		t.Fatalf("skipped = %+v, want the unlabelled case named", report.Skipped)
+	}
+
+	// The same run again, diffed against itself, is all zeroes — the shape
+	// `--baseline` is for.
+	baseline := filepath.Join(home, "before.json")
+	writeFile(t, baseline, out)
+	if diffed := mustRun(t, "eval", "--mode", "keyword", "--baseline", baseline); !strings.Contains(diffed, "+0.00") {
+		t.Fatalf("eval --baseline output = %q, want deltas", diffed)
 	}
 
 	if out := mustRun(t, "delete", "--yes", fixture); !strings.Contains(out, "Deleted") {
