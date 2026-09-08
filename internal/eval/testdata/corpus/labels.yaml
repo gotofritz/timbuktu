@@ -1,0 +1,22 @@
+version: 1
+name: fixture-corpus
+description: fixture corpus for eval regression tests
+
+cases:
+  - id: slices-growth
+    query: how do slices grow?
+    relevant:
+      - path: slices.md
+        contains: roughly doubled
+        grade: 2
+
+  - id: maps-growth
+    query: how do maps grow?
+    relevant:
+      - path: maps.md
+
+  - id: slice-internals
+    query: what is inside a slice?
+    relevant:
+      - path: slices.md
+        contains: array pointer
