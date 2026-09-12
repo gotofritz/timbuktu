@@ -1,0 +1,1005 @@
+{
+  "set": "timbuktu-docs",
+  "run": {
+    "mode": "hybrid",
+    "top_k": 5,
+    "rewrite": "window",
+    "stage": "both",
+    "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+    "llm": "mlx/mlx-community/Qwen2.5-3B-Instruct-4bit",
+    "judge": "mlx/mlx-community/Qwen2.5-3B-Instruct-4bit",
+    "host": "fritznew.local",
+    "at": "2026-09-12T23:12:57.432447Z"
+  },
+  "overall": {
+    "hit": 0.375,
+    "recall": 0.3541666666666667,
+    "precision": 0.08333333333333333,
+    "mrr": 0.23750000000000002,
+    "ndcg": 0.2643340507472733,
+    "cases": 24,
+    "labels": 26,
+    "retrieved": 120,
+    "found": 9
+  },
+  "latency": {
+    "median_ms": 409.7835,
+    "p95_ms": 463.871
+  },
+  "plan_latency": {
+    "median_ms": 0.0025,
+    "p95_ms": 0.005
+  },
+  "generation": {
+    "overall": {
+      "includes": 0.5,
+      "citations": 0,
+      "groundedness": 0.6854711348842667,
+      "correctness": 0.4375,
+      "cases": 24,
+      "with_includes": 24,
+      "with_citations": 8,
+      "with_words": 24,
+      "judged": 24
+    },
+    "latency": {
+      "median_ms": 8451.934000000001,
+      "p95_ms": 15674.1
+    },
+    "plan_latency": {
+      "median_ms": 0,
+      "p95_ms": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "context-budget",
+      "query": "what happens when the prompt is too big for the model?",
+      "queries": [
+        "what happens when the prompt is too big for the model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 414.162,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.5918367346938775,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 8416.145,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "omits the warning and the specific actions to make room for the prompt"
+        }
+      }
+    },
+    {
+      "id": "reembed-after-model-change",
+      "query": "do I have to re-embed everything after changing the embedding model?",
+      "queries": [
+        "do I have to re-embed everything after changing the embedding model?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 410.25,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.8285714285714286,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 7192.44,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "does not fully match the reference answer"
+        }
+      },
+      "unresolved_citations": [
+        "embedding.model",
+        "embedding.provider"
+      ]
+    },
+    {
+      "id": "code-search-encoding",
+      "query": "how is source code indexed for search?",
+      "queries": [
+        "how is source code indexed for search?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 412.061,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.7375,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 13999.711,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "some facts are correct but the answer is not comprehensive"
+        }
+      },
+      "unresolved_citations": [
+        "fmt.Errorf"
+      ]
+    },
+    {
+      "id": "kebab-case-queries",
+      "query": "why does searching for a hyphenated word behave oddly?",
+      "queries": [
+        "why does searching for a hyphenated word behave oddly?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 428.777,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.5714285714285714,
+        "correctness": 1,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 13020.582,
+      "judge": {
+        "correctness": {
+          "score": 2,
+          "reason": "one short sentence"
+        }
+      }
+    },
+    {
+      "id": "backup-archive",
+      "query": "how do I back up my knowledge base?",
+      "queries": [
+        "how do I back up my knowledge base?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 404.579,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.75,
+        "correctness": 1,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 13706.681,
+      "judge": {
+        "correctness": {
+          "score": 2,
+          "reason": "one short sentence"
+        }
+      },
+      "unresolved_citations": [
+        "~/backups/kb.tar",
+        "~/backups/work.tar"
+      ]
+    },
+    {
+      "id": "no-restore-command",
+      "query": "is there a restore command?",
+      "queries": [
+        "is there a restore command?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 401.032,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.5714285714285714,
+        "correctness": 1,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 4440.088,
+      "judge": {
+        "correctness": {
+          "score": 2,
+          "reason": "one short sentence"
+        }
+      }
+    },
+    {
+      "id": "data-root",
+      "query": "how do I keep a second knowledge base in a different directory?",
+      "queries": [
+        "how do I keep a second knowledge base in a different directory?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.5,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 407.734,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.8085106382978723,
+        "correctness": 1,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 18475.498,
+      "judge": {
+        "correctness": {
+          "score": 2,
+          "reason": "one short sentence"
+        }
+      },
+      "unresolved_citations": [
+        "/data/backups/kb.tar"
+      ]
+    },
+    {
+      "id": "deterministic-answers",
+      "query": "how do I make the model's answers deterministic?",
+      "queries": [
+        "how do I make the model's answers deterministic?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 403.323,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.49295774647887325,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 15674.1,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "The answer does not directly state how to make model answers deterministic based on the given context and does not mention the options that can help achieve this."
+        }
+      }
+    },
+    {
+      "id": "stale-extracted-text",
+      "query": "why is my document not being re-extracted after I improved an extractor?",
+      "queries": [
+        "why is my document not being re-extracted after I improved an extractor?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 409.317,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.8,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 6869.905,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "The answer does not directly address the issue of the document not being re-extracted due to it being a non-file type. It instead discusses the extraction process for non-file documents, which is not relevant to the specific question about the document not being re-extracted."
+        }
+      }
+    },
+    {
+      "id": "duplicate-paths",
+      "query": "will ingesting the same file by a relative and an absolute path index it twice?",
+      "queries": [
+        "will ingesting the same file by a relative and an absolute path index it twice?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.5,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 420.602,
+      "plan_ms": 0.003,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.6730769230769231,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 9293.334,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "one short sentence"
+        }
+      }
+    },
+    {
+      "id": "exclusion-operator",
+      "query": "how do I exclude a word from a search?",
+      "queries": [
+        "how do I exclude a word from a search?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 420.837,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.6129032258064516,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 9908.993,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "partly correct, but answer is not a direct quote of the reference answer"
+        }
+      }
+    },
+    {
+      "id": "chunk-size-tuning",
+      "query": "my answers about one document feel incomplete, what should I change?",
+      "queries": [
+        "my answers about one document feel incomplete, what should I change?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.5,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 408.812,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.6607142857142857,
+        "correctness": 1,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 10544.186,
+      "judge": {
+        "correctness": {
+          "score": 2,
+          "reason": "one short sentence"
+        }
+      },
+      "unresolved_citations": [
+        "chunking.size",
+        "~/.tbuk/config.yaml",
+        "llama.cpp"
+      ]
+    },
+    {
+      "id": "eval-purpose",
+      "query": "how do I tell whether a settings change actually helped retrieval?",
+      "queries": [
+        "how do I tell whether a settings change actually helped retrieval?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.4,
+        "mrr": 1,
+        "ndcg": 0.82623465712856,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 408.588,
+      "plan_ms": 0.002,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.5263157894736842,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 14840.368,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "partly correct, but answer is incomplete and lacks the full process described in the reference answer"
+        }
+      }
+    },
+    {
+      "id": "search-without-model-followup",
+      "query": "and without the model?",
+      "queries": [
+        "how do I ask a question about my notes? and without the model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 520.582,
+      "plan_ms": 0.01,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.6666666666666666,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 7228.044,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "one short sentence"
+        }
+      }
+    },
+    {
+      "id": "restore-followup",
+      "query": "and to get it back?",
+      "queries": [
+        "what does tbuk export do? and to get it back?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 412.239,
+      "plan_ms": 0.003,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.4782608695652174,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 4843.699,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "not at all related to the question asked"
+        }
+      }
+    },
+    {
+      "id": "reembed-followup",
+      "query": "do I need to redo anything?",
+      "queries": [
+        "how do I switch to a different embedding model? do I need to redo anything?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 402.558,
+      "plan_ms": 0.004,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.5,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 7969.047,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "partly correct, omits re-indexing for llm.model change"
+        }
+      },
+      "unresolved_citations": [
+        "embedding.provider",
+        "embedding.model",
+        "config.yaml",
+        "llm.model"
+      ]
+    },
+    {
+      "id": "context-window-followup",
+      "query": "what if I want it bigger?",
+      "queries": [
+        "what is the context budget? what if I want it bigger?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 410.761,
+      "plan_ms": 0.003,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.9473684210526315,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 5203.673,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "one short sentence"
+        }
+      }
+    },
+    {
+      "id": "folder-ingest-followup",
+      "query": "and a whole folder?",
+      "queries": [
+        "how do I add a single document? and a whole folder?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 408.067,
+      "plan_ms": 0.003,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.8205128205128205,
+        "correctness": 1,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 8487.723,
+      "judge": {
+        "correctness": {
+          "score": 2,
+          "reason": "one short sentence"
+        }
+      }
+    },
+    {
+      "id": "custom-template-followup",
+      "query": "how do I make my own?",
+      "queries": [
+        "what is a prompt template? how do I make my own?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 403.176,
+      "plan_ms": 0.003,
+      "generation": {
+        "includes": 1,
+        "citations": 0,
+        "groundedness": 0.8115942028985508,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 13723.328,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "The answer does not provide a direct instruction on how to create a prompt template, instead giving an example of a template structure and parameters. It does not fully replicate the reference answer's content and structure."
+        }
+      },
+      "unresolved_citations": [
+        "manifest.yaml",
+        "system.tmpl",
+        "user.tmpl",
+        "~/.tbuk/prompts/actions/manifest.yaml",
+        "~/.tbuk/prompts/actions/system.tmpl",
+        "~/.tbuk/prompts/actions/user.tmpl"
+      ]
+    },
+    {
+      "id": "conversation-followup",
+      "query": "how do I make it?",
+      "queries": [
+        "does tbuk ask remember what I asked before? how do I make it?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 410.946,
+      "plan_ms": 0.004,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.6,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 5403.569,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "not at all described in the context"
+        }
+      }
+    },
+    {
+      "id": "bare-followup-warning",
+      "query": "what happens if I don't?",
+      "queries": [
+        "can I ask a follow-up question? what happens if I don't?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 404.197,
+      "plan_ms": 0.004,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.5,
+        "correctness": 0.5,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 6388.183,
+      "judge": {
+        "correctness": {
+          "score": 1,
+          "reason": "partly correct, but the answer does not fully reflect the full context of the reference answer"
+        }
+      }
+    },
+    {
+      "id": "unnamed-chat-followup",
+      "query": "what if I forget to name it?",
+      "queries": [
+        "how do I start a conversation? what if I forget to name it?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 402.129,
+      "plan_ms": 0.003,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.9411764705882353,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 6426.751,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "answer does not state the correct behavior of forgetting to name a session, instead suggesting a workaround"
+        }
+      }
+    },
+    {
+      "id": "batch-size-followup",
+      "query": "is there a limit with llama.cpp?",
+      "queries": [
+        "how do I make chunks bigger? is there a limit with llama.cpp?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.2,
+        "ndcg": 0.38685280723454163,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 463.871,
+      "plan_ms": 0.004,
+      "generation": {
+        "includes": 0.5,
+        "citations": 0,
+        "groundedness": 0.625,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 1,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 8655.432,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "The answer does not directly state the limit for chunk size and does not mention adjusting the batch sizes (-b and -ub). It also does not provide a specific limit or guidance on how to adjust the chunk size based on the server's batch size."
+        }
+      },
+      "unresolved_citations": [
+        "chunking.size",
+        "config.yaml",
+        "llama.cpp"
+      ]
+    },
+    {
+      "id": "stale-docs-followup",
+      "query": "so how do I keep it current?",
+      "queries": [
+        "what does timbuktu not do well? so how do I keep it current?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 419.731,
+      "plan_ms": 0.005,
+      "generation": {
+        "includes": 0,
+        "citations": 0,
+        "groundedness": 0.9354838709677419,
+        "correctness": 0,
+        "cases": 1,
+        "with_includes": 1,
+        "with_citations": 0,
+        "with_words": 1,
+        "judged": 1
+      },
+      "gen_latency_ms": 6628.135,
+      "judge": {
+        "correctness": {
+          "score": 0,
+          "reason": "not addressing the question asked"
+        }
+      }
+    }
+  ]
+}
