@@ -24,7 +24,6 @@ func newChatCmd() *cobra.Command {
 		sessionName    string
 		rewriteFlag    string
 		expandFlag     int
-		hopsFlag       int
 	)
 
 	cmd := &cobra.Command{
@@ -48,10 +47,6 @@ func newChatCmd() *cobra.Command {
 				return err
 			}
 			expand, err := resolveExpand(expandFlag, cmd.Flags().Changed("expand"), tmpl.Manifest())
-			if err != nil {
-				return err
-			}
-			hops, err := resolveHops(hopsFlag, cmd.Flags().Changed("hops"), tmpl.Manifest())
 			if err != nil {
 				return err
 			}
@@ -99,15 +94,6 @@ func newChatCmd() *cobra.Command {
 				return err
 			}
 
-			askOpts := []AskOption{
-				WithErrOut(cmd.ErrOrStderr()),
-				WithRequireContext(requireContext),
-				WithContextBudget(cfg.LLM.ContextTokens, cfg.LLM.MaxTokens),
-			}
-			if hops > 0 {
-				askOpts = append(askOpts, WithHops(hops, hopperFor(tmpl.Manifest(), l.Chat, cmd.ErrOrStderr())))
-			}
-
 			return RunChat(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), ChatDeps{
 				Retrieve:     retrieval.New(search.New(app.DB(), emb)).RetrieveMany,
 				Chat:         l.Chat,
@@ -118,7 +104,12 @@ func newChatCmd() *cobra.Command {
 				HistoryTurns: cfg.Session.HistoryTurns,
 				Vars:         vars,
 				TopK:         topK,
-				Ask:          append(askOpts, WithPlanner(planner)),
+				Ask: []AskOption{
+					WithErrOut(cmd.ErrOrStderr()),
+					WithRequireContext(requireContext),
+					WithContextBudget(cfg.LLM.ContextTokens, cfg.LLM.MaxTokens),
+					WithPlanner(planner),
+				},
 			})
 		},
 	}
@@ -130,8 +121,6 @@ func newChatCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sessionName, "session", "", "record the conversation in a named thread (created if new); omit to keep it in memory")
 	cmd.Flags().StringVar(&rewriteFlag, "rewrite", "", "how the retrieval query is planned: off | window | condense (overrides the template)")
 	cmd.Flags().IntVar(&expandFlag, "expand", 0, "extra wordings of the query to retrieve on and fuse (overrides the template; 0 = off)")
-	cmd.Flags().IntVar(&hopsFlag, "hops", 0,
-		"follow-up retrieval rounds per turn: retrieve, let the model name what is missing, retrieve again (0 = off)")
 	return cmd
 }
 

@@ -1053,47 +1053,6 @@ per wording. Two or three is plenty; more mostly buys near-duplicates. Set
 expand, under **Prompts**, and `tbuk session show --verbose` prints every query
 a turn searched for, separated by ` | `.
 
-### Searching again for what the first search missed
-
-Some questions are two questions. Ask "how do slices and maps both grow?" and
-one search ranks whichever half your words leaned towards; the other half never
-reaches the answer.
-
-`--hops N` lets the search go round again. It searches, shows the model what
-came back, asks it what is still missing, and searches for that too:
-
-```bash
-tbuk ask --hops 2 "how do slices and maps both grow?"
-```
-
-```
-round 1  how do slices and maps both grow?
-         → passages about slice capacity, nothing about maps
-round 2  how do slices and maps both grow? | map growth factor
-         → both, merged
-```
-
-The loop stops as soon as the model says it has enough, so `--hops 2` is a
-ceiling and not a quota. It also stops when what has already been found fills
-the model's context window — there is nowhere to put more — and it tells you:
-
-```
-warning: stopped after 1 of 3 retrieval hops — what is already retrieved fills
-the model's context budget, so another round has nowhere to go
-```
-
-A round that fails or times out does not lose you the answer. The passages
-already found are the floor, and answering from those is exactly what happens
-without `--hops` at all.
-
-Each round costs a model call and a search on top of the answer, so this is
-**off by default** and capped at 5. Set `retrieval.max_hops:` in a template's
-`manifest.yaml` to make it permanent, and `--hops 0` switches it off for one
-run. Unlike the other two settings here, nobody has measured yet whether it is
-worth the money — `tbuk eval --hops N` is how that gets decided, and until it
-does, treat it as something to reach for on a question you know is layered
-rather than as a setting to turn on and forget.
-
 ### Chatting instead of typing `tbuk ask` each time
 
 `tbuk chat` is the same thing without the retyping: one question per line, until
@@ -1104,8 +1063,8 @@ tbuk chat                     # a conversation that is not saved
 tbuk chat --session alpha     # the "alpha" thread, saved as you go
 ```
 
-`tbuk chat` takes `--rewrite`, `--expand` and `--hops` too, and they apply to
-every question you type in that session.
+`tbuk chat` takes `--rewrite` and `--expand` too, and they apply to every
+question you type in that session.
 
 ```
 tbuk chat — thread "alpha".
@@ -1414,7 +1373,6 @@ retrieval:
   rewrite: condense   # off | window (default) | condense
   window_turns: 2     # questions folded in under `window`
   expand: 3           # extra wordings to also search for; 0 = off (the default)
-  max_hops: 0         # follow-up search rounds; 0 = off (the default)
 ```
 
 - `window` (the default) folds the last `window_turns` questions of the thread
@@ -1427,18 +1385,13 @@ retrieval:
 - `expand: N` spends one more call writing N other wordings of whichever query
   the mode above arrived at, searches for all of them, and merges the results.
   A failed expansion searches for the planned query alone, with a warning.
-- `max_hops: N` lets the search go round up to N more times, each round spending
-  one call asking what the passages so far do not cover. A failed round answers
-  with what has already been found, with a warning.
 
 That is why these live on the template and not in `config.yaml`: they spend the
 template's model. `--rewrite MODE` and `--expand N` override them for a single
 run, and `tbuk doctor` names the templates that condense or expand. See
 [Choosing how the follow-up is searched
-for](#choosing-how-the-follow-up-is-searched-for), [Searching for the same
-thing in several ways](#searching-for-the-same-thing-in-several-ways) and
-[Searching again for what the first search
-missed](#searching-again-for-what-the-first-search-missed).
+for](#choosing-how-the-follow-up-is-searched-for) and [Searching for the same
+thing in several ways](#searching-for-the-same-thing-in-several-ways).
 
 A manifest may also set `max_tokens` (how long the answer may get) and
 `context_tokens` (the window of the model this template runs on, overriding

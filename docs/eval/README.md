@@ -310,6 +310,91 @@ single-shot gain and finds it is not what anybody assumed.
 
 ---
 
+## The multi-hop loop, measured and removed ([#161](../../../../issues/161))
+
+Roadmap #28 asked whether `ask` should retrieve in rounds — retrieve, let the
+model name what is still missing, retrieve again, fuse — and carried a kill
+criterion written before the work started: **two hops must beat one on answer
+correctness at no worse than 2× median latency, or the loop does not ship.**
+
+It was built, measured, and taken back out.
+
+### The A/B
+
+Both sides `--stage both --judge` over all 24 cases, same corpus, same
+instrument: `Qwen3-Embedding-0.6B-4bit-DWQ` retrieving,
+`Qwen2.5-3B-Instruct-4bit` answering and judging, `fritznew.local`, 2026-09-12.
+The baseline is committed as `results/hops0.json`; the `--hops 2` side was run
+with `--baseline` against it and read off the printed diff.
+
+| | `--hops 0` | `--hops 2` | delta |
+|---|---|---|---|
+| **correctness** | 0.783 | 0.78 | **+0.00** |
+| **latency median** | 412ms | 1273ms | **+861ms (3.1×)** |
+| latency p95 | 438ms | 3358ms | +2920ms |
+| hit@5 | 0.375 | 0.29 | −0.08 |
+| recall@5 | 0.354 | 0.27 | −0.08 |
+| MRR | 0.238 | 0.22 | −0.02 |
+| nDCG@5 | 0.264 | 0.23 | −0.04 |
+| includes | 0.50 | 0.46 | −0.04 |
+| faithfulness | 0.413 | 0.39 | −0.02 |
+| groundedness | 0.685 | 0.70 | +0.01 |
+| generation latency median | 8481ms | 8730ms | +250ms |
+
+**No case degraded**, so every hop really ran and the numbers are the loop's
+own: the +861ms is two model calls a question, which is what it cost. A run
+whose hops had all timed out would have shown the baseline's latency and the
+baseline's scores, and the report says when that happens.
+
+### It failed both limbs, and made retrieval worse
+
+Correctness did not move at all, and the latency was 3.1× against a cap of 2×.
+Nothing else moved up either: every retrieval metric fell, and so did the
+deterministic `includes` score that depends on them.
+
+That is the design working exactly as documented and being wrong for this
+corpus. Every round re-runs **all** queries and fuses them, deliberately — RRF
+is not associative, so folding one round's ranking into the next would score a
+chunk by its rank in a fusion rather than its rank in a search. The cost of
+doing it correctly is that the follow-up query brings a full ranked list of its
+own, and the fusion averages the two: a passage that was first on the question
+actually asked gets pushed below the cutoff by agreement with a query that was
+never the question.
+
+Where the ceiling is **0.455 hit@5** there is not enough signal for a second
+opinion to add to. It only dilutes the first. The headroom on this corpus is
+where it always was — chunking, ranking, fusion (#8, #27, #29) — and a loop over
+a retriever that finds the right passage less than half the time inherits that
+problem twice.
+
+### What came out, and what stayed
+
+`rewrite.Hop`, `cli.RetrieveWithHops`, `--hops` on `ask`/`chat`/`eval` and the
+manifest's `retrieval.max_hops` were removed. `search.FuseRRF` and the
+`Planner` interface stay: they belong to [#160](../../../../issues/160) and
+[#159](../../../../issues/159), and neither depended on the loop.
+
+Two things the milestone left behind, both worth keeping:
+
+- **`tbuk eval` refuses a generation run over a set with nothing to mark an
+  answer against.** The first `--hops 0` baseline was spent discovering that
+  this label set carried no reference answers at all, so `--stage both --judge`
+  scored the retrieval half and reported no generation block — on the page,
+  indistinguishable from a model that answered nothing.
+- **The set carries an `answer` and a `must_include` per case**, and a test
+  loads it and asserts every case is scorable by both stages. Nothing had ever
+  loaded it, which is how it lost a whole stage unnoticed.
+
+### What this does not settle
+
+What was measured is *this* loop, on *this* corpus, with *this* model. A
+different shape — reranking the union rather than fusing it, or a corpus whose
+ceiling leaves room for a second opinion to find something — is a different
+question, and would want its own criterion written before the work rather than
+after. #28 is answered on evidence, not abandoned.
+
+---
+
 ## Sampling `condense`'s variance ([#173](../../../../issues/173))
 
 The tables above rest on one run each. For `off`, `window` and `gold` that is

@@ -261,11 +261,11 @@ func spreadWarnings(reports []Report) []string {
 				n, orNone(r.Run.Host), orNone(first.Run.Host)))
 		}
 		if r.Run.Rewrite != first.Run.Rewrite || r.Run.Expand != first.Run.Expand ||
-			r.Run.Mode != first.Run.Mode || r.Run.TopK != first.Run.TopK || r.Run.Hops != first.Run.Hops {
+			r.Run.Mode != first.Run.Mode || r.Run.TopK != first.Run.TopK {
 			out = append(out, fmt.Sprintf(
-				"run %d swept a different setting (mode %s, top %d, rewrite %s, expand %d, hops %d): "+
+				"run %d swept a different setting (mode %s, top %d, rewrite %s, expand %d): "+
 					"repeating a sweep means repeating it unchanged",
-				n, r.Run.Mode, r.Run.TopK, orNone(r.Run.Rewrite), r.Run.Expand, r.Run.Hops))
+				n, r.Run.Mode, r.Run.TopK, orNone(r.Run.Rewrite), r.Run.Expand))
 		}
 		if r.Overall.Cases != first.Overall.Cases {
 			out = append(out, fmt.Sprintf(
@@ -311,9 +311,6 @@ func (s Spread) WriteText(w io.Writer) error {
 	}
 	if s.Run.Expand > 0 {
 		fmt.Fprintf(&b, "   expand %d", s.Run.Expand)
-	}
-	if s.Run.Hops > 0 {
-		fmt.Fprintf(&b, "   hops %d", s.Run.Hops)
 	}
 	b.WriteString("\n")
 	if s.Run.Embedding != "" {

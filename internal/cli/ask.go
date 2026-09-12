@@ -43,7 +43,6 @@ func newAskCmd() *cobra.Command {
 		continueSession bool
 		rewriteFlag     string
 		expandFlag      int
-		hopsFlag        int
 	)
 
 	cmd := &cobra.Command{
@@ -65,10 +64,6 @@ func newAskCmd() *cobra.Command {
 				return err
 			}
 			expand, err := resolveExpand(expandFlag, cmd.Flags().Changed("expand"), tmpl.Manifest())
-			if err != nil {
-				return err
-			}
-			hops, err := resolveHops(hopsFlag, cmd.Flags().Changed("hops"), tmpl.Manifest())
 			if err != nil {
 				return err
 			}
@@ -118,9 +113,6 @@ func newAskCmd() *cobra.Command {
 			if planner != nil {
 				opts = append(opts, WithPlanner(planner))
 			}
-			if hops > 0 {
-				opts = append(opts, WithHops(hops, hopperFor(tmpl.Manifest(), l.Chat, cmd.ErrOrStderr())))
-			}
 
 			return RunAsk(
 				cmd.Context(),
@@ -146,8 +138,6 @@ func newAskCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&continueSession, "continue", "c", false, "continue the most recently used conversation thread")
 	cmd.Flags().StringVar(&rewriteFlag, "rewrite", "", "how the retrieval query is planned: off | window | condense (overrides the template)")
 	cmd.Flags().IntVar(&expandFlag, "expand", 0, "extra wordings of the query to retrieve on and fuse (overrides the template; 0 = off)")
-	cmd.Flags().IntVar(&hopsFlag, "hops", 0,
-		"follow-up retrieval rounds: retrieve, let the model name what is missing, retrieve again (overrides the template; 0 = off)")
 	cmd.MarkFlagsMutuallyExclusive("session", "continue")
 	return cmd
 }
@@ -181,32 +171,6 @@ func resolveExpand(flag int, changed bool, manifest prompts.Manifest) (int, erro
 		return 0, fmt.Errorf("--expand: %w", err)
 	}
 	return flag, nil
-}
-
-// resolveHops picks how many follow-up retrieval rounds this run may take:
-// --hops when it was given, the template's manifest otherwise. Like --expand
-// the flag has to be asked whether it was set, since 0 is both its zero value
-// and a meaningful answer — "no loop", which is how a template's loop is
-// switched off for one run.
-func resolveHops(flag int, changed bool, manifest prompts.Manifest) (int, error) {
-	if !changed {
-		return manifest.Retrieval.MaxHops, nil
-	}
-	if err := rewrite.ValidateHops(flag); err != nil {
-		return 0, fmt.Errorf("--hops: %w", err)
-	}
-	return flag, nil
-}
-
-// hopperFor builds what names the gap between rounds. Like the planner it
-// spends the template's model at the template's temperature: it is the same
-// call, asked a different question.
-func hopperFor(manifest prompts.Manifest, chat rewrite.ChatFn, warn io.Writer) Hopper {
-	return rewrite.Hop{
-		Chat: chat,
-		Opts: llm.CallOptions{Model: manifest.Model, Temperature: manifest.Temperature},
-		Warn: warn,
-	}
 }
 
 // plannerFor builds the query planner for one run, or returns nil when nothing
@@ -379,8 +343,6 @@ type askConfig struct {
 	thread         *conversation.Thread
 	appendTurn     AppendTurnFn
 	planner        rewrite.Planner
-	hop            Hopper
-	maxHops        int
 }
 
 // AppendTurnFn records a completed turn against a thread. It is a function
@@ -421,17 +383,6 @@ func WithSession(thread *conversation.Thread, appendTurn AppendTurnFn) AskOption
 // retrieval runs. Unset means retrieving on the question exactly as typed,
 // which is what a single-shot ask has always done.
 func WithPlanner(p rewrite.Planner) AskOption { return func(c *askConfig) { c.planner = p } }
-
-// WithHops lets the answer be retrieved for in rounds: retrieve, let the model
-// name what is still missing, retrieve again, fuse. maxHops of 0 — the default
-// — is the single shot `tbuk ask` has always run, and the hopper is never
-// called.
-func WithHops(maxHops int, h Hopper) AskOption {
-	return func(c *askConfig) {
-		c.maxHops = maxHops
-		c.hop = h
-	}
-}
 
 // buildFn assembles the whole message slice — the system message, the replayed
 // history, and the current turn's rendered user message — for one candidate
@@ -665,6 +616,25 @@ func RunAsk(
 		}
 	}
 
+	chunks, err := retrieve(ctx, queries, k, nil)
+	if err != nil {
+		return fmt.Errorf("retrieve: %w", err)
+	}
+	chunks = trimToTokenBudget(chunks, manifest.Retrieval.MaxTokens)
+
+	// Empty retrieval means the answer comes purely from model priors, not the
+	// user's documents. Warn loudly (or abort under --require-context) so this
+	// isn't mistaken for a grounded answer.
+	if len(chunks) == 0 {
+		if cfg.requireContext {
+			return fmt.Errorf("no relevant context found in the knowledge base; " +
+				"aborting because --require-context is set")
+		}
+		_, _ = fmt.Fprintln(cfg.errOut,
+			"warning: no relevant context found — answering from the model's general "+
+				"knowledge; the response may not reflect your documents")
+	}
+
 	render := func(cs []retrieval.RetrievedChunk) (string, string, error) {
 		system, user, err := tmpl.Render(prompts.TemplateData{
 			Question:  question,
@@ -695,43 +665,6 @@ func RunAsk(
 			return nil, err
 		}
 		return conversation.Messages(system, user, hs), nil
-	}
-
-	// Under --hops the loop re-checks the budget before each round rather than
-	// discovering on the fourth that there was never room for the second. The
-	// rendered prompt is what the budget is about, so the check renders it.
-	var fits func([]retrieval.RetrievedChunk) bool
-	if window > 0 {
-		fits = func(cs []retrieval.RetrievedChunk) bool {
-			messages, err := build(history, cs)
-			if err != nil {
-				return false
-			}
-			return promptTokens(messages) < window-reserve
-		}
-	}
-
-	chunks, queries, err := RetrieveWithHops(ctx, retrieve, cfg.hop, question, queries, k, HopOptions{
-		MaxHops: cfg.maxHops,
-		Warn:    cfg.errOut,
-		Fits:    fits,
-	})
-	if err != nil {
-		return err //nolint:wrapcheck // already "retrieve: …"
-	}
-	chunks = trimToTokenBudget(chunks, manifest.Retrieval.MaxTokens)
-
-	// Empty retrieval means the answer comes purely from model priors, not the
-	// user's documents. Warn loudly (or abort under --require-context) so this
-	// isn't mistaken for a grounded answer.
-	if len(chunks) == 0 {
-		if cfg.requireContext {
-			return fmt.Errorf("no relevant context found in the knowledge base; " +
-				"aborting because --require-context is set")
-		}
-		_, _ = fmt.Fprintln(cfg.errOut,
-			"warning: no relevant context found — answering from the model's general "+
-				"knowledge; the response may not reflect your documents")
 	}
 
 	fitted := fittedPrompt{chunks: chunks}

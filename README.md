@@ -91,7 +91,6 @@ tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top
 tbuk eval [set]          # score retrieval and generation against a labelled set of cases
                          #   (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format, --verbose)
                          #   --repeat N runs the sweep N times and reports the spread, not one run's numbers
-                         #   --hops N scores the multi-hop loop, latency included — what #28's kill criterion needs
                          #   --stage retrieval|generation|both picks what is scored (default retrieval)
                          #   --judge adds an LLM judge's correctness and faithfulness to the generation stage
                          #   --mode keyword with the retrieval stage needs no embedder and no model at all
@@ -103,10 +102,9 @@ tbuk ask <question>      # RAG: retrieve relevant chunks, render prompt template
                          #   --session NAME records the turn in a thread (created if new); -c/--continue uses the last one
                          #   --rewrite off|window|condense plans the retrieval query for this run (overrides the template)
                          #   --expand N retrieves on N extra wordings of that query and fuses them (0 = off)
-                         #   --hops N retrieves in rounds: the model names what is missing, retrieval runs again (0 = off)
 tbuk chat                # REPL over the same path, one turn per line (--template, --top, --var, --require-context)
                          #   --session NAME records into a named thread; without it the chat is in memory and saves nothing
-                         #   --rewrite off|window|condense, --expand N and --hops N, as on ask
+                         #   --rewrite off|window|condense and --expand N, as on ask
 tbuk session list        # conversation threads: name, turns, template, last used
 tbuk session show <n>    # a thread turn by turn, with its citations (--verbose adds the query retrieval ran)
 tbuk session rename <old> <new>  # rename a thread, keeping its turns
@@ -459,7 +457,6 @@ internal/
   retrieval/        Retriever: hybrid search → RetrievedChunk with Citation string; RetrieveMany fuses several queries
   conversation/     Thread, Turn, Replay, Messages — how a thread is replayed into a prompt (pure)
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings) — turn (thread, question) into the queries retrieval runs
-                    Hop — reads what retrieval found and names what is still missing (the multi-hop loop)
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
@@ -731,46 +728,6 @@ Numbers: [`docs/eval/`](docs/eval/README.md).
 `tbuk doctor` names the templates that expand, on the **Prompts / expand** line;
 `tbuk session show --verbose` prints every query a turn ran on, separated by
 ` | `.
-
-#### Multi-hop retrieval — asking again for what was missing
-
-A search answers the question it was given. "How do slices and maps both grow?"
-is two questions, and one search ranks the passages about whichever half the
-words leaned towards.
-
-`retrieval.max_hops: N` in `manifest.yaml` (or `--hops N` for one run) retrieves
-in rounds: search, show the model what came back, let it name what is still
-missing, search again, fuse.
-
-```bash
-tbuk ask --hops 2 "how do slices and maps both grow?"
-#   round 1: how do slices and maps both grow?
-#   the model: "map growth factor"        ← what the passages did not cover
-#   round 2: both queries, fused
-```
-
-Every round re-runs every query rather than folding one round's ranking into
-the last: fusing fusions scores a passage by where it placed in a fusion instead
-of where it placed in a search. The loop stops early the moment the model says
-nothing is missing, and it stops on its own if the model asks for a search that
-has already run.
-
-Two bounds, both checked **before** a round is spent rather than after: `N`
-itself, and the model's context budget — there is no point retrieving more when
-what is already retrieved fills the window, and a loop that discovers that on
-the fourth hop has spent four model calls finding out. A hop that errors or
-times out does not fail the ask: the passages already retrieved are the floor,
-and answering from them is exactly what `--hops 0` does.
-
-`tbuk doctor` names the templates that hop, on the **Prompts / hops** line —
-the most expensive line there, since each round is a model call *and* a search
-on top of the answer's own call.
-
-It is **off by default**, and unlike `condense` and `expand` it has not been
-measured yet. #28's kill criterion is written down in advance: two hops must
-beat one on answer correctness at no worse than 2× median latency, or the loop
-does not become anything. `tbuk eval --hops N` scores it with the hops' model
-calls inside the latency, which is what makes that criterion checkable.
 
 #### `tbuk chat` — the same thread, interactively
 

@@ -24,7 +24,6 @@ internal/
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
   eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture (with ChunkSpec), LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
-                    Hop (one LLM call) — reads the passages retrieved so far and names what is still missing, for the multi-hop loop
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
   searchtext/       Reduce() — the reduced encoding stored in chunks.search_text and embedded
@@ -689,7 +688,7 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, topK int, meta m
 func (r *Retriever) RetrieveMany(ctx context.Context, queries []string, topK int, meta map[string]string) ([]RetrievedChunk, error)
 ```
 
-`RetrieveMany` is what query expansion and multi-hop retrieval both retrieve with:
+`RetrieveMany` is what query expansion (and, later, multi-hop) retrieves with:
 it runs each query, fuses the ranked lists with `search.FuseRRF`, de-duplicates
 by chunk id and cuts to `topK`. Each query is searched at the full depth rather
 than at `topK/N` — fusion ranks by agreement between whole lists, and a
@@ -720,7 +719,7 @@ func (t *Template) Render(data TemplateData) (system, user string, err error)
 func (t *Template) Manifest() Manifest
 ```
 
-Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `retrieval.expand`, `retrieval.max_hops`, `variables` come from `manifest.yaml`. Query planning is a property of the template — `condense` and `expand` spend the template's model at the template's temperature — so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value, a negative `window_turns` or `expand`, and a `max_hops` outside 0–`rewrite.MaxHopsLimit`, at load, the rule `normalize`'s filters already follow; `--rewrite` and `--expand` override the keys for one run and are validated at the same edge, in `resolveRewriteMode`, `resolveExpand` and `resolveHops`. `--expand` is read through `Flags().Changed`, since `0` is both its zero value and the answer that switches a template's expansion off for one run. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
+Built-in `qa`, `brief`, and `anki` templates installed by `tbuk init`. `temperature`, `max_tokens`, `context_tokens`, `retrieval.top_k`, `retrieval.max_tokens`, `retrieval.rewrite`, `retrieval.window_turns`, `retrieval.expand`, `variables` come from `manifest.yaml`. Query planning is a property of the template — `condense` and `expand` spend the template's model at the template's temperature — so it sits in the `retrieval:` block; `loadManifest` rejects an unknown `rewrite` value and a negative `window_turns` or `expand` at load, the rule `normalize`'s filters already follow; `--rewrite` and `--expand` override the keys for one run and are validated at the same edge, in `resolveRewriteMode` and `resolveExpand`. `--expand` is read through `Flags().Changed`, since `0` is both its zero value and the answer that switches a template's expansion off for one run. `RunAsk` forwards `model`/`temperature`/`max_tokens` into the LLM via `CallOptions`; `Manifest.Temperature` is `*float64` so an explicit `0` is distinct from unset. `retrieval.max_tokens`, when set, trims retrieved chunks to that approximate token budget before rendering (at least one chunk is always kept).
 
 `tbuk ask` core logic is in exported `RunAsk(out, retrieveFn, chatFn, tmpl, ...)` for dependency-injected unit testing.
 
@@ -740,9 +739,7 @@ line (`rewriteModesMsg`) names the templates that plan their query with
 run under it, which is otherwise invisible until the token bill says so — and
 its **Prompts / expand** line (`expandMsg`) names the templates that retrieve on
 extra wordings, and how many, since each is a model call plus a search per
-wording. Its **Prompts / hops** line (`hopsMsg`) is the third of the same
-story and the most expensive: a hopping template spends a model call *and* a
-search per round on top of the answer's own call.
+wording.
 
 ```go
 func WithContextBudget(window, outputReserve int) AskOption
@@ -900,77 +897,6 @@ same way it explains a rewritten one. A plan with nothing usable in it leaves
 the question standing, since an empty query matches the whole corpus in rank
 order.
 
-**Multi-hop retrieval** (roadmap #28, [#161](../../../../issues/161)) is the
-loop around all of the above: retrieve, let the model name what is still
-missing, retrieve again, fuse. `rewrite.Hop` is the model call — deliberately
-*not* a `Planner`, since a planner turns `(thread, question)` into queries
-before anything has been retrieved and a hop reads what came back:
-
-```go
-type Hop struct {                                      // one model call a round
-    Chat ChatFn; Opts llm.CallOptions
-    Warn io.Writer; Timeout time.Duration              // 0 = HopTimeout (20s)
-}
-
-func (h Hop) Next(ctx context.Context, question string, passages []string) (string, error)
-func ValidateHops(n int) error                         // what loadManifest, --hops and eval call
-```
-
-`Next` returns the follow-up query, or `""` when the passages already cover the
-question — the reply that ends the loop, which is why the sentinel is one word
-(`NOTHING`) and is recognised through the quoting, casing and trailing
-punctuation a model wraps it in. A sentinel nobody can hit is a loop that always
-runs to its bound. Unlike `Condense` it **reports** its failures instead of
-falling back: there is nothing to fall back to, since the floor is the passages
-already in hand, so the caller stops hopping and answers with those — exactly
-what `--hops 0` would have done.
-
-`cli.RetrieveWithHops` is the loop itself, shared by `RunAsk` and `RunEval` so
-the answer path and the harness measuring it cannot drift:
-
-```go
-type Hopper interface {
-    Next(ctx context.Context, question string, passages []string) (string, error)
-}
-
-type HopOptions struct {
-    MaxHops  int                                       // 0 = the single shot
-    Warn     io.Writer
-    OnGiveUp func(reason string)                       // a *failed* hop, not a finished loop
-    Fits     func([]retrieval.RetrievedChunk) bool     // nil = no budget guard
-}
-
-func RetrieveWithHops(ctx context.Context, retrieve retrieverFn, hop Hopper,
-    question string, queries []string, topK int, opts HopOptions) ([]retrieval.RetrievedChunk, []string, error)
-```
-
-Every round re-runs **every** query rather than fusing each round's list into the
-last. RRF over ranked lists is not associative: folding round by round would
-score a chunk by its rank in a fusion rather than by its rank in a search. One
-extra search per query per round buys a ranking that means what it says.
-
-Two things bound it, and both are checked **before** a hop is spent: the hop
-count, and the context budget — a loop that discovers it has overflowed on the
-fourth hop has spent four hops and a model call each. `RunAsk` supplies `Fits`
-by rendering the prompt it would build, which is what the budget is actually
-about; the eval harness leaves it nil and is bounded by the count alone. A query
-the loop has already run ends it too: retrieving twice on one query fuses a
-ranked list with itself, which moves nothing and costs a search.
-
-`OnGiveUp` separates a hop that *failed* from a loop that *finished*. Both stop
-the loop, and in a report they are indistinguishable without it — a run whose
-hops all timed out is a single-shot run wearing the loop's name. `RunEval` folds
-those reasons into the row's `Degraded`, alongside a rewrite that fell back, and
-the hops' model calls are inside the case's latency on purpose: #28's kill
-criterion is stated in correctness **and** latency, and a loop whose rounds were
-not timed cannot be held to it.
-
-It is **off by default** (`retrieval.max_hops: 0`, `--hops 0`) and stays that
-way until the eval split says two hops beat one on answer correctness at no
-worse than 2× median latency. `ValidateHops` also caps it at `MaxHopsLimit` (5):
-each hop is a model call and a search on top of every answer, and a loop longer
-than that is an agent with a tool, which #161 puts out of scope.
-
 Wiring is by option, not by parameter — `RunAsk`'s positional list is already at
 its limit:
 
@@ -979,7 +905,6 @@ type AppendTurnFn func(ctx context.Context, sessionID int64, turn conversation.T
 
 func WithSession(thread *conversation.Thread, appendTurn AppendTurnFn) AskOption
 func WithPlanner(p rewrite.Planner) AskOption
-func WithHops(maxHops int, h Hopper) AskOption
 ```
 
 `ask.go` resolves the mode and builds the planner in two steps, shared with
