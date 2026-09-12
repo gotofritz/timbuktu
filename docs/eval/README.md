@@ -45,18 +45,21 @@ so labelling one over the other would measure how the set was written rather
 than how retrieval performs.
 
 ```bash
-tbuk --root ~/.tbuk-eval init
-tbuk --root ~/.tbuk-eval ingest README.md docs/user-guide.md docs/initial-context.md docs/plans/
-tbuk --root ~/.tbuk-eval doctor          # the Eval section must find every labelled path
-make eval-defaults                        # writes docs/eval/results/*.json
+make eval-ingest      # init + ingest + doctor, into ~/.tbuk-eval
+make eval-defaults    # the five sweeps, into docs/eval/results/*.json
 ```
 
-A separate root keeps the measurement corpus out of a working knowledge base;
-drop `--root` if you would rather use your own.
+`eval-ingest` uses a root of its own so the measurement corpus stays out of a
+working knowledge base. Override with `ROOT=~/.tbuk make eval-ingest` to use
+yours instead, and `TBUK=./bin/tbuk` to point at a build rather than whatever
+is on `PATH`.
 
-`doctor` before sweeping is not optional. A label naming a document that was
-never ingested scores zero on every run and reads on the report exactly like a
-retrieval failure.
+It ends on `doctor`, which is not decoration. Read the **Eval** section before
+sweeping: a label naming a document that was never ingested scores zero on
+every run and reads on the report exactly like a retrieval failure.
+
+`tbuk ingest` takes exactly one path per invocation, which is why this is a
+script and not a one-liner.
 
 ### What each row costs
 

@@ -1,5 +1,5 @@
 .PHONY: help build install test test-verbose test-race coverage coverage-html lint lint-install vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump \
-	 eval-record eval-record-lsa eval-defaults
+	 eval-record eval-record-lsa eval-ingest eval-defaults
 
 .DEFAULT_GOAL := help
 
@@ -88,6 +88,12 @@ eval-record: ## Record frozen vectors + their baseline (needs the configured emb
 eval-record-lsa: ## Record frozen vectors + their baseline with the offline LSA stopgap
 	EVAL_EMBEDDER=lsa go test -tags=record -count=1 -v -run TestRecordFixtureVectors ./internal/eval
 	go test -tags=record -count=1 -v -run TestRecordFixtureBaseline ./internal/cli
+
+# Build the corpus docs/eval is labelled against, in a root of its own. Needs
+# the embedding server: every chunk is embedded on the way in, whichever sweep
+# runs afterwards.
+eval-ingest: ## Ingest this repo's docs into ~/.tbuk-eval and run doctor
+	./scripts/eval-ingest.sh
 
 # The measurement behind the deferred defaults (#24 condense, #25 expand). Runs
 # on a machine with the corpus ingested and a model; CI has neither, which is
