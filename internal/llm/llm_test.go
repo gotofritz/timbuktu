@@ -1120,3 +1120,56 @@ func TestMLXProvider_serverError(t *testing.T) {
 		t.Errorf("message: want provider body, got %q", llmErr.Message)
 	}
 }
+
+// TestOpenAIProvider_streamsReasoningSeparately covers a reasoning model served
+// over the OpenAI-compatible API. mlx_lm.server puts the thinking in
+// `reasoning` and other servers in `reasoning_content`; either way it is not
+// the answer, and a provider that decodes only `content` reports a model that
+// reasoned for its whole budget as one that said nothing at all.
+func TestOpenAIProvider_streamsReasoningSeparately(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{"mlx spells it reasoning", "reasoning"},
+		{"others spell it reasoning_content", "reasoning_content"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{
+				"data: {\"choices\":[{\"delta\":{\"" + tc.field + "\":\"Okay, the user \"}}]}\n\n",
+				"data: {\"choices\":[{\"delta\":{\"" + tc.field + "\":\"wants a rewrite.\"}}]}\n\n",
+				"data: {\"choices\":[{\"delta\":{\"content\":\"how do Go maps grow?\"}}]}\n\n",
+				"data: [DONE]\n\n",
+			}
+			srv := httptest.NewServer(openAISSEHandler(events))
+			defer srv.Close()
+
+			// The fake server wants a bearer token; a real mlx_lm.server does
+			// not, which is why the key is optional in the provider.
+			t.Setenv("MLX_API_KEY", "test-key")
+			provider, err := llm.NewLLM(&config.LLMConfig{
+				Provider: "mlx", Model: "qwen3", MaxTokens: 100, BaseURL: srv.URL,
+			})
+			if err != nil {
+				t.Fatalf("NewLLM: %v", err)
+			}
+			ch, err := provider.Chat(context.Background(), []llm.Message{{Role: llm.RoleUser, Content: "hi"}})
+			if err != nil {
+				t.Fatalf("Chat: %v", err)
+			}
+
+			var text, reasoning string
+			for _, tok := range collectTokens(ch) {
+				text += tok.Text
+				reasoning += tok.Reasoning
+			}
+			if text != "how do Go maps grow?" {
+				t.Errorf("text = %q, want only the answer", text)
+			}
+			if reasoning != "Okay, the user wants a rewrite." {
+				t.Errorf("reasoning = %q, want the thinking, kept out of the text", reasoning)
+			}
+		})
+	}
+}

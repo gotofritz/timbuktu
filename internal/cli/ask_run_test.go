@@ -1144,3 +1144,71 @@ func TestRunAsk_contextGuardDropsEverythingAndWarns(t *testing.T) {
 		t.Errorf("nothing survived, so nothing to cite, got: %q", out.String())
 	}
 }
+
+// A reasoning model that spends the whole budget thinking streams no text, and
+// the generic "raise max_tokens" hint leaves the user guessing which of several
+// causes it was. The reasoning arrives on its own field, so say it plainly.
+func TestRunAsk_reasonedWithoutAnswering_namesTheCause(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out, errBuf bytes.Buffer
+
+	reasoningOnly := func(_ context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		ch := make(chan llm.Token, 2)
+		ch <- llm.Token{Reasoning: "Okay, the user wants a summary. Let me think about"}
+		ch <- llm.Token{Done: true}
+		close(ch)
+		return ch, nil
+	}
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve([]retrieval.RetrievedChunk{{Text: "ctx", Citation: "a.md §0"}}, nil),
+		reasoningOnly,
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errBuf),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	got := strings.ToLower(errBuf.String())
+	// The generic warning already guesses that a reasoning model "can" spend
+	// the budget. Here the reasoning actually arrived, so the warning has to
+	// state it rather than offer it as one possibility among several.
+	if !strings.Contains(got, "spent the whole budget reasoning") {
+		t.Errorf("warning hedges about a cause it can see: %q", errBuf.String())
+	}
+	if !strings.Contains(got, "max_tokens") {
+		t.Errorf("warning does not name the budget to raise: %q", errBuf.String())
+	}
+}
+
+// The definite wording must not appear when nothing said the model reasoned —
+// a warning that asserts a cause it did not observe is worse than a vague one.
+func TestRunAsk_emptyWithoutReasoning_doesNotClaimReasoning(t *testing.T) {
+	tmpl := buildQATemplate(t)
+	var out, errBuf bytes.Buffer
+
+	err := cli.RunAsk(
+		context.Background(),
+		&out,
+		mockRetrieve([]retrieval.RetrievedChunk{{Text: "ctx", Citation: "a.md §0"}}, nil),
+		mockChat(nil, nil),
+		tmpl,
+		"question",
+		nil,
+		0,
+		false,
+		cli.WithErrOut(&errBuf),
+	)
+	if err != nil {
+		t.Fatalf("RunAsk: %v", err)
+	}
+	if strings.Contains(strings.ToLower(errBuf.String()), "spent the whole budget reasoning") {
+		t.Errorf("warning claims reasoning it never saw: %q", errBuf.String())
+	}
+}

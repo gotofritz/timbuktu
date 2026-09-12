@@ -309,6 +309,42 @@ func NewLLM(cfg *config.LLMConfig) (LLM, error)
 
 Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. Every send goes through `sendToken`, which selects on `ctx.Done()`, so a consumer that abandons the channel (e.g. `RunAsk` returning on a mid-stream error) releases the goroutine instead of leaking it. `RunAsk` runs retrieval and the chat call under a cancellable context derived from `cmd.Context()`, cancelled on return (Ctrl-C interrupts). System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
 
+
+**Reasoning models.** The OpenAI-compatible providers stream a reasoning
+model's thinking in a field of its own — `reasoning` on `mlx_lm.server`,
+`reasoning_content` elsewhere — and it is not the answer. `llm.Token` carries
+it as `Reasoning`, decoded from both spellings, kept out of `Text` and never
+printed.
+
+Decoding it rather than dropping it is what tells two states apart that look
+identical from `Text`: a model that had nothing to say, and one that reasoned
+until its budget ran out and never reached the answer. The second is the common
+case on a local reasoning model with a small budget, and reporting it as "the
+model returned nothing" sends the reader to the prompt when the token budget is
+what ran out. `RunAsk` names the observed cause instead of guessing;
+`rewrite.Condense`, whose budget is one question's worth (`CondenseMaxTokens`,
+256), reports it as the reason it fell back — without which a reasoning model
+makes every `condense` rewrite fail identically and silently.
+
+Servers that stream thinking inline instead are handled by `stripThinking`,
+which removes `<think>…</think>` from the completion. A block that never closes
+is thinking that ran out of budget, so everything from it on is dropped rather
+than retrieved on.
+
+**Which model actually answers.** The request body always carries `model`,
+resolved as `CallOptions.Model` (the template manifest's `model:`) → the
+provider's `cfg.Model` (`llm.model`) → `""`. A named model wins:
+`mlx_lm.server --model X` only preloads X, and a request naming Y makes it
+fetch and load Y on demand.
+
+**When both are empty the server decides**, which is the default configuration
+`tbuk init` writes. `""` is sent as-is, and whatever the server has loaded
+answers — so on that setup the `--model` flag governs after all, and any other
+client that switched the server's model has changed what `tbuk` gets. Pin
+`llm.model` to stop that being a question: it is also what the eval report
+records as the instrument, and `modelLabel` has nothing to name when it is
+blank.
+
 On a non-200 response the adapters read up to ~2 KB of the body into `LLMError`/`EmbedError.Message` (falling back to the HTTP status text when empty), preserving the provider's own error text ("model not found", "context length exceeded").
 
 ---
