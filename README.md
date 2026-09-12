@@ -676,10 +676,17 @@ be slow or down, and none of that may cost the answer. `tbuk session show
 --verbose` prints the query each turn actually ran on, so a bad rewrite is
 visible rather than mysterious.
 
-`condense` is **opt-in**: `window` stays the default until the retrieval eval
-harness says condensing beats it on follow-up turns. `tbuk doctor` names the
-templates that use it, on the **Prompts / rewrite** line, since each one is a
-second model call per question.
+`condense` is **opt-in**, and stays that way: the retrieval eval harness was
+built to decide this and its answer was no. Over 24 labelled cases on this
+repository's own documentation, `condense` tied `window` on the follow-up
+turns — hit@5 0.182 for both, MRR 0.076 against 0.064 — which is inside the
+noise of an eleven-case set and not the win #159 deferred the flip for. It did
+improve the *single-shot* half, 0.538 to 0.692 hit, which is a different
+effect than the one anybody asked for. Numbers and full reasoning:
+[`docs/eval/`](docs/eval/README.md).
+
+`tbuk doctor` names the templates that use it, on the **Prompts / rewrite**
+line, since each one is a second model call per question.
 
 #### Query expansion — several wordings of one query
 
@@ -710,8 +717,14 @@ arrived at — so inside a thread the paraphrases carry the topic too. Like
 completion retrieves on the planned query alone and says so on stderr.
 
 It costs one model call plus one search per extra wording, so it is **off by
-default** and stays off until the eval harness says otherwise. `tbuk doctor`
-names the templates that expand, on the **Prompts / expand** line;
+default** and stays off. The eval harness measured it: on follow-up turns it is
+the best thing here short of a hand-written standalone question — hit@5 0.273
+against `window`'s 0.182 — but on single-shot questions it *loses* hit, 0.538
+to 0.385, and it costs 4× the latency of every question (1024ms against
+259ms). Worth reaching for on a thread, not worth making everyone pay for.
+Numbers: [`docs/eval/`](docs/eval/README.md).
+
+`tbuk doctor` names the templates that expand, on the **Prompts / expand** line;
 `tbuk session show --verbose` prints every query a turn ran on, separated by
 ` | `.
 
