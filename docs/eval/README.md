@@ -61,6 +61,31 @@ every run and reads on the report exactly like a retrieval failure.
 `tbuk ingest` takes exactly one path per invocation, which is why this is a
 script and not a one-liner.
 
+### Serving the models
+
+Two servers, and they do different jobs. The embedding model must be the one
+the corpus was ingested with — changing it means re-ingesting.
+
+```bash
+# embeddings (ingest, and the vector/hybrid legs)
+mlx_lm.server --model mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ --port 8081
+
+# generation, and the condense/expand rewrites
+mlx_lm.server --model mlx-community/Qwen3-4B-4bit --port 8080
+```
+
+**Use a small model for the rewrite sweeps.** `condense` gets one line to write
+and is capped at 20 seconds and 256 tokens (`rewrite.CondenseTimeout`,
+`CondenseMaxTokens`); it cannot fail, it falls back to the window. A 27B model
+takes ~12s a call on an M-series laptop and crosses the deadline often enough
+to poison the run, and a reasoning model is worse: the thinking block fills the
+256-token budget before the rewritten question appears, so the completion comes
+back empty and every case falls back. A 4B does this task in under a second.
+
+That is a finding as much as a workaround. #24 is decided on correctness **and**
+latency (D10), and a rewrite costing 12s a question does not become a default
+whatever it does to MRR.
+
 ### What each row costs
 
 | Sweep | Needs |
@@ -96,6 +121,15 @@ eval time, not free of a server.
 `P@5` is bounded above by `labels/5`, which is a property of the label set and
 not of the retriever. Most cases carry one label, so a precision near `0.20` is
 the ceiling, not a finding.
+
+**Check the `degraded` count before reading any rewrite row.** `condense`
+degrades instead of failing, so a run where every model call timed out still
+reports as a condense run — carrying the window's numbers under the condense
+name. The report counts the cases whose planning fell back, prints
+`! query planning fell back on N of M cases` above the metrics, and records
+`degraded` in the JSON; `--baseline` warns when either side has any. Anything
+above zero means the row measures a mixture, and the fix is a faster rewrite
+model, not a footnote.
 
 ### The eleven follow-ups, against the ceiling
 

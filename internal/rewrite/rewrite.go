@@ -43,6 +43,11 @@ type Options struct {
 	// Warn receives the diagnostic when a rewrite is given up on and the window
 	// plans the query instead.
 	Warn io.Writer
+	// OnFallback is called with the reason each time that happens. Warn tells a
+	// person; this tells a caller that has to count, which the eval harness
+	// does: a rewrite that degrades rather than failing produces numbers
+	// indistinguishable from ones where it worked.
+	OnFallback func(reason string)
 	// Expand is how many extra wordings of the planned query to retrieve on,
 	// fused by RRF. 0 is off. Like ModeCondense it needs a Chat, and it
 	// composes with the mode rather than replacing it.
@@ -146,5 +151,11 @@ func newBase(opts Options) (Planner, error) {
 	if opts.Chat == nil {
 		return nil, fmt.Errorf("rewrite: mode %q needs a model to condense with", opts.Mode)
 	}
-	return Condense{Chat: opts.Chat, Opts: opts.CallOptions, Fallback: window, Warn: opts.Warn}, nil
+	return Condense{
+		Chat:       opts.Chat,
+		Opts:       opts.CallOptions,
+		Fallback:   window,
+		Warn:       opts.Warn,
+		OnFallback: opts.OnFallback,
+	}, nil
 }

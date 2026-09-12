@@ -134,6 +134,7 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			Query:     c.Query,
 			Queries:   queries,
 			LatencyMS: float64(elapsed.Microseconds()) / 1000,
+			Degraded:  drainFallbacks(opts.Planner),
 		}
 		if scoreRetrieval {
 			row.Metrics = eval.Score(evalResults(chunks), c.Relevant, opts.TopK)
@@ -160,6 +161,51 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 	}, scored)
 	report.Skipped = skipped
 	return report, nil
+}
+
+// fallbackReporter is the half of a planner that admits to having degraded.
+// Condense cannot fail — it falls back — so without something to ask, a sweep
+// whose every model call timed out reports as a condense sweep carrying the
+// window's numbers.
+type fallbackReporter interface {
+	Fallbacks() []string
+}
+
+// drainFallbacks takes the reasons the planner gave up for on the case just
+// planned, and clears them for the next one. A planner that does not report is
+// one that cannot degrade.
+func drainFallbacks(p rewrite.Planner) string {
+	r, ok := p.(fallbackReporter)
+	if !ok {
+		return ""
+	}
+	reasons := r.Fallbacks()
+	if len(reasons) == 0 {
+		return ""
+	}
+	return strings.Join(reasons, "; ")
+}
+
+// countingPlanner remembers what its planner fell back on, so RunEval can
+// record it per case. It is a wrapper rather than a field on the planners
+// because expansion composes over a mode, and either half can degrade.
+type countingPlanner struct {
+	inner   rewrite.Planner
+	reasons []string
+}
+
+func (p *countingPlanner) Queries(ctx context.Context, thread []conversation.Turn, question string) ([]string, error) {
+	return p.inner.Queries(ctx, thread, question) //nolint:wrapcheck // the caller wraps
+}
+
+// note records one give-up. It is what rewrite.Options.OnFallback is pointed at.
+func (p *countingPlanner) note(reason string) { p.reasons = append(p.reasons, reason) }
+
+// Fallbacks returns and clears the reasons since the last call.
+func (p *countingPlanner) Fallbacks() []string {
+	out := p.reasons
+	p.reasons = nil
+	return out
 }
 
 // evalHost names the machine the latency figures came from. An unreadable
@@ -755,11 +801,19 @@ configurable, so two runs cannot be scored by two different instruments;
 					runOpts.LLM = modelLabel(cfg.LLM.Provider, cfg.LLM.Model)
 				}
 
+				// The counter is wired before the planner is built, so a
+				// rewrite that gives up is recorded on the case it gave up on
+				// rather than only warned about on stderr, where it scrolls
+				// past and the report still reads as a clean measurement.
+				counter := &countingPlanner{}
+				plannerOpts.OnFallback = counter.note
+
 				planner, err := rewrite.New(plannerOpts)
 				if err != nil {
 					return fmt.Errorf("plan queries: %w", err)
 				}
-				runOpts.Planner = planner
+				counter.inner = planner
+				runOpts.Planner = counter
 			}
 
 			out := cmd.OutOrStdout()

@@ -818,3 +818,38 @@ func TestRunEval_recordsTheHost(t *testing.T) {
 		t.Fatal("the report names no host, so its latency cannot be traced to a machine")
 	}
 }
+
+// TestRunEval_recordsAQueryPlanThatFellBack is the end of the chain the
+// harness was missing: Condense degrades instead of failing, so without this
+// a sweep where the model timed out on every case still reports as a condense
+// sweep, with numbers that are really the window's.
+func TestRunEval_recordsAQueryPlanThatFellBack(t *testing.T) {
+	var seen [][]string
+	// A planner that always falls back, reporting it the way Condense does.
+	planner := fallingBackPlanner{reason: "the model did not answer within 20s"}
+
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "keyword", TopK: 5, Rewrite: "condense", Planner: planner})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+
+	if report.Degraded != 2 {
+		t.Fatalf("Degraded = %d, want both cases counted", report.Degraded)
+	}
+	for _, row := range report.Cases {
+		if row.Degraded == "" {
+			t.Errorf("case %s records no reason", row.ID)
+		}
+	}
+}
+
+// fallingBackPlanner stands in for a Condense whose model never answers.
+type fallingBackPlanner struct{ reason string }
+
+func (p fallingBackPlanner) Queries(_ context.Context, _ []conversation.Turn, question string) ([]string, error) {
+	return []string{question}, nil
+}
+
+func (p fallingBackPlanner) Fallbacks() []string { return []string{p.reason} }

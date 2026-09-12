@@ -301,3 +301,55 @@ func TestCondense_keepsAnExplicitMaxTokens(t *testing.T) {
 func TestCondense_implementsPlanner(t *testing.T) {
 	var _ rewrite.Planner = rewrite.Condense{}
 }
+
+// TestCondense_reportsEachFallback covers the failure the eval harness cannot
+// see otherwise: Condense never fails, it falls back, so a run where half the
+// calls timed out still produces a report that looks like a condense report.
+// The warning goes to stderr and is gone; something has to be able to count.
+func TestCondense_reportsEachFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		chat rewrite.ChatFn
+		want string
+	}{
+		{"no model", nil, "no model is configured"},
+		{"call fails", chatFailing(errors.New("connection refused")), "connection refused"},
+		{"empty completion", chatReturning(""), "nothing to retrieve on"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var reasons []string
+			c := rewrite.Condense{
+				Chat:       tc.chat,
+				OnFallback: func(reason string) { reasons = append(reasons, reason) },
+			}
+			if _, err := c.Queries(context.Background(), nil, "and maps?"); err != nil {
+				t.Fatalf("Queries: %v", err)
+			}
+			if len(reasons) != 1 {
+				t.Fatalf("OnFallback called %d times, want 1", len(reasons))
+			}
+			if !strings.Contains(reasons[0], tc.want) {
+				t.Errorf("reason %q does not mention %q", reasons[0], tc.want)
+			}
+		})
+	}
+}
+
+func TestCondense_doesNotReportASuccessfulRewrite(t *testing.T) {
+	var reasons []string
+	c := rewrite.Condense{
+		Chat:       chatReturning("how do Go maps grow?"),
+		OnFallback: func(reason string) { reasons = append(reasons, reason) },
+	}
+	got, err := c.Queries(context.Background(), nil, "and maps?")
+	if err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	if len(got) != 1 || got[0] != "how do Go maps grow?" {
+		t.Fatalf("Queries = %v", got)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("OnFallback called on a successful rewrite: %v", reasons)
+	}
+}

@@ -1201,6 +1201,15 @@ generation half carries a latency of its own: a model call an answer is a
 different order of expense from an embedding call a query, and #28's kill
 criterion is stated in correctness and latency together.
 
+**A degraded run says so.** `rewrite.Condense` cannot fail — it falls back to
+the window — so a sweep whose every model call timed out would otherwise report
+as a condense sweep carrying the window's numbers, which is the harness lying
+in the one way it exists to prevent. `rewrite.Options.OnFallback` reports each
+give-up, `cli.countingPlanner` collects them per case into
+`CaseResult.Degraded`, and `NewReport` counts them into `Report.Degraded`. The
+text report prints the count above the metrics, and `Diff` warns when either
+side has any: a run that fell back is not measuring the planner it names.
+
 A row scored on generation alone carries no retrieval metrics and stays out of
 the retrieval average; a run that scored no retrieval at all prints no
 retrieval headline, since a row of zeroes reads exactly like the failure this

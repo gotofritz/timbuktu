@@ -52,6 +52,12 @@ type CaseResult struct {
 	// with zeroes it never earned.
 	Metrics   Metrics `json:"metrics"`
 	LatencyMS float64 `json:"latency_ms"`
+	// Degraded is why this case did not get the query planning the run asked
+	// for — a condense that timed out and fell back to the window, say. Empty
+	// is the normal case. It is recorded per row because a rewrite that cannot
+	// fail can still stop working, and a run where it did produces numbers
+	// that look exactly like a run where it did not.
+	Degraded string `json:"degraded,omitempty"`
 
 	// Generation is the answer's score, absent when the stage did not run.
 	Generation   *GenMetrics `json:"generation,omitempty"`
@@ -106,6 +112,10 @@ type Report struct {
 	// the count is printed rather than left to be inferred from a case total
 	// the reader would have to go and look up.
 	Skipped []SkippedCase `json:"skipped,omitempty"`
+	// Degraded counts the cases whose query planning fell back. A run with any
+	// is not measuring the planner it names, so the number belongs beside the
+	// metrics rather than in a warning on stderr that has already scrolled past.
+	Degraded int `json:"degraded,omitempty"`
 }
 
 // NewReport assembles a report, computing the headline from the rows.
@@ -118,6 +128,7 @@ func NewReport(set string, run Run, cases []CaseResult) Report {
 		latencies = make([]float64, len(cases))
 		gens      []GenMetrics
 		genLat    []float64
+		degraded  int
 	)
 	for i, c := range cases {
 		// A row scored on generation alone carries no retrieval metrics, and
@@ -128,6 +139,9 @@ func NewReport(set string, run Run, cases []CaseResult) Report {
 			ms = append(ms, c.Metrics)
 		}
 		latencies[i] = c.LatencyMS
+		if c.Degraded != "" {
+			degraded++
+		}
 		if c.Generation != nil {
 			gens = append(gens, *c.Generation)
 			genLat = append(genLat, c.GenLatencyMS)
@@ -135,11 +149,12 @@ func NewReport(set string, run Run, cases []CaseResult) Report {
 	}
 
 	report := Report{
-		Set:     set,
-		Run:     run,
-		Overall: Aggregate(ms),
-		Latency: latencyOf(latencies),
-		Cases:   cases,
+		Set:      set,
+		Run:      run,
+		Overall:  Aggregate(ms),
+		Latency:  latencyOf(latencies),
+		Cases:    cases,
+		Degraded: degraded,
 	}
 	if len(gens) > 0 {
 		report.Generation = &GenerationReport{
@@ -225,6 +240,11 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	}
 	if r.Run.Host != "" {
 		fmt.Fprintf(&b, "  host %s\n", r.Run.Host)
+	}
+	if r.Degraded > 0 {
+		fmt.Fprintf(&b,
+			"  ! query planning fell back on %d of %d cases — this is not a %s measurement\n",
+			r.Degraded, len(r.Cases), orNone(r.Run.Rewrite))
 	}
 	if r.Run.LLM != "" {
 		fmt.Fprintf(&b, "  llm %s\n", r.Run.LLM)
@@ -517,6 +537,12 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 			"the embedding model changed (%s, was %s): this compares two instruments, "+
 				"and the latency deltas are not comparable at all",
 			orNone(current.Run.Embedding), orNone(baseline.Run.Embedding)))
+	}
+	if current.Degraded > 0 || baseline.Degraded > 0 {
+		d.Warnings = append(d.Warnings, fmt.Sprintf(
+			"query planning fell back on %d of the current run's cases and %d of the baseline's: "+
+				"a run that fell back is not measuring the planner it names",
+			current.Degraded, baseline.Degraded))
 	}
 	if current.Run.Host != baseline.Run.Host {
 		d.Warnings = append(d.Warnings, fmt.Sprintf(
