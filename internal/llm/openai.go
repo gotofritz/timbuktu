@@ -51,10 +51,7 @@ func newOpenAIProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
 // http://localhost:8080. No API key is required; when MLX_API_KEY is set it
 // is sent as a Bearer token and the base URL must be HTTPS or loopback.
 func newMLXProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+	baseURL := config.ResolveBaseURL("mlx", cfg.BaseURL)
 	key := os.Getenv("MLX_API_KEY")
 	if key != "" {
 		if err := config.ValidateKeyedBaseURL(baseURL); err != nil {
@@ -74,10 +71,7 @@ func newMLXProvider(cfg *config.LLMConfig) (*openAIProvider, error) {
 // newLlamaProvider targets a local llama.cpp server. Its OpenAI-compatible
 // endpoint needs no API key, defaulting to http://localhost:8080.
 func newLlamaProvider(cfg *config.LLMConfig) *openAIProvider {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+	baseURL := config.ResolveBaseURL("llama", cfg.BaseURL)
 	return &openAIProvider{
 		name:      "llama",
 		baseURL:   baseURL,

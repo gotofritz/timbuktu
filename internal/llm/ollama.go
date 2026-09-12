@@ -19,10 +19,7 @@ type ollamaProvider struct {
 }
 
 func newOllamaProvider(cfg *config.LLMConfig) *ollamaProvider {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:11434"
-	}
+	baseURL := config.ResolveBaseURL("ollama", cfg.BaseURL)
 	return &ollamaProvider{
 		baseURL:   baseURL,
 		model:     cfg.Model,

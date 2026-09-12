@@ -36,10 +36,27 @@ func isHostedProvider(provider string) bool {
 // is probed via /v1/models — the one endpoint every OpenAI-compatible server
 // has.
 func statusProbeURL(provider, baseURL string) string {
+	// The resolved URL, not the configured one: an empty base_url is not "no
+	// server", every provider factory falls back to a local default, and
+	// probing "" reports a reachable server as unreachable.
+	baseURL = config.ResolveBaseURL(provider, baseURL)
 	if provider == "mlx" {
 		return baseURL + "/v1/models"
 	}
 	return baseURL + "/health"
+}
+
+// shownBaseURL is what the url line prints: the URL the runtime will use, said
+// out loud when it came from the default rather than from the config, so
+// "nothing configured" and "configured to this" stay distinguishable.
+func shownBaseURL(provider, baseURL string) string {
+	if baseURL != "" {
+		return baseURL
+	}
+	if d := config.DefaultBaseURL(provider); d != "" {
+		return d + " (provider default — not configured)"
+	}
+	return "not configured"
 }
 
 func newDoctorCmd() *cobra.Command {
@@ -121,12 +138,14 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	}
 
 	printSection(w, "LLM ("+cfg.LLM.Provider+")")
-	printCheck(w, "url", cfg.LLM.BaseURL, "")
+	printCheck(w, "url", shownBaseURL(cfg.LLM.Provider, cfg.LLM.BaseURL), "")
+	llmReachable := false
 	if isHostedProvider(cfg.LLM.Provider) {
 		printCheck(w, "status", hostedNotProbed, "")
 		printCheck(w, "model", cfg.LLM.Model, "")
 	} else {
 		msg, ok = CheckHTTP(statusProbeURL(cfg.LLM.Provider, cfg.LLM.BaseURL), client)
+		llmReachable = ok
 		printCheck(w, "status", msg, boolToStatus(ok))
 		printCheck(w, "model", CheckLLMModel(cfg.LLM.BaseURL, cfg.LLM.Model, client), "")
 	}
@@ -135,12 +154,20 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 	printCheck(w, "context", ctxMsg, ctxStatus)
 
 	printSection(w, "Embedding ("+cfg.Embedding.Provider+")")
-	printCheck(w, "url", cfg.Embedding.BaseURL, "")
+	printCheck(w, "url", shownBaseURL(cfg.Embedding.Provider, cfg.Embedding.BaseURL), "")
+	sharesLLM := config.ResolveBaseURL(cfg.Embedding.Provider, cfg.Embedding.BaseURL) ==
+		config.ResolveBaseURL(cfg.LLM.Provider, cfg.LLM.BaseURL)
 	switch {
 	case isHostedProvider(cfg.Embedding.Provider):
 		printCheck(w, "status", hostedNotProbed, "")
-	case cfg.Embedding.BaseURL == cfg.LLM.BaseURL && !isHostedProvider(cfg.LLM.Provider):
-		printCheck(w, "status", "same server as LLM", "✓")
+	case sharesLLM && !isHostedProvider(cfg.LLM.Provider):
+		// Sharing the URL does not make it reachable. Reporting ✓ here while
+		// the LLM line reports ✗ is one of the two that has to be wrong.
+		if llmReachable {
+			printCheck(w, "status", "same server as LLM", "✓")
+		} else {
+			printCheck(w, "status", "same server as LLM, which is not answering", "✗")
+		}
 	default:
 		msg, ok = CheckHTTP(statusProbeURL(cfg.Embedding.Provider, cfg.Embedding.BaseURL), client)
 		printCheck(w, "status", msg, boolToStatus(ok))

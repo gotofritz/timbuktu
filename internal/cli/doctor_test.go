@@ -1096,3 +1096,60 @@ func dropSessionTables(t *testing.T, path string) {
 	}
 	_ = db.Close()
 }
+
+// An empty base_url is not "no server" — every provider factory resolves it to
+// a default, so the runtime happily talks to localhost while doctor probed the
+// empty string and called a working server unreachable. A health check that
+// reports the wrong thing about connectivity sends you debugging the one part
+// that works.
+func TestRunDoctorTo_resolvesAnEmptyBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(dir, "tbuk.sqlite")
+	cfg.LLM.Provider = "mlx"
+	cfg.LLM.BaseURL = ""
+	cfg.Embedding.Provider = "mlx"
+	cfg.Embedding.BaseURL = ""
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, &http.Client{}, cfg, cfgPath); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+
+	if !strings.Contains(got, "http://localhost:8080") {
+		t.Errorf("doctor does not show the URL the runtime would use:\n%s", got)
+	}
+	if !strings.Contains(got, "unsupported protocol scheme") {
+		return // the point: it probed a real URL, not the empty string
+	}
+	t.Errorf("doctor probed the empty base URL instead of the resolved default:\n%s", got)
+}
+
+// The embedding line said "✓ same server as LLM" while the LLM line said ✗.
+// Both cannot be true, and the ✓ is the one that misleads.
+func TestRunDoctorTo_sharedServerCarriesTheLLMStatus(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(dir, "tbuk.sqlite")
+	cfg.LLM.Provider = "mlx"
+	// A port with nothing on it: both probes must fail, and the embedding line
+	// must not claim otherwise just because it shares the URL.
+	cfg.LLM.BaseURL = "http://127.0.0.1:1"
+	cfg.Embedding.Provider = "mlx"
+	cfg.Embedding.BaseURL = "http://127.0.0.1:1"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, &http.Client{}, cfg, cfgPath); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "✓ same server as LLM") {
+		t.Errorf("embedding claims ✓ while sharing an unreachable server:\n%s", got)
+	}
+	if !strings.Contains(got, "same server as LLM") {
+		t.Errorf("embedding no longer says it shares the LLM's server:\n%s", got)
+	}
+}
