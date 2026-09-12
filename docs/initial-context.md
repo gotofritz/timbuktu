@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture, LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
+  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture (with ChunkSpec), LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
@@ -1253,9 +1253,52 @@ It is a weak model and the header says so — enough to pin a ranking, not enoug
 to decide anything about retrieval quality. There is no silent fallback between
 the two: recording without a usable config fails and names the stopgap.
 
+The header also records the **chunking** the corpus was split under, and both
+the recorder and the suite that replays the fixture take it from there rather
+than from a constant each holds separately. Chunk boundaries decide what the
+keys are, so two sides holding separate opinions about them is a fixture that
+misses on every lookup.
+
+That chunking is far finer than a real knowledge base would use (60 tokens,
+10 overlap). With one chunk per document a top-5 search over eight documents
+returns most of the corpus, every metric saturates at 1.0, and a ranking
+regression has nowhere to show. Small chunks give the fixture enough of them to
+rank: 31 chunks, and no metric at its ceiling.
+
 The corpus carries more documents than it has labels. The unlabelled ones are
 distractors, and they are the point: a corpus whose every document is the right
 answer to something has no ranking left to get wrong.
+
+### The regression baseline
+
+`internal/eval/testdata/corpus/baseline.json` is what the fixture scored when it
+was last recorded, across seven deterministic sweeps — keyword, vector and
+hybrid, each under `off` and `window`, plus the gold ceiling.
+`TestFixtureCorpus_scoresItsRecordedBaseline` (in `internal/cli`, which is where
+the database wiring lives) ingests the corpus into an in-memory knowledge base
+against the frozen vectors and asserts every one of them.
+
+The baseline is **recorded, not hand-written**: `make eval-record` writes the
+vectors and then the metrics those vectors score, so changing the corpus, the
+labels or the embedder is one command followed by reading a diff — never
+editing a number in a test until it passes, which is how a regression test
+quietly becomes a record of whatever the code last did.
+
+A moved number is not automatically a regression. It is a change to look at and
+then re-record on purpose.
+
+What this catches and what it does not, measured rather than asserted:
+inverting the keyword leg's BM25 ordering moves every sweep and fails loudly.
+Nudging the RRF weighting constant or the hybrid candidate depth moves nothing
+— over 31 chunks at top 5, RRF is monotonic on a single query list and the
+deeper candidate set only adds tail entries. The fixture pins rankings, not
+every parameter that feeds one.
+
+`TestFixtureCorpus_goldCeilingBeatsTheWindow` scores the ceiling against the
+window on the follow-up cases alone, which is the comparison D14 exists for.
+Comparing the two reports' overall averages would be wrong: the ceiling scores
+only the cases carrying a `gold_query` and skips the rest, so its denominator
+is a different set of cases.
 
 ---
 

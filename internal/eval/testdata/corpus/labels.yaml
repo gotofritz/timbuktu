@@ -1,6 +1,11 @@
 version: 1
 name: fixture-corpus
-description: fixture corpus for eval regression tests
+description: |
+  Fixture corpus for the CI regression tests. Small on purpose: it exists to
+  pin a ranking, not to say anything about retrieval quality. The corpus holds
+  more documents than this set labels — the unlabelled ones are distractors,
+  and they are the point, because a corpus whose every document is the right
+  answer to something has no ranking left to get wrong.
 
 cases:
   - id: slices-growth
@@ -20,3 +25,27 @@ cases:
     relevant:
       - path: slices.md
         contains: array pointer
+
+  # The follow-up cases below carry a thread, without which `window` and `off`
+  # are the same measurement: a rewrite is an identity on a question with
+  # nothing behind it. Each also carries the standalone question a competent
+  # human would have typed, so the ceiling a rewrite reaches for costs no model
+  # call to measure.
+  - id: maps-followup
+    thread:
+      - question: how do slices grow?
+        answer: A slice grows when append finds len == cap, roughly doubling capacity.
+    query: and maps?
+    gold_query: how do Go maps grow as they fill up?
+    relevant:
+      - path: maps.md
+
+  - id: channels-followup
+    thread:
+      - question: how does a slice's capacity grow?
+        answer: append allocates a new underlying array and copies into it.
+    query: and for channels?
+    gold_query: what is a channel's buffer capacity and does it grow?
+    relevant:
+      - path: channels.md
+        contains: capacity is fixed when the channel is made

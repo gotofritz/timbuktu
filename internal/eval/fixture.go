@@ -18,10 +18,22 @@ import (
 // and a report over a fixture says which one produced it, so a number is
 // always traceable to something that could have produced it.
 type Fixture struct {
-	Model      string               `json:"model"`
-	Dimension  int                  `json:"dimension"`
-	RecordedAt time.Time            `json:"recorded_at"`
-	Vectors    map[string][]float32 `json:"vectors"`
+	Model      string    `json:"model"`
+	Dimension  int       `json:"dimension"`
+	RecordedAt time.Time `json:"recorded_at"`
+	// Chunking is what split the corpus into the texts below. Both the
+	// recorder and the suite that replays the fixture take it from here rather
+	// than from a constant each holds separately: chunk boundaries decide what
+	// the keys even are, so two sides disagreeing about them is a fixture that
+	// misses on every lookup.
+	Chunking ChunkSpec            `json:"chunking"`
+	Vectors  map[string][]float32 `json:"vectors"`
+}
+
+// ChunkSpec is the chunker configuration a fixture was recorded under.
+type ChunkSpec struct {
+	Size    int `json:"size"`
+	Overlap int `json:"overlap"`
 }
 
 // NewFixture returns an empty fixture stamped with the instrument recording it.
@@ -65,6 +77,11 @@ func LoadFixture(path string) (*Fixture, error) {
 	}
 	if f.Vectors == nil {
 		f.Vectors = make(map[string][]float32)
+	}
+	if f.Chunking.Size < 1 {
+		return nil, fmt.Errorf(
+			"eval: fixture %s: records no chunk size, so the texts behind its keys cannot be reproduced",
+			path)
 	}
 	for key, vec := range f.Vectors {
 		if len(vec) != f.Dimension {

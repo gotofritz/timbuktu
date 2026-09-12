@@ -72,15 +72,21 @@ check-ci: lint ## Full CI gate: lint + build + coverage >= 85%
 	go build ./...
 	@./scripts/check-coverage.sh
 
-eval-record: ## Record frozen vectors for the fixture corpus (needs the configured embedding server)
+# Both targets write two files that have to agree: the vectors, and the metrics
+# those vectors score. Recording the baseline instead of hand-writing it into a
+# test is what makes changing the corpus, the labels or the embedder a
+# one-command job — re-record, read the diff, commit it on purpose.
+eval-record: ## Record frozen vectors + their baseline (needs the configured embedding server)
 	go test -tags=record -count=1 -v -run TestRecordFixtureVectors ./internal/eval
+	go test -tags=record -count=1 -v -run TestRecordFixtureBaseline ./internal/cli
 
 # The offline stopgap: TF-IDF + SVD fitted on the fixture corpus itself. No
 # server, no weights, real distributional semantics — enough to pin a ranking,
 # not enough to decide anything about retrieval quality. The fixture header
 # names it, so a number is never mistaken for one a real model produced.
-eval-record-lsa: ## Record frozen vectors with the offline LSA stopgap (no server needed)
+eval-record-lsa: ## Record frozen vectors + their baseline with the offline LSA stopgap
 	EVAL_EMBEDDER=lsa go test -tags=record -count=1 -v -run TestRecordFixtureVectors ./internal/eval
+	go test -tags=record -count=1 -v -run TestRecordFixtureBaseline ./internal/cli
 
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and

@@ -32,6 +32,14 @@ const lsaDimension = 64
 // recordBatch is how many texts go to the embedder at once, matching ingest.
 const recordBatch = 16
 
+// fixtureChunking splits the corpus far more finely than a real knowledge base
+// would. That is deliberate: with one chunk per document a top-5 search over
+// eight documents returns most of the corpus, every metric saturates at 1.0,
+// and a ranking regression has nowhere to show. Small chunks give the fixture
+// enough of them to actually rank. It is recorded in the fixture header, so
+// the suite that replays the vectors chunks the same way by construction.
+var fixtureChunking = eval.ChunkSpec{Size: 60, Overlap: 10}
+
 // TestRecordFixtureVectors embeds the fixture corpus and its label set's
 // queries, and writes testdata/corpus/vectors.json.
 //
@@ -48,6 +56,7 @@ func TestRecordFixtureVectors(t *testing.T) {
 	embedder, model := recordEmbedder(t, corpusTexts(t, ctx))
 
 	fixture := eval.NewFixture(model, embedder.Dimension(), time.Now().UTC().Truncate(time.Second))
+	fixture.Chunking = fixtureChunking
 	for start := 0; start < len(texts); start += recordBatch {
 		end := start + recordBatch
 		if end > len(texts) {
@@ -95,10 +104,7 @@ func corpusTexts(t *testing.T, ctx context.Context) []string {
 	}
 	sort.Strings(paths)
 
-	chunker := &chunking.Chunker{
-		Size:    config.Defaults().Chunking.Size,
-		Overlap: config.Defaults().Chunking.Overlap,
-	}
+	chunker := &chunking.Chunker{Size: fixtureChunking.Size, Overlap: fixtureChunking.Overlap}
 	var texts []string
 	for _, path := range paths {
 		text, _, _, err := preprocess.Extract(ctx, path)

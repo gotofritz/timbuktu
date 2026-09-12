@@ -26,6 +26,7 @@ func writeFixtureFile(t *testing.T, body string) string {
 func twoVectorFixture(t *testing.T) *eval.Fixture {
 	t.Helper()
 	f := eval.NewFixture(fixtureModel, 2, time.Date(2026, 9, 12, 10, 0, 0, 0, time.UTC))
+	f.Chunking = eval.ChunkSpec{Size: 60, Overlap: 10}
 	if err := f.Put("slices grow", []float32{1, 0}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -108,6 +109,7 @@ func TestLoadFixture_rejectsAVectorDisagreeingWithItsOwnHeader(t *testing.T) {
   "model": "lsa/fixture",
   "dimension": 2,
   "recorded_at": "2026-09-12T10:00:00Z",
+  "chunking": {"size": 60, "overlap": 10},
   "vectors": {"aaa": [1, 0, 0]}
 }`)
 	_, err := eval.LoadFixture(path)
@@ -202,5 +204,52 @@ func TestCommittedFixture_isRecorded(t *testing.T) {
 	}
 	if _, err := f.Embedder(f.Model, f.Dimension); err != nil {
 		t.Fatalf("fixture will not replay as an embedder: %v", err)
+	}
+}
+
+func TestFixture_carriesTheChunkingItWasRecordedUnder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vectors.json")
+	f := eval.NewFixture(fixtureModel, 2, time.Now())
+	f.Chunking = eval.ChunkSpec{Size: 60, Overlap: 10}
+	if err := f.Put("slices grow", []float32{1, 0}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := f.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := eval.LoadFixture(path)
+	if err != nil {
+		t.Fatalf("LoadFixture: %v", err)
+	}
+	if got.Chunking != f.Chunking {
+		t.Fatalf("Chunking = %+v, want %+v", got.Chunking, f.Chunking)
+	}
+}
+
+func TestLoadFixture_rejectsAFixtureThatDoesNotSayHowItWasChunked(t *testing.T) {
+	path := writeFixtureFile(t, `{
+  "model": "lsa/fixture",
+  "dimension": 2,
+  "recorded_at": "2026-09-12T10:00:00Z",
+  "chunking": {"size": 0, "overlap": 0},
+  "vectors": {"aaa": [1, 0]}
+}`)
+	_, err := eval.LoadFixture(path)
+	if err == nil {
+		t.Fatal("LoadFixture accepted a fixture with no chunk size")
+	}
+	if !strings.Contains(err.Error(), "chunk") {
+		t.Errorf("error does not mention chunking: %v", err)
+	}
+}
+
+func TestCommittedFixture_recordsItsChunking(t *testing.T) {
+	f, err := eval.LoadFixture(filepath.Join("testdata", "corpus", "vectors.json"))
+	if err != nil {
+		t.Fatalf("LoadFixture: %v", err)
+	}
+	if f.Chunking.Size < 1 {
+		t.Fatalf("committed fixture records chunk size %d", f.Chunking.Size)
 	}
 }
