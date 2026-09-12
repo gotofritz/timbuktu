@@ -452,6 +452,39 @@ func TestManifest_expand(t *testing.T) {
 	}
 }
 
+// max_hops is a template key for the same reason the mode is: every hop spends
+// the template's model.
+func TestManifest_maxHops(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "deep", map[string]string{
+		"manifest.yaml": "name: deep\nretrieval:\n  top_k: 5\n  max_hops: 2\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+	writeTemplate(t, dir, "plainhops", map[string]string{
+		"manifest.yaml": "name: plainhops\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+
+	td := prompts.NewTemplateDir(dir)
+	deep, err := td.Load("deep")
+	if err != nil {
+		t.Fatalf("Load(deep): %v", err)
+	}
+	if got := deep.Manifest().Retrieval.MaxHops; got != 2 {
+		t.Errorf("retrieval.max_hops: want 2, got %d", got)
+	}
+
+	plain, err := td.Load("plainhops")
+	if err != nil {
+		t.Fatalf("Load(plainhops): %v", err)
+	}
+	if got := plain.Manifest().Retrieval.MaxHops; got != 0 {
+		t.Errorf("retrieval.max_hops default: want 0 (single shot), got %d", got)
+	}
+}
+
 // Every mode this build ships loads; the command decides whether it has a model
 // to spend on the ones that need one.
 func TestLoad_acceptsEveryRewriteMode(t *testing.T) {
@@ -485,6 +518,8 @@ func TestLoad_rejectsBadRewrite(t *testing.T) {
 		{"unknown mode", "name: t\nretrieval:\n  rewrite: windwo\n", "windwo"},
 		{"negative window", "name: t\nretrieval:\n  rewrite: window\n  window_turns: -1\n", "window_turns"},
 		{"negative expansion", "name: t\nretrieval:\n  expand: -2\n", "expand"},
+		{"negative hops", "name: t\nretrieval:\n  max_hops: -1\n", "hops"},
+		{"more hops than the loop allows", "name: t\nretrieval:\n  max_hops: 99\n", "hops"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

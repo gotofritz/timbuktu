@@ -53,6 +53,13 @@ type EvalOptions struct {
 	// Planner turns a case's thread and its question into the queries
 	// retrieval runs. Nil retrieves on the question exactly as written.
 	Planner rewrite.Planner
+	// Hop names what the passages retrieved so far do not cover, so the run can
+	// retrieve again. Nil, or a MaxHops of 0, is the single shot every report
+	// in this repository was produced by.
+	Hop     Hopper
+	MaxHops int
+	// Warn receives the loop's diagnostics. Nil is silence.
+	Warn io.Writer
 	// Answer produces a case's completion. Required by the generation stage
 	// and unused by the retrieval one, which is what keeps a retrieval eval
 	// free of a model.
@@ -128,20 +135,31 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			continue
 		}
 
+		// A hop that failed is recorded the way a rewrite that fell back is:
+		// the case did not get the loop the run claims to be measuring, and
+		// numbers from it are the single shot's wearing the loop's name.
+		var hopGaveUp []string
 		start := time.Now()
-		chunks, err := retrieve(ctx, queries, opts.TopK, nil)
+		chunks, ran, err := RetrieveWithHops(ctx, retrieve, opts.Hop, c.Query, queries, opts.TopK, HopOptions{
+			MaxHops:  opts.MaxHops,
+			Warn:     opts.Warn,
+			OnGiveUp: func(reason string) { hopGaveUp = append(hopGaveUp, reason) },
+		})
+		// The hops' model calls are inside this timer on purpose: #28's kill
+		// criterion is stated in latency, and a loop whose rounds were not
+		// timed cannot be held to it.
 		elapsed := time.Since(start)
 		if err != nil {
-			return eval.Report{}, fmt.Errorf("eval: case %q: retrieve: %w", c.ID, err)
+			return eval.Report{}, fmt.Errorf("eval: case %q: %w", c.ID, err)
 		}
 
 		row := eval.CaseResult{
 			ID:        c.ID,
 			Query:     c.Query,
-			Queries:   queries,
+			Queries:   ran,
 			LatencyMS: float64(elapsed.Microseconds()) / 1000,
 			PlanMS:    float64(planElapsed.Microseconds()) / 1000,
-			Degraded:  drainFallbacks(opts.Planner),
+			Degraded:  joinReasons(drainFallbacks(opts.Planner), hopGaveUp),
 		}
 		if scoreRetrieval {
 			row.Metrics = eval.Score(evalResults(chunks), c.Relevant, opts.TopK)
@@ -159,6 +177,7 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		TopK:      opts.TopK,
 		Rewrite:   rewriteLabel(opts),
 		Expand:    opts.Expand,
+		Hops:      opts.MaxHops,
 		Stage:     stageLabel(opts.Stage),
 		Embedding: opts.Embedding,
 		LLM:       opts.LLM,
@@ -212,6 +231,17 @@ func checkIndexedLabels(set eval.Set, opts EvalOptions) (int, error) {
 			"the knowledge base is empty or holds a different corpus, and scoring it "+
 			"would report zeroes that read as a retrieval failure",
 		eval.Plural(labels, "label"), set.Name, nameSome(names))
+}
+
+// joinReasons collects every way this case failed to get what the run asked
+// for, into the one field the report counts.
+func joinReasons(planner string, hops []string) string {
+	reasons := make([]string, 0, len(hops)+1)
+	if planner != "" {
+		reasons = append(reasons, planner)
+	}
+	reasons = append(reasons, hops...)
+	return strings.Join(reasons, "; ")
 }
 
 // fallbackReporter is the half of a planner that admits to having degraded.
@@ -703,6 +733,7 @@ func newEvalCmd() *cobra.Command {
 		format       string
 		verbose      bool
 		repeat       int
+		hopsFlag     int
 	)
 
 	cmd := &cobra.Command{
@@ -732,6 +763,15 @@ evidence.
 
   tbuk eval go-docs --stage both
   tbuk eval go-docs --stage generation --judge --verbose
+
+--hops N lets a case be retrieved for in rounds: retrieve, let the model name
+what is still missing, retrieve again, fuse. It costs a model call a round on
+top of the answer, and the round trips are inside the latency the report
+records — which is what #28's kill criterion, stated in correctness and latency
+together, is measured against.
+
+  tbuk eval go-docs --stage both --judge              # one hop
+  tbuk eval go-docs --stage both --judge --hops 2     # and two
 
 --repeat N runs the same sweep N times and reports the spread — mean, min, max
 and standard deviation per metric — instead of one run's numbers, naming the
@@ -766,6 +806,9 @@ configurable, so two runs cannot be scored by two different instruments;
 			}
 			if err := eval.ValidateStage(stage); err != nil {
 				return fmt.Errorf("--stage: %w", err)
+			}
+			if err := rewrite.ValidateHops(hopsFlag); err != nil {
+				return fmt.Errorf("--hops: %w", err)
 			}
 			// A repeat of one is a single run, not a spread of one: the
 			// summary would print a standard deviation of zero, which states
@@ -840,6 +883,23 @@ configurable, so two runs cannot be scored by two different instruments;
 				runOpts.Embedding = modelLabel(cfg.Embedding.Provider, cfg.Embedding.Model)
 			}
 
+			// The template is read at most once, and only when something
+			// actually spends what it holds: the model and temperature a
+			// rewrite, a hop or an answer costs. A keyword-mode retrieval eval
+			// therefore needs no prompt directory at all, which is what keeps
+			// it free to run anywhere — CI included.
+			var loaded *prompts.Template
+			template := func() (*prompts.Template, error) {
+				if loaded == nil {
+					t, err := prompts.NewTemplateDir(cfg.Prompts.Dir).Load(templateName)
+					if err != nil {
+						return nil, fmt.Errorf("load template %q: %w", templateName, err)
+					}
+					loaded = t
+				}
+				return loaded, nil
+			}
+
 			// Zero, not the template's: a grader that disagrees with itself
 			// between two runs of the same set is not a measuring instrument.
 			judgeTemperature := 0.0
@@ -859,9 +919,9 @@ configurable, so two runs cannot be scored by two different instruments;
 			}
 
 			if eval.ScoresGeneration(stage) {
-				tmpl, err := prompts.NewTemplateDir(cfg.Prompts.Dir).Load(templateName)
+				tmpl, err := template()
 				if err != nil {
-					return fmt.Errorf("load template %q: %w", templateName, err)
+					return err
 				}
 				l, err := app.LLM()
 				if err != nil {
@@ -904,9 +964,9 @@ configurable, so two runs cannot be scored by two different instruments;
 				// CI included, where there is no model and no reason to have
 				// installed templates.
 				if needsModel || cmd.Flags().Changed("template") {
-					tmpl, err := prompts.NewTemplateDir(cfg.Prompts.Dir).Load(templateName)
+					tmpl, err := template()
 					if err != nil {
-						return fmt.Errorf("load template %q: %w", templateName, err)
+						return err
 					}
 					manifest := tmpl.Manifest()
 					plannerOpts.WindowTurns = manifest.Retrieval.WindowTurns
@@ -935,6 +995,24 @@ configurable, so two runs cannot be scored by two different instruments;
 				}
 				counter.inner = planner
 				runOpts.Planner = counter
+			}
+
+			// #28's kill criterion is "two hops beat one", so the harness has
+			// to be able to run two. The loop is off unless asked for, and off
+			// is the single search every report in docs/eval was produced by.
+			if hopsFlag > 0 {
+				tmpl, err := template()
+				if err != nil {
+					return err
+				}
+				l, err := app.LLM()
+				if err != nil {
+					return err
+				}
+				runOpts.Hop = hopperFor(tmpl.Manifest(), l.Chat, cmd.ErrOrStderr())
+				runOpts.MaxHops = hopsFlag
+				runOpts.Warn = cmd.ErrOrStderr()
+				runOpts.LLM = modelLabel(cfg.LLM.Provider, cfg.LLM.Model)
 			}
 
 			out := cmd.OutOrStdout()
@@ -980,6 +1058,8 @@ configurable, so two runs cannot be scored by two different instruments;
 	cmd.Flags().StringVar(&baselinePath, "baseline", "", "a previous --format json report to diff against")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text or json")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print a row per case, and the skipped ones")
+	cmd.Flags().IntVar(&hopsFlag, "hops", 0,
+		"follow-up retrieval rounds per case: retrieve, let the model name what is missing, retrieve again (0 = off)")
 	cmd.Flags().IntVar(&repeat, "repeat", 1,
 		"run the sweep this many times and report the spread instead of one run's numbers")
 	cmd.MarkFlagsMutuallyExclusive("gold", "rewrite")

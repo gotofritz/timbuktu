@@ -236,6 +236,7 @@ func runDoctor(w io.Writer, client *http.Client, cfg config.Config, cfgPath stri
 		printCheck(w, "budgets", budgetMsg, budgetStatus)
 		printCheck(w, "rewrite", rewriteModesMsg(manifests), "")
 		printCheck(w, "expand", expandMsg(manifests), "")
+		printCheck(w, "hops", hopsMsg(manifests), "")
 	}
 
 	printSection(w, "Eval")
@@ -321,6 +322,26 @@ func expandMsg(manifests []prompts.Manifest) string {
 	}
 	return strings.Join(parts, ", ") +
 		" extra queries (one model call to write them, one search each, fused by RRF); off elsewhere"
+}
+
+// hopsMsg says which templates retrieve in rounds, and how many they allow.
+//
+// The third line of the same story as rewriteModesMsg and expandMsg, and the
+// most expensive of them: a hopping template spends a model call *and* a search
+// per round, on top of the answer's own call. An imported template that hops is
+// otherwise a quietly multiplied cost per ask.
+func hopsMsg(manifests []prompts.Manifest) string {
+	var parts []string
+	for _, m := range manifests {
+		if n := m.Retrieval.MaxHops; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", m.Name, n))
+		}
+	}
+	if len(parts) == 0 {
+		return "off everywhere (a single search per ask, unmeasured and off by default)"
+	}
+	return strings.Join(parts, ", ") +
+		" follow-up rounds (a model call and a search each, fused by RRF); off elsewhere"
 }
 
 // contextBudgetMsg describes the context window and what it leaves for the

@@ -29,6 +29,11 @@ type RetrievalConfig struct {
 	// fused with the original by RRF. It spends one more model call, so it is
 	// off (0) unless a template asks for it.
 	Expand int `yaml:"expand"`
+	// MaxHops is how many follow-up retrieval rounds the answer may take:
+	// retrieve, let the model name what is still missing, retrieve again, fuse.
+	// Each hop costs a model call and a search on top of the answer, so it is
+	// off (0 = today's single shot) unless a template asks for it.
+	MaxHops int `yaml:"max_hops"`
 }
 
 // VariableDefault holds a default value for a template variable.
@@ -75,6 +80,9 @@ func loadManifest(path string) (Manifest, error) {
 	}
 	if err := rewrite.ValidateExpand(m.Retrieval.Expand); err != nil {
 		return Manifest{}, fmt.Errorf("manifest %s: retrieval %w", path, err)
+	}
+	if err := rewrite.ValidateHops(m.Retrieval.MaxHops); err != nil {
+		return Manifest{}, fmt.Errorf("manifest %s: retrieval max_hops: %w", path, err)
 	}
 	return m, nil
 }

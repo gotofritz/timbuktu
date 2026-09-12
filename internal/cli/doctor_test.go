@@ -1153,3 +1153,49 @@ func TestRunDoctorTo_sharedServerCarriesTheLLMStatus(t *testing.T) {
 		t.Errorf("embedding no longer says it shares the LLM's server:\n%s", got)
 	}
 }
+
+// A hopping template is a model call and a search per round on every ask, so
+// doctor names the templates that do it and how many rounds each allows.
+func TestRunDoctorTo_namesTemplatesThatHop(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\n")
+	writeTemplateAt(t, promptRoot, "deep", "name: deep\nretrieval:\n  max_hops: 2\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"hops", "deep", "2"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("doctor report missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The loop is off unless a template asks for it, and the line says so rather
+// than going quiet — "no line" and "no loop" would look the same.
+func TestRunDoctorTo_reportsNoHops(t *testing.T) {
+	promptRoot := t.TempDir()
+	writeTemplateAt(t, promptRoot, "qa", "name: qa\n")
+
+	cfg := config.Defaults()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "tbuk.sqlite")
+	cfg.Prompts.Dir = promptRoot
+	cfg.LLM.Provider = "llama"
+	cfg.LLM.BaseURL = "http://127.0.0.1:19999"
+
+	var out bytes.Buffer
+	if err := cli.RunDoctorTo(&out, http.DefaultClient, cfg, "/no/such/config.yaml"); err != nil {
+		t.Fatalf("RunDoctorTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "hops") || !strings.Contains(out.String(), "single search") {
+		t.Errorf("want a hops line saying the loop is off:\n%s", out.String())
+	}
+}

@@ -1082,3 +1082,69 @@ func TestEvalSpreadOutput(t *testing.T) {
 		}
 	})
 }
+
+// #28's kill criterion is "two hops beat one", which means the harness has to
+// be able to run two. The loop's extra searches land in the row's queries, so
+// a report says what each case actually retrieved on.
+func TestRunEval_hopsRetrieveAgain(t *testing.T) {
+	var plans [][]string
+	set := evalSet(t, twoCaseSet)
+	hop := &scriptedHop{replies: []string{"slice growth factor", "", "map growth factor", ""}}
+
+	report, err := cli.RunEval(context.Background(), set, countingRetriever(&plans),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, MaxHops: 2, Hop: hop})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	// Two cases, two searches each: the question, then the question plus what
+	// the hop asked for.
+	if len(plans) != 4 {
+		t.Fatalf("searches = %d, want 4", len(plans))
+	}
+	if len(report.Cases[0].Queries) != 2 || report.Cases[0].Queries[1] != "slice growth factor" {
+		t.Errorf("case queries = %v, want the hop's search recorded", report.Cases[0].Queries)
+	}
+	// The instrument block has to say the loop ran, or two reports with
+	// different hop counts are indistinguishable.
+	if report.Run.Hops != 2 {
+		t.Errorf("Run.Hops = %d, want 2", report.Run.Hops)
+	}
+}
+
+// A run whose hops all failed is a single-shot run wearing the loop's name.
+func TestRunEval_recordsAHopThatGaveUp(t *testing.T) {
+	var plans [][]string
+	set := evalSet(t, twoCaseSet)
+	hop := &scriptedHop{err: errors.New("the model did not answer within 20s")}
+
+	report, err := cli.RunEval(context.Background(), set, countingRetriever(&plans),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, MaxHops: 2, Hop: hop})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.Degraded != 2 {
+		t.Errorf("Degraded = %d, want both cases counted", report.Degraded)
+	}
+	if !strings.Contains(report.Cases[0].Degraded, "did not answer") {
+		t.Errorf("case degraded = %q, want the reason", report.Cases[0].Degraded)
+	}
+}
+
+// The default has to stay exactly what it was: one search on the planned query.
+func TestRunEval_withoutHopsIsOneSearchPerCase(t *testing.T) {
+	var plans [][]string
+	set := evalSet(t, twoCaseSet)
+	hop := &scriptedHop{replies: []string{"never asked"}}
+
+	report, err := cli.RunEval(context.Background(), set, countingRetriever(&plans),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Hop: hop})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if len(plans) != 2 || hop.calls != 0 {
+		t.Errorf("searches = %d, hops = %d, want 2 and 0", len(plans), hop.calls)
+	}
+	if report.Run.Hops != 0 {
+		t.Errorf("Run.Hops = %d, want 0", report.Run.Hops)
+	}
+}

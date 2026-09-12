@@ -119,36 +119,17 @@ func (c Condense) condense(ctx context.Context, thread []conversation.Turn, ques
 	if err != nil {
 		return "", fmt.Errorf("the model call failed: %w", err)
 	}
-
-	var sb, reasoning strings.Builder
-	for done := false; !done; {
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return "", fmt.Errorf("the model did not answer within %s", timeout)
-			}
-			return "", ctx.Err() //nolint:wrapcheck // the caller's own cancellation, unadorned
-		case tok, ok := <-tokens:
-			if !ok {
-				done = true
-				break
-			}
-			if tok.Error != nil {
-				return "", fmt.Errorf("the model stream failed: %w", tok.Error)
-			}
-			sb.WriteString(tok.Text)
-			reasoning.WriteString(tok.Reasoning)
-			done = tok.Done
-		}
+	raw, reasoning, err := collect(ctx, tokens, timeout)
+	if err != nil {
+		return "", err
 	}
 
-	raw := sb.String()
 	out := cleanCondensed(stripThinking(raw))
 	if out == "" {
 		// A reasoning model given a budget sized for one question spends all of
 		// it thinking and never reaches the answer. Saying "returned nothing"
 		// sends the reader to the prompt; the budget is what ran out.
-		if reasoning.Len() > 0 || strings.Contains(raw, thinkOpen) {
+		if reasoning != "" || strings.Contains(raw, thinkOpen) {
 			return "", fmt.Errorf(
 				"the model spent its %d-token budget reasoning without writing a question — "+
 					"raise the template's max_tokens or rewrite with a non-reasoning model",
@@ -163,6 +144,36 @@ func (c Condense) condense(ctx context.Context, thread []conversation.Turn, ques
 			len(out), limit)
 	}
 	return out, nil
+}
+
+// collect drains a token stream into the completion and the reasoning it came
+// with, bounded by the same timeout that bounds the call.
+//
+// Shared by every planner here that spends a model: they differ in what they
+// ask for and in what they do with a failure, not in how a stream ends.
+func collect(ctx context.Context, tokens <-chan llm.Token, timeout time.Duration) (string, string, error) {
+	var text, reasoning strings.Builder
+	for done := false; !done; {
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return "", "", fmt.Errorf("the model did not answer within %s", timeout)
+			}
+			return "", "", ctx.Err() //nolint:wrapcheck // the caller's own cancellation, unadorned
+		case tok, ok := <-tokens:
+			if !ok {
+				done = true
+				break
+			}
+			if tok.Error != nil {
+				return "", "", fmt.Errorf("the model stream failed: %w", tok.Error)
+			}
+			text.WriteString(tok.Text)
+			reasoning.WriteString(tok.Reasoning)
+			done = tok.Done
+		}
+	}
+	return text.String(), reasoning.String(), nil
 }
 
 const (

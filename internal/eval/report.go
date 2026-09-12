@@ -18,6 +18,10 @@ type Run struct {
 	TopK    int    `json:"top_k"`
 	Rewrite string `json:"rewrite,omitempty"`
 	Expand  int    `json:"expand,omitempty"`
+	// Hops is how many follow-up retrieval rounds the run allowed. Zero is the
+	// single shot, and two reports that differ only in this are otherwise
+	// indistinguishable — which is the comparison #28's kill criterion is.
+	Hops int `json:"hops,omitempty"`
 	// Stage is what was measured: retrieval, generation, or both. A report that
 	// does not say which half it scored is a report whose empty block cannot be
 	// told from a failing one.
@@ -255,6 +259,9 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	}
 	if r.Run.Expand > 0 {
 		fmt.Fprintf(&b, "   expand %d", r.Run.Expand)
+	}
+	if r.Run.Hops > 0 {
+		fmt.Fprintf(&b, "   hops %d", r.Run.Hops)
 	}
 	b.WriteString("\n")
 	if r.Run.Embedding != "" {

@@ -252,6 +252,30 @@ the loop does not ship. The planner interface and the fusion stay — they are
 milestones 3 and 4's — and milestone 5 is closed as "measured, not worth it".
 Same discipline as plan 33's D7.
 
+**Status.** The loop is built and off by default (`rewrite.Hop`,
+`cli.RetrieveWithHops`, `--hops` on `ask`, `chat` and `eval`, manifest
+`retrieval.max_hops`), and `tbuk eval --hops N` times the rounds inside the
+case latency so the criterion above is checkable. **The criterion has not been
+evaluated**: it needs the corpus ingested and a chat model served. Until it is,
+nothing about the defaults changes, and this milestone is not done — either the
+numbers justify the loop and it stays, or they kill it and the loop comes back
+out, leaving the planner interface and the fusion behind.
+
+Two additions the milestone made that the design above did not name:
+
+- `MaxHopsLimit` (5) caps `--hops`. Each round is a model call and a search on
+  top of the answer, and a loop longer than that is an agent with a tool, which
+  #161 puts out of scope. A typo fails at the flag, not after five model calls.
+- Every round re-runs *every* query rather than fusing each round's list into
+  the last. RRF is not associative, so folding round by round would score a
+  chunk by its rank in a fusion rather than by its rank in a search.
+
+**The `--hops` name belongs to this loop.** Plan 33's entity expansion wanted
+the same flag on `ask` for graph traversal depth, which is a different number
+with a different meaning; it takes `--entity-hops`, paired with
+`--expand-entities`. `entity show --hops N` is unambiguous and keeps the plain
+name.
+
 ### D13. Appends are transactional
 
 `UNIQUE(session_id, turn_index)` plus `MAX(turn_index)+1` computed inside the
