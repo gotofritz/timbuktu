@@ -2184,7 +2184,9 @@ A `+` means this run is better. Now you know, rather than suspect.
 Most of what `tbuk eval` measures is deterministic: the same corpus and the
 same settings give you the same report, to the last digit. `--rewrite condense`
 and `--expand N` are not, because a model writes the query, and a model asked
-the same question twice does not always write the same thing.
+the same question twice does not always write the same thing. Nor is
+`--judge`: a judged correctness is a model marking an answer, and it can mark
+the same answer differently on Tuesday.
 
 `--repeat` runs the sweep several times and shows you the spread instead of one
 run's numbers:
@@ -2209,11 +2211,21 @@ my-notes — 3 runs, 24 cases each
       ran on: session turn storage
 ```
 
+If you scored answers as well — `--stage both --judge` — the spread covers that
+half too: includes, citations, groundedness, correctness, and how many answers
+the judge actually managed to mark each time. A judge that fails a different
+case each run is worth seeing, because it moves every average above it.
+
 Nothing is re-ingested between the runs, so the corpus they disagree about is
 one corpus. If the spread is as large as the difference you were about to act
 on, you have not measured a difference yet. On a deterministic setting the
 spread comes out at exactly zero, which is a useful thing to check: anything
 else means something moved underneath the runs.
+
+This repository keeps two ready-made sweeps of its own documentation, if you
+want to see the shape of one: `make eval-condense-spread` (cheap) and
+`make eval-generation-spread` (a model call per answer and another per mark, so
+minutes rather than seconds).
 
 ### Trying it without an AI model running
 
