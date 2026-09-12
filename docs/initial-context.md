@@ -331,11 +331,19 @@ which removes `<think>…</think>` from the completion. A block that never close
 is thinking that ran out of budget, so everything from it on is dropped rather
 than retrieved on.
 
-**The request names the model, not the server.** `mlx_lm.server --model X`
-only preloads X; the `model` field in each request wins, and the server loads
-whatever it names on demand. So the model a rewrite spends is the template
-manifest's `model:` (or `llm.model` when that is empty) — starting the server
-with a different one changes nothing.
+**Which model actually answers.** The request body always carries `model`,
+resolved as `CallOptions.Model` (the template manifest's `model:`) → the
+provider's `cfg.Model` (`llm.model`) → `""`. A named model wins:
+`mlx_lm.server --model X` only preloads X, and a request naming Y makes it
+fetch and load Y on demand.
+
+**When both are empty the server decides**, which is the default configuration
+`tbuk init` writes. `""` is sent as-is, and whatever the server has loaded
+answers — so on that setup the `--model` flag governs after all, and any other
+client that switched the server's model has changed what `tbuk` gets. Pin
+`llm.model` to stop that being a question: it is also what the eval report
+records as the instrument, and `modelLabel` has nothing to name when it is
+blank.
 
 On a non-200 response the adapters read up to ~2 KB of the body into `LLMError`/`EmbedError.Message` (falling back to the HTTP status text when empty), preserving the provider's own error text ("model not found", "context length exceeded").
 
