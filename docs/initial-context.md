@@ -1237,6 +1237,16 @@ generation half carries a latency of its own: a model call an answer is a
 different order of expense from an embedding call a query, and #28's kill
 criterion is stated in correctness and latency together.
 
+**An unscoreable run is refused, not reported.** Before scoring, `RunEval`
+resolves the set's labels against the documents the knowledge base actually
+holds (`Set.CheckPaths`, the same check doctor's Eval section runs). If *none*
+resolve, that is not a bad score — it is an empty knowledge base or the wrong
+corpus — and it errors out naming the labels, because a report of zeroes is
+indistinguishable from a retrieval failure. Some missing is a partial corpus:
+it scores, and `Report.UnindexedLabels` counts them above the metrics. An empty
+`Indexed` means the caller did not look, which is not the same as looking and
+finding none.
+
 **A degraded run says so.** `rewrite.Condense` cannot fail — it falls back to
 the window — so a sweep whose every model call timed out would otherwise report
 as a condense sweep carrying the window's numbers, which is the harness lying

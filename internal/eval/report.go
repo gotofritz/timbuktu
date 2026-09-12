@@ -112,6 +112,11 @@ type Report struct {
 	// the count is printed rather than left to be inferred from a case total
 	// the reader would have to go and look up.
 	Skipped []SkippedCase `json:"skipped,omitempty"`
+	// UnindexedLabels counts the labels naming a document the knowledge base
+	// does not hold. Each scores zero on every run and reads exactly like a
+	// retrieval failure, so the count belongs beside the metrics it is dragging
+	// down. Zero labels resolving is refused outright rather than reported.
+	UnindexedLabels int `json:"unindexed_labels,omitempty"`
 	// Degraded counts the cases whose query planning fell back. A run with any
 	// is not measuring the planner it names, so the number belongs beside the
 	// metrics rather than in a warning on stderr that has already scrolled past.
@@ -240,6 +245,11 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	}
 	if r.Run.Host != "" {
 		fmt.Fprintf(&b, "  host %s\n", r.Run.Host)
+	}
+	if r.UnindexedLabels > 0 {
+		fmt.Fprintf(&b,
+			"  ! %s not in the index — each scores zero and reads as a retrieval failure\n",
+			Plural(r.UnindexedLabels, "label"))
 	}
 	if r.Degraded > 0 {
 		fmt.Fprintf(&b,

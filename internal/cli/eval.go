@@ -88,6 +88,10 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			return eval.Report{}, err
 		}
 	}
+	unindexed, err := checkIndexedLabels(set, opts)
+	if err != nil {
+		return eval.Report{}, err
+	}
 	if eval.ScoresGeneration(opts.Stage) && opts.Answer == nil {
 		return eval.Report{}, fmt.Errorf(
 			"eval: the %s stage needs a model to answer with, and none was configured", opts.Stage)
@@ -160,7 +164,51 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		At:        time.Now().UTC(),
 	}, scored)
 	report.Skipped = skipped
+	report.UnindexedLabels = unindexed
 	return report, nil
+}
+
+// checkIndexedLabels resolves the set's labels against the documents the
+// knowledge base holds, and refuses the run when none of them resolve.
+//
+// A label naming a document that was never ingested scores zero on every run,
+// and a report of zeroes is indistinguishable from a retrieval failure — so a
+// set where *nothing* resolves is not a bad score, it is the wrong corpus or an
+// empty one, and scoring it would produce a complete report measuring nothing.
+// Some labels missing is a partial corpus: score it, and count them.
+//
+// An empty Indexed means the caller did not look, which is not the same as
+// looking and finding none.
+func checkIndexedLabels(set eval.Set, opts EvalOptions) (int, error) {
+	if len(opts.Indexed) == 0 || !eval.ScoresRetrieval(opts.Stage) {
+		return 0, nil
+	}
+	missing, _ := set.CheckPaths(opts.Indexed)
+	if len(missing) == 0 {
+		return 0, nil
+	}
+
+	labels := 0
+	for _, c := range set.Cases {
+		labels += len(c.Relevant)
+	}
+	if len(missing) < labels {
+		return len(missing), nil
+	}
+
+	names := make([]string, 0, len(missing))
+	seen := make(map[string]bool, len(missing))
+	for _, issue := range missing {
+		if !seen[issue.Path] {
+			seen[issue.Path] = true
+			names = append(names, issue.Path)
+		}
+	}
+	return 0, fmt.Errorf(
+		"eval: not one of the %s in %q is in the index (%s) — "+
+			"the knowledge base is empty or holds a different corpus, and scoring it "+
+			"would report zeroes that read as a retrieval failure",
+		eval.Plural(labels, "label"), set.Name, nameSome(names))
 }
 
 // fallbackReporter is the half of a planner that admits to having degraded.
@@ -725,19 +773,22 @@ configurable, so two runs cannot be scored by two different instruments;
 			// Zero, not the template's: a grader that disagrees with itself
 			// between two runs of the same set is not a measuring instrument.
 			judgeTemperature := 0.0
-			if eval.ScoresGeneration(stage) {
-				// The indexed paths are what a citation resolves against, and
-				// they are read once for the whole run rather than a query a
-				// case: the index does not change under an eval (D7).
-				docs, err := app.Docs().List(cmd.Context())
-				if err != nil {
-					return fmt.Errorf("eval: read the indexed documents: %w", err)
-				}
-				runOpts.Indexed = make([]string, len(docs))
-				for i, d := range docs {
-					runOpts.Indexed[i] = d.Path
-				}
+			// The indexed paths are read once for the whole run rather than a
+			// query a case: the index does not change under an eval (D7). Both
+			// stages want them — generation resolves citations against them,
+			// and retrieval checks that the labels name documents that are
+			// actually there, without which an empty corpus scores zero and
+			// reads as a retrieval failure.
+			docs, err := app.Docs().List(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("eval: read the indexed documents: %w", err)
+			}
+			runOpts.Indexed = make([]string, len(docs))
+			for i, d := range docs {
+				runOpts.Indexed[i] = d.Path
+			}
 
+			if eval.ScoresGeneration(stage) {
 				tmpl, err := prompts.NewTemplateDir(cfg.Prompts.Dir).Load(templateName)
 				if err != nil {
 					return fmt.Errorf("load template %q: %w", templateName, err)

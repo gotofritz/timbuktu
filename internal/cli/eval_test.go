@@ -853,3 +853,55 @@ func (p fallingBackPlanner) Queries(_ context.Context, _ []conversation.Turn, qu
 }
 
 func (p fallingBackPlanner) Fallbacks() []string { return []string{p.reason} }
+
+// TestRunEval_refusesWhenNoLabelIsInTheIndex is the guard for the failure that
+// wasted a real afternoon: five sweeps ran to completion against an empty
+// knowledge base and produced full reports — headline metrics, per-case rows,
+// latency percentiles, a named instrument — every number zero and nothing
+// saying why. Committed, those files read as a devastating retrieval result
+// rather than as a database with nothing in it.
+func TestRunEval_refusesWhenNoLabelIsInTheIndex(t *testing.T) {
+	var seen [][]string
+	_, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Indexed: []string{"/n/unrelated/other.md"}})
+	if err == nil {
+		t.Fatal("RunEval scored a set whose labels name nothing in the index")
+	}
+	if !strings.Contains(err.Error(), "index") {
+		t.Errorf("error does not say the labels are not indexed: %v", err)
+	}
+	// Naming one of them is what turns the error into an action.
+	if !strings.Contains(err.Error(), "go/slices.md") {
+		t.Errorf("error names no unresolved label: %v", err)
+	}
+}
+
+func TestRunEval_scoresWhenSomeLabelsResolve(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5,
+			// Only the first case's label is indexed. That is a partial corpus,
+			// not a broken one: score it, and say how much is missing.
+			Indexed: []string{"/n/go/slices.md"},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.UnindexedLabels != 1 {
+		t.Fatalf("UnindexedLabels = %d, want 1", report.UnindexedLabels)
+	}
+}
+
+// An empty Indexed means the caller did not look them up, which is not the
+// same as looking and finding none.
+func TestRunEval_withoutAnIndexListStillScores(t *testing.T) {
+	var seen [][]string
+	if _, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5}); err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+}
