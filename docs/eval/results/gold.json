@@ -7,7 +7,7 @@
     "stage": "retrieval",
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:09:22.242491Z"
+    "at": "2026-09-12T14:36:17.015899Z"
   },
   "overall": {
     "hit": 0.45454545454545453,
@@ -21,8 +21,8 @@
     "found": 5
   },
   "latency": {
-    "median_ms": 278.732,
-    "p95_ms": 399.353
+    "median_ms": 264.278,
+    "p95_ms": 387.138
   },
   "cases": [
     {
@@ -42,7 +42,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 278.732
+      "latency_ms": 273.241
     },
     {
       "id": "restore-followup",
@@ -61,7 +61,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 269.213
+      "latency_ms": 294.264
     },
     {
       "id": "reembed-followup",
@@ -80,7 +80,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 277.805
+      "latency_ms": 264.712
     },
     {
       "id": "context-window-followup",
@@ -99,7 +99,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 279.151
+      "latency_ms": 260.202
     },
     {
       "id": "folder-ingest-followup",
@@ -118,7 +118,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 277.816
+      "latency_ms": 260.01
     },
     {
       "id": "custom-template-followup",
@@ -137,7 +137,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 273.093
+      "latency_ms": 254.069
     },
     {
       "id": "conversation-followup",
@@ -156,7 +156,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 399.353
+      "latency_ms": 259.692
     },
     {
       "id": "bare-followup-warning",
@@ -175,7 +175,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 282.856
+      "latency_ms": 259.397
     },
     {
       "id": "unnamed-chat-followup",
@@ -194,7 +194,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 282.406
+      "latency_ms": 269.233
     },
     {
       "id": "batch-size-followup",
@@ -213,7 +213,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 282.609
+      "latency_ms": 264.278
     },
     {
       "id": "stale-docs-followup",
@@ -232,7 +232,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 272.212
+      "latency_ms": 387.138
     }
   ],
   "skipped": [

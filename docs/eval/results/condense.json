@@ -8,22 +8,22 @@
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "llm": "mlx/mlx-community/Qwen2.5-3B-Instruct-4bit",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:09:41.340124Z"
+    "at": "2026-09-12T14:36:34.530048Z"
   },
   "overall": {
-    "hit": 0.4166666666666667,
-    "recall": 0.375,
-    "precision": 0.08333333333333333,
-    "mrr": 0.24930555555555556,
-    "ndcg": 0.27496041388319503,
+    "hit": 0.4583333333333333,
+    "recall": 0.4166666666666667,
+    "precision": 0.09166666666666666,
+    "mrr": 0.2576388888888889,
+    "ndcg": 0.2910792808513009,
     "cases": 24,
     "labels": 26,
     "retrieved": 120,
-    "found": 10
+    "found": 11
   },
   "latency": {
-    "median_ms": 276.2415,
-    "p95_ms": 397.26
+    "median_ms": 258.0825,
+    "p95_ms": 368.633
   },
   "cases": [
     {
@@ -43,7 +43,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 281.665
+      "latency_ms": 284.469
     },
     {
       "id": "reembed-after-model-change",
@@ -62,7 +62,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 273.033
+      "latency_ms": 279.3
     },
     {
       "id": "code-search-encoding",
@@ -81,7 +81,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 272.915
+      "latency_ms": 281.32
     },
     {
       "id": "kebab-case-queries",
@@ -100,7 +100,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 277.219
+      "latency_ms": 260.424
     },
     {
       "id": "backup-archive",
@@ -119,7 +119,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 390.034
+      "latency_ms": 274.389
     },
     {
       "id": "no-restore-command",
@@ -138,7 +138,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 267.981
+      "latency_ms": 253.301
     },
     {
       "id": "data-root",
@@ -147,17 +147,17 @@
         "What directory do I need to keep a second knowledge base in?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.2,
+        "ndcg": 0.38685280723454163,
         "cases": 1,
         "labels": 1,
         "retrieved": 5,
-        "found": 0
+        "found": 1
       },
-      "latency_ms": 280.262
+      "latency_ms": 368.633
     },
     {
       "id": "deterministic-answers",
@@ -176,7 +176,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 274.681
+      "latency_ms": 258.545
     },
     {
       "id": "stale-extracted-text",
@@ -195,7 +195,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 279.467
+      "latency_ms": 261.37
     },
     {
       "id": "duplicate-paths",
@@ -214,7 +214,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 273.94
+      "latency_ms": 260.923
     },
     {
       "id": "exclusion-operator",
@@ -233,7 +233,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 271.567
+      "latency_ms": 257.62
     },
     {
       "id": "chunk-size-tuning",
@@ -252,7 +252,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 397.26
+      "latency_ms": 274.786
     },
     {
       "id": "eval-purpose",
@@ -271,7 +271,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 275.168
+      "latency_ms": 251.112
     },
     {
       "id": "search-without-model-followup",
@@ -290,7 +290,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 276.37
+      "latency_ms": 379.716
     },
     {
       "id": "restore-followup",
@@ -309,7 +309,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 276.113
+      "latency_ms": 257.608
     },
     {
       "id": "reembed-followup",
@@ -328,7 +328,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 276.563
+      "latency_ms": 250.355
     },
     {
       "id": "context-window-followup",
@@ -347,7 +347,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 281.978
+      "latency_ms": 255.8
     },
     {
       "id": "folder-ingest-followup",
@@ -366,7 +366,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 275.622
+      "latency_ms": 252.135
     },
     {
       "id": "custom-template-followup",
@@ -385,7 +385,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 400.298
+      "latency_ms": 248.921
     },
     {
       "id": "conversation-followup",
@@ -404,7 +404,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 277.762
+      "latency_ms": 250.449
     },
     {
       "id": "bare-followup-warning",
@@ -423,7 +423,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 276.589
+      "latency_ms": 251.579
     },
     {
       "id": "unnamed-chat-followup",
@@ -442,7 +442,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 275.468
+      "latency_ms": 362.349
     },
     {
       "id": "batch-size-followup",
@@ -461,7 +461,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 273.541
+      "latency_ms": 246.115
     },
     {
       "id": "stale-docs-followup",
@@ -480,7 +480,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 272.792
+      "latency_ms": 249.783
     }
   ]
 }

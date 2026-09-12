@@ -7,7 +7,7 @@
     "stage": "retrieval",
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:09:12.181807Z"
+    "at": "2026-09-12T14:36:07.391181Z"
   },
   "overall": {
     "hit": 0.3333333333333333,
@@ -21,8 +21,8 @@
     "found": 8
   },
   "latency": {
-    "median_ms": 274.704,
-    "p95_ms": 391.246
+    "median_ms": 252.1045,
+    "p95_ms": 357.71
   },
   "cases": [
     {
@@ -42,7 +42,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 408.848
+      "latency_ms": 390.682
     },
     {
       "id": "reembed-after-model-change",
@@ -61,7 +61,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 278.219
+      "latency_ms": 259.149
     },
     {
       "id": "code-search-encoding",
@@ -80,7 +80,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 274.665
+      "latency_ms": 245.865
     },
     {
       "id": "kebab-case-queries",
@@ -99,7 +99,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 271.868
+      "latency_ms": 261.076
     },
     {
       "id": "backup-archive",
@@ -118,7 +118,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 277.821
+      "latency_ms": 248.977
     },
     {
       "id": "no-restore-command",
@@ -137,7 +137,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 274.743
+      "latency_ms": 255.654
     },
     {
       "id": "data-root",
@@ -156,7 +156,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 280.319
+      "latency_ms": 252.896
     },
     {
       "id": "deterministic-answers",
@@ -175,7 +175,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 277.946
+      "latency_ms": 251.484
     },
     {
       "id": "stale-extracted-text",
@@ -194,7 +194,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 275.687
+      "latency_ms": 251.08
     },
     {
       "id": "duplicate-paths",
@@ -213,7 +213,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 280.28
+      "latency_ms": 252.725
     },
     {
       "id": "exclusion-operator",
@@ -232,7 +232,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 278.345
+      "latency_ms": 250.575
     },
     {
       "id": "chunk-size-tuning",
@@ -251,7 +251,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 273.434
+      "latency_ms": 256.535
     },
     {
       "id": "eval-purpose",
@@ -270,7 +270,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 277.747
+      "latency_ms": 254.622
     },
     {
       "id": "search-without-model-followup",
@@ -289,7 +289,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 264.409
+      "latency_ms": 247.025
     },
     {
       "id": "restore-followup",
@@ -308,7 +308,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 265.707
+      "latency_ms": 245.912
     },
     {
       "id": "reembed-followup",
@@ -327,7 +327,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 269.676
+      "latency_ms": 247.69
     },
     {
       "id": "context-window-followup",
@@ -346,7 +346,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 265.911
+      "latency_ms": 246.651
     },
     {
       "id": "folder-ingest-followup",
@@ -365,7 +365,7 @@
         "retrieved": 5,
         "found": 1
       },
-      "latency_ms": 272.769
+      "latency_ms": 249.15
     },
     {
       "id": "custom-template-followup",
@@ -384,7 +384,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 391.246
+      "latency_ms": 243.613
     },
     {
       "id": "conversation-followup",
@@ -403,7 +403,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 266.592
+      "latency_ms": 258.048
     },
     {
       "id": "bare-followup-warning",
@@ -422,7 +422,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 267.686
+      "latency_ms": 357.71
     },
     {
       "id": "unnamed-chat-followup",
@@ -441,7 +441,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 268.207
+      "latency_ms": 253.859
     },
     {
       "id": "batch-size-followup",
@@ -460,7 +460,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 267.745
+      "latency_ms": 246.893
     },
     {
       "id": "stale-docs-followup",
@@ -479,7 +479,7 @@
         "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 276.918
+      "latency_ms": 259.515
     }
   ]
 }
