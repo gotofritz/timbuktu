@@ -21,10 +21,7 @@ type ollamaEmbedder struct {
 }
 
 func newOllamaEmbedder(cfg config.EmbeddingConfig) *ollamaEmbedder {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:11434"
-	}
+	baseURL := config.ResolveBaseURL("ollama", cfg.BaseURL)
 	return &ollamaEmbedder{
 		baseURL:   baseURL,
 		model:     cfg.Model,

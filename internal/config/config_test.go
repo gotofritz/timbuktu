@@ -917,3 +917,37 @@ func TestValidate_emptyEvalDirIsFine(t *testing.T) {
 		t.Errorf("Validate with no eval.dir = %v, want nil", err)
 	}
 }
+
+// TestDefaultBaseURL pins the table doctor and the provider factories share.
+// They used to hold it separately, so doctor probed the empty string and
+// reported a working server unreachable.
+func TestDefaultBaseURL(t *testing.T) {
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"mlx", "http://localhost:8080"},
+		{"llama", "http://localhost:8080"},
+		{"ollama", "http://localhost:11434"},
+		{"unknown", ""},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		if got := config.DefaultBaseURL(tc.provider); got != tc.want {
+			t.Errorf("DefaultBaseURL(%q) = %q, want %q", tc.provider, got, tc.want)
+		}
+	}
+}
+
+func TestResolveBaseURL(t *testing.T) {
+	if got := config.ResolveBaseURL("mlx", ""); got != "http://localhost:8080" {
+		t.Errorf("an empty URL should resolve to the provider default, got %q", got)
+	}
+	if got := config.ResolveBaseURL("mlx", "http://elsewhere:9000"); got != "http://elsewhere:9000" {
+		t.Errorf("a configured URL must win, got %q", got)
+	}
+	// A hosted provider has no local default; the adapter builds its own URL.
+	if got := config.ResolveBaseURL("openai", ""); got != "" {
+		t.Errorf("no local default for a hosted provider, got %q", got)
+	}
+}
