@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
+  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture, LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
@@ -1215,6 +1215,47 @@ point); a different corpus size, embedder, model or judge is. The judged axes
 are diffed only when both runs judged: a run without `--judge` scores them zero,
 and a zero minus a zero says nothing while looking exactly like a delta that
 says something.
+
+
+### Frozen vectors
+
+`make check-ci` has no embedding server, so the fixture corpus under
+`internal/eval/testdata/corpus/` is embedded **once** and the vectors committed
+as `vectors.json`. `CacheEmbedder` replays them; a cache miss is a hard failure
+naming the text, never a silent fallback, because a fallback would score half
+the corpus against nothing and still print a number.
+
+The naive alternative is a hashing embedder, and it is the wrong one: hashed
+pseudo-vectors carry no semantics, so the only thing they can pin is that a
+ranking did not move — a test that fails identically whether the change was a
+regression or an improvement.
+
+Keys are the `sha256` of **the exact text the embedder was shown**, which is
+two different things: `searchtext.Reduce`'s encoding for a chunk (what
+`ingest` embeds) and the planned query string for a query (what `search`
+embeds). Under the default `window` mode that query is the thread's last
+questions folded in front of the current one, not the question as typed, so a
+fixture records all three deterministic forms — `off`, `window`, and the gold
+ceiling. An edited corpus or an edited label set is therefore a **miss**, which
+is loud, rather than a quiet zero.
+
+The header records `model`, `dimension` and `recorded_at`, and a run whose
+embedder disagrees with it is an error rather than a warning: vectors from two
+models are never mixed, and a report says which instrument produced it.
+
+Recording is `make eval-record` — a Go test behind the `record` build tag,
+because the production surface owes nothing to a test concern, and it needs a
+machine with a model, which CI does not have. `make eval-record-lsa` records
+with `FitLSA` instead: TF-IDF over the corpus vocabulary projected onto the
+leading singular directions of its own term-document matrix. No weights, no
+network, deterministic, and real distributional semantics rather than a hash.
+It is a weak model and the header says so — enough to pin a ranking, not enough
+to decide anything about retrieval quality. There is no silent fallback between
+the two: recording without a usable config fails and names the stopgap.
+
+The corpus carries more documents than it has labels. The unlabelled ones are
+distractors, and they are the point: a corpus whose every document is the right
+answer to something has no ranking left to get wrong.
 
 ---
 

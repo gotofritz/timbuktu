@@ -2,8 +2,6 @@ package eval
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 )
 
@@ -28,8 +26,7 @@ func NewCacheEmbedder(vectors map[string][]float32, dimension int) *CacheEmbedde
 func (c *CacheEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	result := make([][]float32, len(texts))
 	for i, text := range texts {
-		hash := sha256.Sum256([]byte(text))
-		key := hex.EncodeToString(hash[:])
+		key := VectorKey(text)
 		vec, ok := c.vectors[key]
 		if !ok {
 			return nil, fmt.Errorf("cache embedder: no vector for %s (text: %q)", key, text)
