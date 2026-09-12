@@ -256,7 +256,12 @@ Same discipline as plan 33's D7.
 `cli.RetrieveWithHops`, `--hops` on `ask`, `chat` and `eval`, manifest
 `retrieval.max_hops`), and `tbuk eval --hops N` times the rounds inside the
 case latency so the criterion above is checkable. **The criterion has not been
-evaluated**: it needs the corpus ingested and a chat model served. Until it is,
+evaluated**: it needs the corpus ingested and a chat model served. A first
+attempt was spent discovering that `docs/eval/timbuktu-docs.yaml` carried no
+reference answers, so `--stage both --judge` scored retrieval and reported no
+generation half at all; the set now carries an `answer` and a `must_include`
+per case, and `tbuk eval` refuses a generation run with nothing to mark
+against rather than reporting an empty block. Until it is,
 nothing about the defaults changes, and this milestone is not done — either the
 numbers justify the loop and it stays, or they kill it and the loop comes back
 out, leaving the planner interface and the fusion behind.

@@ -1148,3 +1148,60 @@ func TestRunEval_withoutHopsIsOneSearchPerCase(t *testing.T) {
 		t.Errorf("Run.Hops = %d, want 0", report.Run.Hops)
 	}
 }
+
+// The failure this guard exists to prevent, seen in the wild: a label set with
+// no reference answers scored under --stage both reported a full retrieval half
+// and no generation block at all — indistinguishable, on the page, from a run
+// where the model answered nothing.
+func TestRunEval_refusesGenerationWithNothingToMarkAgainst(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet) // relevant labels, no answer, no must_include
+
+	for _, stage := range []string{eval.StageGeneration, eval.StageBoth} {
+		t.Run(stage, func(t *testing.T) {
+			_, err := cli.RunEval(context.Background(), set,
+				recordingRetriever(nil, &seen),
+				cli.EvalOptions{
+					Mode: "hybrid", TopK: 5, Stage: stage,
+					Answer: fixedAnswer("anything at all"),
+				})
+			if err == nil {
+				t.Fatal("want an error: the generation half would be empty and read as a failure")
+			}
+			for _, want := range []string{"go-docs", "answer", "must_include"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// The guard is about the stage that was asked for. A retrieval run over a set
+// with no reference answers is the normal case and must stay silent.
+func TestRunEval_retrievalStageIgnoresMissingAnswers(t *testing.T) {
+	var seen [][]string
+	if _, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Stage: eval.StageRetrieval}); err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+}
+
+// Some cases scorable and some not is a partial set, not a broken one: it
+// scores what it can and the skipped list records the rest.
+func TestRunEval_partiallyScorableSetStillRuns(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, genSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageBoth,
+			Answer: fixedAnswer("append reallocates when len == cap."),
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.Generation == nil || report.Generation.Overall.Cases != 1 {
+		t.Errorf("Generation = %+v, want the one scorable case scored", report.Generation)
+	}
+}

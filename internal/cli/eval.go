@@ -103,6 +103,9 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		return eval.Report{}, fmt.Errorf(
 			"eval: the %s stage needs a model to answer with, and none was configured", opts.Stage)
 	}
+	if err := checkScorableAnswers(set, opts.Stage); err != nil {
+		return eval.Report{}, err
+	}
 
 	var (
 		scored  []eval.CaseResult
@@ -242,6 +245,35 @@ func joinReasons(planner string, hops []string) string {
 	}
 	reasons = append(reasons, hops...)
 	return strings.Join(reasons, "; ")
+}
+
+// checkScorableAnswers refuses a generation run over a set with nothing to mark
+// an answer against.
+//
+// Same reasoning as checkIndexedLabels, and the same failure it prevents: under
+// --stage both, a set with no reference answers scores its retrieval half
+// normally and reports no generation block at all, which on the page is
+// indistinguishable from a model that answered nothing. The run costs no model
+// call either — every case falls out before the answer is asked for — so
+// nothing announces that the stage the user named measured nothing.
+//
+// Some cases scorable and some not is a partial set, not a broken one: it
+// scores what it can, and the skipped list records the rest.
+func checkScorableAnswers(set eval.Set, stage string) error {
+	if !eval.ScoresGeneration(stage) {
+		return nil
+	}
+	for _, c := range set.Cases {
+		if scorableAnswer(c) {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"eval: --stage %s scores answers, but not one of the %s in %q carries an answer or "+
+			"must_include to score one against — the generation half would come back empty and "+
+			"read exactly like a model that answered nothing; add a reference answer to the cases "+
+			"you want marked, or score retrieval alone with --stage retrieval",
+		stage, eval.Plural(len(set.Cases), "case"), set.Name)
 }
 
 // fallbackReporter is the half of a planner that admits to having degraded.

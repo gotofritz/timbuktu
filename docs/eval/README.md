@@ -127,7 +127,7 @@ default whatever it does to MRR.
 | `gold` (the ceiling) | nothing beyond the labels |
 | `condense` | one model call per case |
 | `expand3` | one model call per case, plus a search per wording |
-| generation, `--judge` | one or two model calls per case |
+| generation, `--judge` | one or two model calls per case; needs `answer` / `must_include` on the cases |
 
 Ingesting the corpus needs the embedding server whichever row you want, because
 every chunk is embedded on the way in. "Free" means free of a *model* call at
@@ -207,9 +207,22 @@ an identity on a question with nothing behind it.
 
 ### Generation
 
-Not run. `--stage both` costs a model call a case and `--judge` another, and
-nothing about #24 or #25 turns on them. The retrieval half is what the two
-deferred defaults are about.
+Not run at the time those numbers were recorded, and it could not have been:
+the set carried **no reference answers at all**. `--stage both --judge` over it
+scored the retrieval half normally and reported no generation block — which on
+the page is indistinguishable from a model that answered nothing, and which is
+exactly how one `--hops 0` baseline run was spent finding out.
+
+Two things changed after that. Every case now carries an `answer` (the
+reference the judge marks correctness against) and a `must_include` list (short
+substrings a correct answer has to contain, scored without a model at all), and
+`tbuk eval` **refuses** a generation run over a set with nothing to mark against
+rather than reporting an empty half. A set where only some cases are scorable
+still runs — that is a partial set, and the skipped list records it.
+
+So the generation half is now runnable. Nothing about #24 or #25 turns on it —
+those were settled on retrieval — but [#161](../../../../issues/161)'s kill
+criterion is stated in answer correctness, and this is what it needs.
 
 ---
 
