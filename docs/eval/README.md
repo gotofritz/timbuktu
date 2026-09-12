@@ -136,85 +136,151 @@ eval time, not free of a server.
 
 ## Results
 
-> **Not yet run.** Every table below is empty because no sweep has been
-> recorded against this label set. Fill them from `docs/eval/results/*.json`
-> after `make eval-defaults`, and commit the JSON alongside so the numbers can
-> be re-derived rather than trusted.
+Recorded 2026-09-12 from `docs/eval/results/*.json`, committed alongside so
+every number below can be re-derived rather than trusted.
+
+| | |
+|---|---|
+| corpus | 11 documents, 345 chunks |
+| embedding | `mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`, 1024 dimensions |
+| chat (rewrites) | `mlx/mlx-community/Qwen2.5-3B-Instruct-4bit` |
+| host | `fritznew.local` (Apple silicon) |
+| degraded / unindexed | 0 / 0 on every sweep |
+
+`degraded: 0` matters: no rewrite fell back, so the `condense` row is a
+condense measurement and not the window's numbers wearing its name.
 
 ### Retrieval, all 24 cases
 
 | Run | hit@5 | recall@5 | P@5 | MRR | nDCG@5 | median | p95 |
 |---|---|---|---|---|---|---|---|
-| `off` | | | | | | | |
-| `window` | | | | | | | |
-| `condense` | | | | | | | |
-| `window --expand 3` | | | | | | | |
+| `off` | 0.333 | 0.312 | 0.075 | 0.229 | 0.248 | 252ms | 358ms |
+| `window` | 0.375 | 0.354 | 0.083 | 0.238 | 0.264 | 259ms | 344ms |
+| `condense` | 0.458 | 0.417 | 0.092 | 0.258 | 0.291 | 258ms | 369ms |
+| `window --expand 3` | 0.333 | 0.312 | 0.067 | 0.279 | 0.285 | **1024ms** | 1146ms |
+| `gold` (ceiling, 11 cases) | 0.455 | 0.409 | 0.091 | 0.280 | 0.306 | 264ms | 387ms |
 
 `P@5` is bounded above by `labels/5`, which is a property of the label set and
 not of the retriever. Most cases carry one label, so a precision near `0.20` is
-the ceiling, not a finding.
+the ceiling — these sit well under even that.
 
-**Check the `degraded` count before reading any rewrite row.** `condense`
-degrades instead of failing, so a run where every model call timed out still
-reports as a condense run — carrying the window's numbers under the condense
-name. The report counts the cases whose planning fell back, prints
-`! query planning fell back on N of M cases` above the metrics, and records
-`degraded` in the JSON; `--baseline` warns when either side has any. Anything
-above zero means the row measures a mixture, and the fix is a faster rewrite
-model, not a footnote.
+The rewrite latencies do not include the model call: the planner runs before
+the timer, so `condense` reads as 258ms while actually costing a round trip per
+question on top. `expand3`'s 1024ms is three extra searches, which the timer
+does see.
 
 ### The eleven follow-ups, against the ceiling
 
-This is the table #24 turns on. The ceiling is scored over the follow-up cases
-only, so compare per case — the ceiling skips every case with no `gold_query`,
-and its report average is over a different denominator.
+The table #24 turns on, scored per case over the follow-ups alone — the ceiling
+skips every case with no `gold_query`, so its report average is over a
+different denominator.
 
-| Run | hit@5 | MRR | nDCG@5 | gap to ceiling (MRR) |
+| Run | hit@5 | MRR | nDCG@5 | MRR gap to ceiling |
 |---|---|---|---|---|
-| `off` | | | | |
-| `window` | | | | |
-| `condense` | | | | |
-| `gold` (ceiling) | | | — | — |
+| `off` | 0.091 | 0.045 | 0.057 | −0.235 |
+| `window` | 0.182 | 0.064 | 0.093 | −0.216 |
+| `condense` | 0.182 | 0.076 | 0.085 | −0.204 |
+| `window --expand 3` | **0.273** | **0.155** | **0.183** | −0.125 |
+| `gold` (ceiling) | 0.455 | 0.280 | 0.306 | — |
 
 ### The thirteen single-shot cases, as a control
 
 | Run | hit@5 | MRR | nDCG@5 |
 |---|---|---|---|
-| `off` | | | |
-| `window` | | | |
-| `condense` | | | |
+| `off` | 0.538 | 0.385 | 0.410 |
+| `window` | 0.538 | 0.385 | 0.410 |
+| `condense` | **0.692** | **0.412** | **0.465** |
+| `window --expand 3` | **0.385** | 0.385 | 0.371 |
+
+`off` and `window` are identical here, which is the design working: a window is
+an identity on a question with nothing behind it.
 
 ### Generation
 
-| Run | includes | citations | groundedness | correctness | faithfulness |
-|---|---|---|---|---|---|
-| `--stage both` | | | | | |
-| `--stage both --judge` | | | | — | — |
-
-### Instrument
-
-| | |
-|---|---|
-| embedding model | |
-| chat model | |
-| judge model | |
-| host | |
-| recorded | |
-
-Latency moves with the machine as much as with the code, which is why the host
-is part of the record and why `--baseline` warns when it changes.
+Not run. `--stage both` costs a model call a case and `--judge` another, and
+nothing about #24 or #25 turns on them. The retrieval half is what the two
+deferred defaults are about.
 
 ---
 
 ## The decisions
 
-> **Pending the numbers above.** Each needs a stated outcome, a link to the
-> report it came from, and the corresponding edit to `README.md` and
-> `docs/plans/next-steps.md` — including "stays off", which is a result and not
-> a failure to decide.
+### #24 / [#159](../../../../issues/159) — `condense` stays off
 
-- **#24 / [#159](../../../../issues/159) — should `condense` become the default?**
-- **#25 / [#160](../../../../issues/160) — should `expand: N` become the default?**
+**It does not do the thing it was deferred for.** #159 deferred the flip until
+the harness showed condensing "beats the window on follow-up turns". On the
+follow-ups it ties the window on hit (0.182 both) and gains 0.012 MRR — inside
+the noise of an 11-case set, where one case is ±0.09 on hit.
+
+What it *does* do is improve the **single-shot control**, from 0.538 to 0.692
+hit — the half of the set where a rewrite was supposed to be a no-op. A model
+asked to restate a standalone question is apparently cleaning it up in ways
+retrieval likes.
+
+Both readings come from a single run, and `condense` is the one knob here whose
+output is not deterministic. Sampling its variance is the obvious next thing to
+do, and it is what would turn "stays off, and here is an unexplained gain
+elsewhere" into a decision about the gain itself.
+
+That is a real effect and a different feature from the one #159 describes.
+Flipping the default on it would be flipping it for a reason nobody stated and
+nobody measured against. So `condense` stays off, and the control-half gain is
+worth an issue of its own rather than a silent reinterpretation of this one.
+
+### #25 / [#160](../../../../issues/160) — `expand: N` stays off
+
+**It helps exactly where it should and hurts everywhere else.** On the
+follow-ups it is the best non-ceiling row by a clear margin — 0.273 hit and
+0.155 MRR against the window's 0.182 and 0.064, closing about 40% of the gap to
+the ceiling. On the single-shot control it *loses* hit, 0.538 down to 0.385.
+And it costs 1024ms against 259ms: **4× the latency of every question**.
+
+A default that makes most questions four times slower and less likely to find
+the passage, in exchange for better follow-ups, is not a default. It stays off
+and stays worth reaching for on threads — which is what `--expand N` already
+is.
+
+### What neither of them is: the actual problem
+
+The ceiling is **0.455 hit@5**. The standalone question a competent person
+would have typed finds the labelled passage, in the top five, less than half
+the time. No query planner can beat that, because the ceiling *is* the query
+being right.
+
+So the headroom on this corpus is not in query planning at all. It is in
+chunking, ranking, or fusion — 400-token chunks over 345 of them, cut at
+sentence boundaries with no structural awareness, scored by RRF over a single
+embedding leg. That is roadmap #8 (re-ranking), #27 (parent-child) and #29
+(structural chunking), and this is the first evidence in the repository that
+says so rather than assuming it.
+
+### How much to trust these
+
+Eleven and thirteen cases. One case moving is ±0.09 on hit and ±0.03 on MRR.
+None of the above is a significance claim — with a set this size there is
+nothing to be significant about, which the plan said before any of it ran.
+
+**Within one ingest the numbers are exact.** `--baseline` over two `window`
+runs three minutes apart returns a delta of **0 on hit, recall, precision, MRR
+and nDCG** — every quality metric, to the last digit. Only latency moves
+(median −5.5ms, p95 +30.9ms), which is why D10 reports it and never asserts it.
+That is the "A/B'd with a diff of two JSON files" the plan is for, working.
+
+**Across a re-ingest they are not comparable, and that is the corpus, not the
+harness.** An earlier sweep of this same label set is on record with different
+figures; it ran before the corpus was fully ingested, so it scored a different
+knowledge base. Numbers from two ingests are two measurements, not two samples
+of one — which is the whole reason the instrument block travels with the
+report.
+
+The practical consequence: **these decisions rest on one run each**, reproduced
+exactly rather than corroborated by an independent sample. For a knob whose
+output is deterministic (`window`, `off`, `gold`) that is the whole story. For
+`condense`, whose rewrite comes from a model, it is not: a second and third run
+would sample its variance, and nobody has. The direction is clear enough to act
+on and the effect sizes are not.
+
+---
 
 ### What the fixture already hints at, and why it decides nothing
 
