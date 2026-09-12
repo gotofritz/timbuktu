@@ -120,7 +120,7 @@ func (c Condense) condense(ctx context.Context, thread []conversation.Turn, ques
 		return "", fmt.Errorf("the model call failed: %w", err)
 	}
 
-	var sb strings.Builder
+	var sb, reasoning strings.Builder
 	for done := false; !done; {
 		select {
 		case <-ctx.Done():
@@ -137,12 +137,23 @@ func (c Condense) condense(ctx context.Context, thread []conversation.Turn, ques
 				return "", fmt.Errorf("the model stream failed: %w", tok.Error)
 			}
 			sb.WriteString(tok.Text)
+			reasoning.WriteString(tok.Reasoning)
 			done = tok.Done
 		}
 	}
 
-	out := cleanCondensed(sb.String())
+	raw := sb.String()
+	out := cleanCondensed(stripThinking(raw))
 	if out == "" {
+		// A reasoning model given a budget sized for one question spends all of
+		// it thinking and never reaches the answer. Saying "returned nothing"
+		// sends the reader to the prompt; the budget is what ran out.
+		if reasoning.Len() > 0 || strings.Contains(raw, thinkOpen) {
+			return "", fmt.Errorf(
+				"the model spent its %d-token budget reasoning without writing a question — "+
+					"raise the template's max_tokens or rewrite with a non-reasoning model",
+				opts.MaxTokens)
+		}
 		return "", errors.New("the model returned nothing to retrieve on")
 	}
 	// A rewrite that is longer than what it was asked to condense is not a
@@ -152,6 +163,30 @@ func (c Condense) condense(ctx context.Context, thread []conversation.Turn, ques
 			len(out), limit)
 	}
 	return out, nil
+}
+
+const (
+	thinkOpen  = "<think>"
+	thinkClose = "</think>"
+)
+
+// stripThinking removes the reasoning blocks a model streams inline, which is
+// what the servers that do not carry thinking in a field of its own do instead.
+// An unterminated block is thinking that never finished, so everything from it
+// on is dropped rather than retrieved on.
+func stripThinking(s string) string {
+	for {
+		open := strings.Index(s, thinkOpen)
+		if open < 0 {
+			return s
+		}
+		rest := s[open+len(thinkOpen):]
+		closed := strings.Index(rest, thinkClose)
+		if closed < 0 {
+			return s[:open]
+		}
+		s = s[:open] + rest[closed+len(thinkClose):]
+	}
 }
 
 // cleanCondensed reduces the completion to the one line retrieval runs on. A

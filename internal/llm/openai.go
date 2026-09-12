@@ -171,6 +171,12 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 				Choices []struct {
 					Delta struct {
 						Content string `json:"content"`
+						// Servers disagree on the name: mlx_lm.server sends
+						// `reasoning`, others `reasoning_content`. Decode both
+						// rather than pick, since the cost of guessing wrong is
+						// a model that reasoned reading as one that was silent.
+						Reasoning        string `json:"reasoning"`
+						ReasoningContent string `json:"reasoning_content"`
 					} `json:"delta"`
 				} `json:"choices"`
 			}
@@ -179,7 +185,12 @@ func (p *openAIProvider) Chat(ctx context.Context, messages []Message, opts ...C
 				return
 			}
 			if len(payload.Choices) > 0 {
-				if !sendToken(ctx, ch, Token{Text: payload.Choices[0].Delta.Content}) {
+				delta := payload.Choices[0].Delta
+				reasoning := delta.Reasoning
+				if reasoning == "" {
+					reasoning = delta.ReasoningContent
+				}
+				if !sendToken(ctx, ch, Token{Text: delta.Content, Reasoning: reasoning}) {
 					return
 				}
 			}

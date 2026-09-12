@@ -25,9 +25,15 @@ type Message struct {
 
 // Token is a streamed piece of a response.
 type Token struct {
-	Text  string
-	Done  bool  // true on last token
-	Error error // non-nil on stream error
+	Text string
+	// Reasoning is a reasoning model's thinking, which the OpenAI-compatible
+	// APIs stream in a field of its own rather than in the answer. It is kept
+	// apart from Text because it is not the answer — but it is not discarded
+	// either: a model that spends its whole budget thinking and never writes
+	// looks, from Text alone, exactly like one that had nothing to say.
+	Reasoning string
+	Done      bool  // true on last token
+	Error     error // non-nil on stream error
 }
 
 // CallOptions overrides per-request LLM parameters.

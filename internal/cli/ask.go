@@ -707,6 +707,10 @@ func RunAsk(
 	// Tracked on the raw stream, not the printed output, so a normalizer that
 	// legitimately reduces a real completion to nothing is not mistaken for it.
 	gotText := false
+	// Whether the model reasoned. A reasoning model streams its thinking on a
+	// field of its own and it never reaches the answer, so an empty completion
+	// with reasoning behind it has a cause worth naming rather than guessing at.
+	gotReasoning := false
 
 	// Under a session the answer has to be kept as well as printed, since a turn
 	// stores what the user saw. The tee exists only then, so the single-shot
@@ -726,6 +730,9 @@ func RunAsk(
 				return fmt.Errorf("LLM stream: %w", tok.Error)
 			}
 			sb.WriteString(tok.Text)
+			if tok.Reasoning != "" {
+				gotReasoning = true
+			}
 			if tok.Done {
 				break
 			}
@@ -757,6 +764,9 @@ func RunAsk(
 				gotText = true
 				endsWithNewline = strings.HasSuffix(tok.Text, "\n")
 			}
+			if tok.Reasoning != "" {
+				gotReasoning = true
+			}
 			if tok.Done {
 				break
 			}
@@ -774,6 +784,13 @@ func RunAsk(
 		empty := "warning: the model returned no text — the answer is empty; if the template's " +
 			"max_tokens is small, raise it (a reasoning model can spend the whole budget " +
 			"before writing anything)"
+		if gotReasoning {
+			// Not a guess any more: the thinking arrived on its own field and
+			// the answer never did. Naming the observed cause beats offering it
+			// as one possibility among several.
+			empty = "warning: the model spent the whole budget reasoning and never wrote an " +
+				"answer — raise the template's max_tokens, or use a model that does not reason"
+		}
 		if cfg.thread != nil {
 			// An empty assistant message replayed as history teaches the model
 			// nothing and costs the next prompt a pair, so the turn is not
