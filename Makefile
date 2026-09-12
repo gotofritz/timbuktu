@@ -1,5 +1,6 @@
 .PHONY: help build install test test-verbose test-race coverage coverage-html lint lint-install vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump \
-	 eval-record eval-record-lsa eval-ingest eval-defaults eval-condense-spread
+	 eval-record eval-record-lsa eval-ingest eval-defaults eval-condense-spread \
+	 eval-generation eval-generation-spread
 
 .DEFAULT_GOAL := help
 
@@ -107,6 +108,16 @@ eval-defaults: ## Sweep the rewrite/expand defaults over docs/eval (needs a KB a
 # non-zero spread there means the corpus moved under the runs.
 eval-condense-spread: ## Sample condense's run-to-run variance over docs/eval (needs a KB and a model)
 	./scripts/eval-condense-spread.sh
+
+# The expensive one: a model call to answer each case and another to mark it.
+# `eval-generation` writes the baseline a later run is diffed against;
+# `eval-generation-spread` runs it three times instead, because a judged score
+# is model-written and one run of a model-written number is an anecdote (#173).
+eval-generation: ## Score the answers over docs/eval, into results/generation.json (needs a KB and a model)
+	./scripts/eval-generation.sh
+
+eval-generation-spread: ## Sample the judge's run-to-run variance over docs/eval (RUNS=3; slow)
+	RUNS=3 ./scripts/eval-generation.sh
 
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and

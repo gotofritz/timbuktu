@@ -91,6 +91,7 @@ tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top
 tbuk eval [set]          # score retrieval and generation against a labelled set of cases
                          #   (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format, --verbose)
                          #   --repeat N runs the sweep N times and reports the spread, not one run's numbers
+                         #     the spread covers the generation half too when --stage scored one
                          #   --stage retrieval|generation|both picks what is scored (default retrieval)
                          #   --judge adds an LLM judge's correctness mark to the generation stage
                          #   --mode keyword with the retrieval stage needs no embedder and no model at all

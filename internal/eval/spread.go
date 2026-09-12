@@ -41,11 +41,17 @@ type CaseSpread struct {
 	// rewrite can be read against what it was given without opening the set.
 	Query string    `json:"query,omitempty"`
 	Hit   []float64 `json:"hit"`
+	// Correctness is the judge's mark per run, when the generation stage ran
+	// and judged this case every time. A case whose retrieval never moved but
+	// whose judged score did is exactly what a spread over a judged run exists
+	// to find, and hit alone would miss it.
+	Correctness []float64 `json:"correctness,omitempty"`
 	// Queries are the distinct plans this case ran on, in the order first seen.
 	// One entry means the planner produced the same search every time, whatever
 	// else moved.
 	Queries []string `json:"queries,omitempty"`
-	// Moved is whether this case scored differently between runs.
+	// Moved is whether this case scored differently between runs, on retrieval
+	// or on the judge's mark.
 	Moved bool `json:"moved,omitempty"`
 }
 
@@ -72,8 +78,22 @@ type Spread struct {
 	// only the ones that moved. A set whose halves are read apart (follow-ups
 	// against single-shot, say) can only be re-split from the rows, so the
 	// spread carries them rather than the averages alone.
-	Cases    []CaseSpread `json:"cases"`
-	Warnings []string     `json:"warnings,omitempty"`
+	Cases []CaseSpread `json:"cases"`
+	// Generation is the answers' half, absent unless every run scored it.
+	Generation *GenerationSpread `json:"generation,omitempty"`
+	Warnings   []string          `json:"warnings,omitempty"`
+}
+
+// GenerationSpread is the generation half across the runs, present only when
+// every run scored it. A run that scored no answers and a run that did are not
+// two samples of one measurement.
+type GenerationSpread struct {
+	Metrics       []MetricSpread `json:"metrics"`
+	LatencyMedian MetricSpread   `json:"latency_median"`
+	// Judged is how many answers the judge actually marked, per run. A judge
+	// that fails a different case each run is instability worth seeing, and it
+	// moves every average above it.
+	Judged MetricSpread `json:"judged"`
 }
 
 // Stable reports whether the quality metrics came out identical every run.
@@ -82,7 +102,11 @@ type Spread struct {
 // run of everything, and folding it in would make every spread unstable and
 // the word useless.
 func (s Spread) Stable() bool {
-	for _, m := range s.Metrics {
+	metrics := s.Metrics
+	if s.Generation != nil {
+		metrics = append(append([]MetricSpread(nil), metrics...), s.Generation.Metrics...)
+	}
+	for _, m := range metrics {
 		if m.StdDev != 0 || m.Span() != 0 {
 			return false
 		}
@@ -150,8 +174,32 @@ func NewSpread(reports []Report) (Spread, error) {
 		s.DegradedPerRun[i] = r.Degraded
 	}
 	s.Cases = caseSpreads(reports)
+	s.Generation = generationSpread(reports, pick)
 	s.Warnings = spreadWarnings(reports)
 	return s, nil
+}
+
+// generationSpread summarises the answers' half, or returns nil when the runs
+// do not agree on whether there was one. Comparing a number with the absence of
+// one is not a spread.
+func generationSpread(reports []Report, pick func(func(Report) float64) []float64) *GenerationSpread {
+	for _, r := range reports {
+		if r.Generation == nil {
+			return nil
+		}
+	}
+	return &GenerationSpread{
+		Metrics: []MetricSpread{
+			newMetricSpread("includes", pick(func(r Report) float64 { return r.Generation.Overall.Includes })),
+			newMetricSpread("citations", pick(func(r Report) float64 { return r.Generation.Overall.Citations })),
+			newMetricSpread("groundedness", pick(func(r Report) float64 { return r.Generation.Overall.Groundedness })),
+			newMetricSpread("correctness", pick(func(r Report) float64 { return r.Generation.Overall.Correctness })),
+		},
+		LatencyMedian: newMetricSpread("generation latency median",
+			pick(func(r Report) float64 { return r.Generation.Latency.MedianMS })),
+		Judged: newMetricSpread("judged",
+			pick(func(r Report) float64 { return float64(r.Generation.Overall.Judged) })),
+	}
 }
 
 func newMetricSpread(name string, xs []float64) MetricSpread {
@@ -198,7 +246,7 @@ func caseSpreads(reports []Report) []CaseSpread {
 			continue
 		}
 		spread := CaseSpread{ID: c.ID, Query: c.Query, Hit: make([]float64, 0, len(reports))}
-		complete := true
+		complete, judgedEvery := true, true
 		for i := range reports {
 			got, ok := byID[i][c.ID]
 			if !ok {
@@ -207,11 +255,21 @@ func caseSpreads(reports []Report) []CaseSpread {
 			}
 			spread.Hit = append(spread.Hit, got.Metrics.Hit)
 			spread.Queries = addDistinct(spread.Queries, strings.Join(got.Queries, " | "))
+			if got.Generation != nil && got.Generation.Judged > 0 {
+				spread.Correctness = append(spread.Correctness, got.Generation.Correctness)
+			} else {
+				judgedEvery = false
+			}
 		}
 		if !complete {
 			continue
 		}
-		spread.Moved = !sameFloats(spread.Hit)
+		// A case the judge marked only sometimes has no spread to report: the
+		// runs where it went unjudged scored nothing, not zero.
+		if !judgedEvery {
+			spread.Correctness = nil
+		}
+		spread.Moved = !sameFloats(spread.Hit) || !sameFloats(spread.Correctness)
 		out = append(out, spread)
 	}
 	return out
@@ -230,6 +288,9 @@ func addDistinct(xs []string, s string) []string {
 }
 
 func sameFloats(xs []float64) bool {
+	if len(xs) == 0 {
+		return true
+	}
 	for _, x := range xs {
 		if x != xs[0] {
 			return false
@@ -273,6 +334,19 @@ func spreadWarnings(reports []Report) []string {
 				n, r.Overall.Cases, first.Overall.Cases))
 		}
 	}
+	var scored int
+	for _, r := range reports {
+		if r.Generation != nil {
+			scored++
+		}
+	}
+	if scored > 0 && scored < len(reports) {
+		out = append(out, fmt.Sprintf(
+			"only %d of the %d runs scored the generation stage, so there is no spread to take on the "+
+				"answers — a run that scored none and a run that scored them are not two samples of one "+
+				"measurement", scored, len(reports)))
+	}
+
 	var degraded int
 	for _, r := range reports {
 		degraded += r.Degraded
@@ -319,6 +393,9 @@ func (s Spread) WriteText(w io.Writer) error {
 	if s.Run.LLM != "" {
 		fmt.Fprintf(&b, "  llm %s\n", s.Run.LLM)
 	}
+	if s.Run.Judge != "" {
+		fmt.Fprintf(&b, "  judge %s\n", s.Run.Judge)
+	}
 	if s.Run.Host != "" {
 		fmt.Fprintf(&b, "  host %s\n", s.Run.Host)
 	}
@@ -338,6 +415,8 @@ func (s Spread) WriteText(w io.Writer) error {
 			s.PlanMedian.Mean, s.PlanMedian.Min, s.PlanMedian.Max, s.PlanMedian.StdDev, s.PlanMedian.Span())
 	}
 
+	s.writeGeneration(&b)
+
 	if n := len(s.Cases); n > 0 {
 		fmt.Fprintf(&b, "\n  note: %s, so one case moving is ±%.3f on hit\n",
 			Plural(n, "case"), 1/float64(n))
@@ -349,6 +428,24 @@ func (s Spread) WriteText(w io.Writer) error {
 		return fmt.Errorf("eval: write spread: %w", err)
 	}
 	return nil
+}
+
+// writeGeneration prints the answers' half, when every run scored it.
+func (s Spread) writeGeneration(b *strings.Builder) {
+	if s.Generation == nil {
+		return
+	}
+	fmt.Fprintf(b, "\n  generation\n")
+	for _, m := range s.Generation.Metrics {
+		fmt.Fprintf(b, "  %-16s %7.3f %7.3f %7.3f %8.3f %8.3f\n",
+			m.Name, m.Mean, m.Min, m.Max, m.StdDev, m.Span())
+	}
+	g := s.Generation.LatencyMedian
+	fmt.Fprintf(b, "  %-16s %7.0f %7.0f %7.0f %8.0f %8.0f   ms\n",
+		"latency median", g.Mean, g.Min, g.Max, g.StdDev, g.Span())
+	j := s.Generation.Judged
+	fmt.Fprintf(b, "  %-16s %7.0f %7.0f %7.0f %8.0f %8.0f   answers\n",
+		"judged", j.Mean, j.Min, j.Max, j.StdDev, j.Span())
 }
 
 // writeCases names the cases that moved, or states that none did.
@@ -363,9 +460,15 @@ func (s Spread) writeCases(b *strings.Builder) {
 	}
 	fmt.Fprintf(b, "\n  %d of %s changed between runs:\n", len(moved), Plural(len(s.Cases), "case"))
 	for _, c := range moved {
-		fmt.Fprintf(b, "    %-28s", truncate(c.ID, 28))
+		fmt.Fprintf(b, "    %-28s hit ", truncate(c.ID, 28))
 		for _, h := range c.Hit {
 			fmt.Fprintf(b, " %4.2f", h)
+		}
+		if len(c.Correctness) > 0 {
+			b.WriteString("   correctness ")
+			for _, v := range c.Correctness {
+				fmt.Fprintf(b, " %4.2f", v)
+			}
 		}
 		b.WriteString("\n")
 		// One plan every run explains nothing about the movement, so printing

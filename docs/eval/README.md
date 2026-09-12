@@ -127,7 +127,7 @@ default whatever it does to MRR.
 | `gold` (the ceiling) | nothing beyond the labels |
 | `condense` | one model call per case |
 | `expand3` | one model call per case, plus a search per wording |
-| generation, `--judge` | one or two model calls per case; needs `answer` / `must_include` on the cases |
+| generation, `--judge` | one or two model calls per case; needs `answer` / `must_include` on the cases. `make eval-generation`, and `make eval-generation-spread` for its variance |
 
 Ingesting the corpus needs the embedding server whichever row you want, because
 every chunk is embedded on the way in. "Free" means free of a *model* call at
@@ -475,6 +475,18 @@ they do not agree with what the issue expected.
 make eval-ingest           # once, if ~/.tbuk-eval is not already built
 make eval-condense-spread  # RUNS=3 by default
 ```
+
+The generation stage has targets of its own, and they are the expensive ones —
+a model call to answer each case and another to mark it:
+
+```bash
+make eval-generation         # one run, into results/generation.json
+make eval-generation-spread  # three runs, reporting the spread instead
+```
+
+`--repeat` summarises **both** halves. A judged correctness is model-written,
+and everything this directory has learned about model-written numbers says a
+single run of one is an anecdote until its spread is known.
 
 It writes four files into `results/`: `condense-spread.{json,txt}` and
 `window-spread.{json,txt}`. No ingest happens between the runs — `tbuk eval`

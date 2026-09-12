@@ -320,3 +320,140 @@ func TestNewSpreadKeepsEveryCase(t *testing.T) {
 		t.Errorf("Query = %q, want the question as asked", s.Cases[0].Query)
 	}
 }
+
+// judgedRun builds a report whose cases carry a generation half too, so a
+// spread over a --stage both run has something to summarise.
+func judgedRun(set string, run eval.Run, correctness ...float64) eval.Report {
+	cases := make([]eval.CaseResult, len(correctness))
+	for i, c := range correctness {
+		cases[i] = eval.CaseResult{
+			ID:      caseID(i),
+			Query:   "q" + caseID(i),
+			Metrics: eval.Metrics{Hit: 1, Recall: 1, Precision: 1, MRR: 1, NDCG: 1, Cases: 1, Labels: 1, Retrieved: 5},
+			Generation: &eval.GenMetrics{
+				Includes: 1, Groundedness: 0.5, Correctness: c,
+				Cases: 1, WithIncludes: 1, WithWords: 1, Judged: 1,
+			},
+			GenLatencyMS: 8000,
+		}
+	}
+	return eval.NewReport(set, run, cases)
+}
+
+func judgedRunConfig() eval.Run {
+	r := condenseRun()
+	r.Judge = "mlx/judge"
+	return r
+}
+
+// The failure this closes: --repeat over --stage both --judge spent every
+// model call the generation stage costs and reported only the retrieval half,
+// so the one number the run was for — whether a judged score is stable — was
+// not in the output at all.
+func TestNewSpreadSummarisesTheGenerationHalf(t *testing.T) {
+	t.Parallel()
+	s, err := eval.NewSpread([]eval.Report{
+		judgedRun("docs", judgedRunConfig(), 1, 0.5),
+		judgedRun("docs", judgedRunConfig(), 1, 1),
+		judgedRun("docs", judgedRunConfig(), 0.5, 1),
+	})
+	if err != nil {
+		t.Fatalf("NewSpread: %v", err)
+	}
+	if s.Generation == nil {
+		t.Fatal("no generation half in the spread")
+	}
+	// Correctness per run: 0.75, 1.0, 0.75.
+	c := genMetricNamed(t, s, "correctness")
+	if !equalFloats(c.Runs, []float64{0.75, 1, 0.75}) {
+		t.Errorf("correctness runs = %v, want [0.75 1 0.75]", c.Runs)
+	}
+	if c.Min != 0.75 || c.Max != 1 {
+		t.Errorf("correctness min/max = %v/%v", c.Min, c.Max)
+	}
+	if s.Stable() {
+		t.Error("Stable() = true, but the judge disagreed with itself between runs")
+	}
+	// A judge that fails a different case each run is instability worth seeing.
+	if j := s.Generation.Judged; !equalFloats(j.Runs, []float64{2, 2, 2}) {
+		t.Errorf("judged runs = %v, want one per case per run", j.Runs)
+	}
+}
+
+// A run that scored no answers and a run that did are not two samples of one
+// measurement.
+func TestNewSpreadOmitsGenerationWhenOnlySomeRunsScoredIt(t *testing.T) {
+	t.Parallel()
+	s, err := eval.NewSpread([]eval.Report{
+		judgedRun("docs", judgedRunConfig(), 1, 1),
+		spreadRun("docs", judgedRunConfig(), 1, 1),
+	})
+	if err != nil {
+		t.Fatalf("NewSpread: %v", err)
+	}
+	if s.Generation != nil {
+		t.Error("Generation is present, but only one run scored the stage")
+	}
+	if !containsSub(s.Warnings, "generation") {
+		t.Errorf("warnings %v, want one about the missing half", s.Warnings)
+	}
+}
+
+// A case whose retrieval never moved but whose judged score did is exactly the
+// case a generation spread exists to find.
+func TestNewSpreadNamesACaseWhoseCorrectnessMoved(t *testing.T) {
+	t.Parallel()
+	s, err := eval.NewSpread([]eval.Report{
+		judgedRun("docs", judgedRunConfig(), 1, 1),
+		judgedRun("docs", judgedRunConfig(), 1, 0),
+	})
+	if err != nil {
+		t.Fatalf("NewSpread: %v", err)
+	}
+	moved := s.Unstable()
+	if len(moved) != 1 || moved[0].ID != "b" {
+		t.Fatalf("unstable = %+v, want the case the judge changed its mind about", moved)
+	}
+	if !equalFloats(moved[0].Correctness, []float64{1, 0}) {
+		t.Errorf("correctness = %v, want [1 0]", moved[0].Correctness)
+	}
+	// Its retrieval was identical throughout, so hit alone would have missed it.
+	if !equalFloats(moved[0].Hit, []float64{1, 1}) {
+		t.Errorf("hit = %v, want it steady", moved[0].Hit)
+	}
+}
+
+func TestSpreadWriteTextIncludesTheGenerationHalf(t *testing.T) {
+	t.Parallel()
+	s, err := eval.NewSpread([]eval.Report{
+		judgedRun("docs", judgedRunConfig(), 1, 0.5),
+		judgedRun("docs", judgedRunConfig(), 1, 1),
+	})
+	if err != nil {
+		t.Fatalf("NewSpread: %v", err)
+	}
+	var b strings.Builder
+	if err := s.WriteText(&b); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"generation", "correctness", "groundedness", "judged",
+		"judge mlx/judge", // the instrument that produced the judged numbers
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("spread is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func genMetricNamed(t *testing.T, s eval.Spread, name string) eval.MetricSpread {
+	t.Helper()
+	for _, m := range s.Generation.Metrics {
+		if m.Name == name {
+			return m
+		}
+	}
+	t.Fatalf("no generation metric %q in %v", name, s.Generation.Metrics)
+	return eval.MetricSpread{}
+}
