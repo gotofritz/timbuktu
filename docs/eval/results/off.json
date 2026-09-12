@@ -1,0 +1,485 @@
+{
+  "set": "timbuktu-docs",
+  "run": {
+    "mode": "hybrid",
+    "top_k": 5,
+    "rewrite": "off",
+    "stage": "retrieval",
+    "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+    "host": "fritznew.local",
+    "at": "2026-09-12T14:03:11.748352Z"
+  },
+  "overall": {
+    "hit": 0,
+    "recall": 0,
+    "precision": 0,
+    "mrr": 0,
+    "ndcg": 0,
+    "cases": 24,
+    "labels": 26,
+    "retrieved": 0,
+    "found": 0
+  },
+  "latency": {
+    "median_ms": 274.10699999999997,
+    "p95_ms": 398.819
+  },
+  "cases": [
+    {
+      "id": "context-budget",
+      "query": "what happens when the prompt is too big for the model?",
+      "queries": [
+        "what happens when the prompt is too big for the model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 405.234
+    },
+    {
+      "id": "reembed-after-model-change",
+      "query": "do I have to re-embed everything after changing the embedding model?",
+      "queries": [
+        "do I have to re-embed everything after changing the embedding model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 267.069
+    },
+    {
+      "id": "code-search-encoding",
+      "query": "how is source code indexed for search?",
+      "queries": [
+        "how is source code indexed for search?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 262.344
+    },
+    {
+      "id": "kebab-case-queries",
+      "query": "why does searching for a hyphenated word behave oddly?",
+      "queries": [
+        "why does searching for a hyphenated word behave oddly?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 271.164
+    },
+    {
+      "id": "backup-archive",
+      "query": "how do I back up my knowledge base?",
+      "queries": [
+        "how do I back up my knowledge base?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 275.871
+    },
+    {
+      "id": "no-restore-command",
+      "query": "is there a restore command?",
+      "queries": [
+        "is there a restore command?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 279.748
+    },
+    {
+      "id": "data-root",
+      "query": "how do I keep a second knowledge base in a different directory?",
+      "queries": [
+        "how do I keep a second knowledge base in a different directory?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 278.486
+    },
+    {
+      "id": "deterministic-answers",
+      "query": "how do I make the model's answers deterministic?",
+      "queries": [
+        "how do I make the model's answers deterministic?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 278.478
+    },
+    {
+      "id": "stale-extracted-text",
+      "query": "why is my document not being re-extracted after I improved an extractor?",
+      "queries": [
+        "why is my document not being re-extracted after I improved an extractor?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 271.688
+    },
+    {
+      "id": "duplicate-paths",
+      "query": "will ingesting the same file by a relative and an absolute path index it twice?",
+      "queries": [
+        "will ingesting the same file by a relative and an absolute path index it twice?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 282.978
+    },
+    {
+      "id": "exclusion-operator",
+      "query": "how do I exclude a word from a search?",
+      "queries": [
+        "how do I exclude a word from a search?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 279.771
+    },
+    {
+      "id": "chunk-size-tuning",
+      "query": "my answers about one document feel incomplete, what should I change?",
+      "queries": [
+        "my answers about one document feel incomplete, what should I change?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 284.148
+    },
+    {
+      "id": "eval-purpose",
+      "query": "how do I tell whether a settings change actually helped retrieval?",
+      "queries": [
+        "how do I tell whether a settings change actually helped retrieval?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 285.12
+    },
+    {
+      "id": "search-without-model-followup",
+      "query": "and without the model?",
+      "queries": [
+        "and without the model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 272.343
+    },
+    {
+      "id": "restore-followup",
+      "query": "and to get it back?",
+      "queries": [
+        "and to get it back?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 271.283
+    },
+    {
+      "id": "reembed-followup",
+      "query": "do I need to redo anything?",
+      "queries": [
+        "do I need to redo anything?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 271.602
+    },
+    {
+      "id": "context-window-followup",
+      "query": "what if I want it bigger?",
+      "queries": [
+        "what if I want it bigger?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 263.877
+    },
+    {
+      "id": "folder-ingest-followup",
+      "query": "and a whole folder?",
+      "queries": [
+        "and a whole folder?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 281.108
+    },
+    {
+      "id": "custom-template-followup",
+      "query": "how do I make my own?",
+      "queries": [
+        "how do I make my own?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 398.819
+    },
+    {
+      "id": "conversation-followup",
+      "query": "how do I make it?",
+      "queries": [
+        "how do I make it?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 266.169
+    },
+    {
+      "id": "bare-followup-warning",
+      "query": "what happens if I don't?",
+      "queries": [
+        "what happens if I don't?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 283.415
+    },
+    {
+      "id": "unnamed-chat-followup",
+      "query": "what if I forget to name it?",
+      "queries": [
+        "what if I forget to name it?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 271.918
+    },
+    {
+      "id": "batch-size-followup",
+      "query": "is there a limit with llama.cpp?",
+      "queries": [
+        "is there a limit with llama.cpp?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 264.841
+    },
+    {
+      "id": "stale-docs-followup",
+      "query": "so how do I keep it current?",
+      "queries": [
+        "so how do I keep it current?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 265.405
+    }
+  ]
+}

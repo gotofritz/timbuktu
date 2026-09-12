@@ -1,0 +1,547 @@
+{
+  "set": "timbuktu-docs",
+  "run": {
+    "mode": "hybrid",
+    "top_k": 5,
+    "rewrite": "window",
+    "expand": 3,
+    "stage": "retrieval",
+    "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+    "llm": "mlx/mlx-community/Qwen2.5-3B-Instruct-4bit",
+    "host": "fritznew.local",
+    "at": "2026-09-12T14:04:34.822749Z"
+  },
+  "overall": {
+    "hit": 0,
+    "recall": 0,
+    "precision": 0,
+    "mrr": 0,
+    "ndcg": 0,
+    "cases": 24,
+    "labels": 26,
+    "retrieved": 0,
+    "found": 0
+  },
+  "latency": {
+    "median_ms": 1099.691,
+    "p95_ms": 1253.903
+  },
+  "cases": [
+    {
+      "id": "context-budget",
+      "query": "what happens when the prompt is too big for the model?",
+      "queries": [
+        "what happens when the prompt is too big for the model?",
+        "what occurs when the input exceeds the model's capacity?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 662.334
+    },
+    {
+      "id": "reembed-after-model-change",
+      "query": "do I have to re-embed everything after changing the embedding model?",
+      "queries": [
+        "do I have to re-embed everything after changing the embedding model?",
+        "have I gotta redo everything after updating the embedding system?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 539.431
+    },
+    {
+      "id": "code-search-encoding",
+      "query": "how is source code indexed for search?",
+      "queries": [
+        "how is source code indexed for search?",
+        "how is source code stored in search results?",
+        "what data structure does search engines use for source code?",
+        "what information about source code is searchable by search engines?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1066.675
+    },
+    {
+      "id": "kebab-case-queries",
+      "query": "why does searching for a hyphenated word behave oddly?",
+      "queries": [
+        "why does searching for a hyphenated word behave oddly?",
+        "why does looking up words with dashes act strangely?",
+        "what unusual behavior occurs with hyphenated searches?",
+        "how does searching words with dashes produce unexpected results?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1232.086
+    },
+    {
+      "id": "backup-archive",
+      "query": "how do I back up my knowledge base?",
+      "queries": [
+        "how do I back up my knowledge base?",
+        "how can i save my knowledge base?",
+        "what methods are there to backup my knowledge base?",
+        "can anyone suggest ways to keep my knowledge base safe?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1156.11
+    },
+    {
+      "id": "no-restore-command",
+      "query": "is there a restore command?",
+      "queries": [
+        "is there a restore command?",
+        "restore function exists",
+        "exists a command for recovery?",
+        "backup command available"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1076.053
+    },
+    {
+      "id": "data-root",
+      "query": "how do I keep a second knowledge base in a different directory?",
+      "queries": [
+        "how do I keep a second knowledge base in a different directory?",
+        "how can i maintain a separate knowledge base in a separate folder?",
+        "what is the best method to store a second database in a different location?",
+        "how do i keep a second knowledge base in a separate directory?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1253.903
+    },
+    {
+      "id": "deterministic-answers",
+      "query": "how do I make the model's answers deterministic?",
+      "queries": [
+        "how do I make the model's answers deterministic?",
+        "ensure model predictions are repeatable",
+        "make sure output consistency is achieved",
+        "guarantee model output stability"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1067.286
+    },
+    {
+      "id": "stale-extracted-text",
+      "query": "why is my document not being re-extracted after I improved an extractor?",
+      "queries": [
+        "why is my document not being re-extracted after I improved an extractor?",
+        "how does improving the document extraction process not affect re-extraction results?",
+        "what issues might prevent re-extraction after enhancing the document extraction?",
+        "what problems could hinder re-extraction following document extraction improvements?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1225.02
+    },
+    {
+      "id": "duplicate-paths",
+      "query": "will ingesting the same file by a relative and an absolute path index it twice?",
+      "queries": [
+        "will ingesting the same file by a relative and an absolute path index it twice?",
+        "will indexing occur twice when a file is accessed via a relative path and an absolute path?",
+        "is there duplication in indexing if a file is referenced by both a relative and an absolute path?",
+        "will indexing be duplicated when a file is accessed using both a relative and an absolute path?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1111.819
+    },
+    {
+      "id": "exclusion-operator",
+      "query": "how do I exclude a word from a search?",
+      "queries": [
+        "how do I exclude a word from a search?",
+        "exclude a term from search results",
+        "remove a keyword from search",
+        "filter out a specific phrase"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1075.084
+    },
+    {
+      "id": "chunk-size-tuning",
+      "query": "my answers about one document feel incomplete, what should I change?",
+      "queries": [
+        "my answers about one document feel incomplete, what should I change?",
+        "what's missing in my understanding of one document?",
+        "what modifications are needed for one document comprehension?",
+        "my knowledge of one document is lacking, how can i improve?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1200.546
+    },
+    {
+      "id": "eval-purpose",
+      "query": "how do I tell whether a settings change actually helped retrieval?",
+      "queries": [
+        "how do I tell whether a settings change actually helped retrieval?",
+        "how can i determine if changes to settings improve search outcomes?",
+        "what methods can be used to assess the impact of adjusting settings on search results?",
+        "can evaluating changes to settings confirm their effect on search performance?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1098.163
+    },
+    {
+      "id": "search-without-model-followup",
+      "query": "and without the model?",
+      "queries": [
+        "how do I ask a question about my notes? and without the model?",
+        "how can i inquire about my notes?",
+        "what is the best way to ask about my notes?",
+        "how may i ask about my note inquiries?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1203.233
+    },
+    {
+      "id": "restore-followup",
+      "query": "and to get it back?",
+      "queries": [
+        "what does tbuk export do? and to get it back?",
+        "what does the tbuk export module do? and how can i recover it?",
+        "what services does tbuk export provide? and how can i restore it?",
+        "what does the tbuk export function do? and how can i retrieve it?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1229.255
+    },
+    {
+      "id": "reembed-followup",
+      "query": "do I need to redo anything?",
+      "queries": [
+        "how do I switch to a different embedding model? do I need to redo anything?",
+        "how can i update my chosen model?",
+        "what steps are required to change the selected architecture?",
+        "should i prepare for any modifications when updating the utilized structure?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1095.74
+    },
+    {
+      "id": "context-window-followup",
+      "query": "what if I want it bigger?",
+      "queries": [
+        "what is the context budget? what if I want it bigger?",
+        "what is the scope allowance? how can I increase it?",
+        "what is the scope ceiling? how do I expand it?",
+        "what is the coverage limit? how can I enlarge it?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1269.147
+    },
+    {
+      "id": "folder-ingest-followup",
+      "query": "and a whole folder?",
+      "queries": [
+        "how do I add a single document? and a whole folder?",
+        "how can i import a single document? and a whole folder?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 559.774
+    },
+    {
+      "id": "custom-template-followup",
+      "query": "how do I make my own?",
+      "queries": [
+        "what is a prompt template? how do I make my own?",
+        "what is a template for a prompt? how can i create one?",
+        "what is a preformat instruction? how can i generate it?",
+        "what is a command format? how do i produce one?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1105.88
+    },
+    {
+      "id": "conversation-followup",
+      "query": "how do I make it?",
+      "queries": [
+        "does tbuk ask remember what I asked before? how do I make it?",
+        "does tbuk ask remember previous conversations? how do I restore previous conversations?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 543.973
+    },
+    {
+      "id": "bare-followup-warning",
+      "query": "what happens if I don't?",
+      "queries": [
+        "can I ask a follow-up question? what happens if I don't?",
+        "follow-up inquiry possible? what if i skip asking?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 669.02
+    },
+    {
+      "id": "unnamed-chat-followup",
+      "query": "what if I forget to name it?",
+      "queries": [
+        "how do I start a conversation? what if I forget to name it?",
+        "how can i initiate a dialogue?",
+        "what happens if i omit the title?",
+        "how do i begin a discussion?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1101.219
+    },
+    {
+      "id": "batch-size-followup",
+      "query": "is there a limit with llama.cpp?",
+      "queries": [
+        "how do I make chunks bigger? is there a limit with llama.cpp?",
+        "increase chunk size how can i enlarge chunks limit on llama.cpp make chunks larger what is the maximum chunk size in llama.cpp how to increase the chunk size limit in llama.cpp how to enlarge chunks in llama.cpp how to increase the maximum chunk size in llama.cpp enlarge chunks in llama.cpp how to modify the chunk size limit in llama.cpp how to increase the size of chunks in llama.cpp how to adjust the chunk size limit in llama.cpp"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 706.293
+    },
+    {
+      "id": "stale-docs-followup",
+      "query": "so how do I keep it current?",
+      "queries": [
+        "what does timbuktu not do well? so how do I keep it current?",
+        "what aspects of timbuktu are outdated? how can timbuktu be more up-to-date?",
+        "how can timbuktu be improved? what features need updating?",
+        "what parts of timbuktu are obsolete? how can timbuktu stay current?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 0,
+        "found": 0
+      },
+      "latency_ms": 1126.273
+    }
+  ]
+}
