@@ -8,22 +8,22 @@
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "llm": "mlx/mlx-community/Qwen2.5-3B-Instruct-4bit",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:03:41.616023Z"
+    "at": "2026-09-12T14:09:41.340124Z"
   },
   "overall": {
-    "hit": 0,
-    "recall": 0,
-    "precision": 0,
-    "mrr": 0,
-    "ndcg": 0,
+    "hit": 0.4166666666666667,
+    "recall": 0.375,
+    "precision": 0.08333333333333333,
+    "mrr": 0.24930555555555556,
+    "ndcg": 0.27496041388319503,
     "cases": 24,
     "labels": 26,
-    "retrieved": 0,
-    "found": 0
+    "retrieved": 120,
+    "found": 10
   },
   "latency": {
-    "median_ms": 270.915,
-    "p95_ms": 387.487
+    "median_ms": 276.2415,
+    "p95_ms": 397.26
   },
   "cases": [
     {
@@ -33,17 +33,17 @@
         "What happens when the prompt is too large for the model?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.25,
+        "ndcg": 0.4306765580733931,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 287.385
+      "latency_ms": 281.665
     },
     {
       "id": "reembed-after-model-change",
@@ -52,17 +52,17 @@
         "Do I have to reembed everything after changing the embedding model?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 270.195
+      "latency_ms": 273.033
     },
     {
       "id": "code-search-encoding",
@@ -78,10 +78,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 272.703
+      "latency_ms": 272.915
     },
     {
       "id": "kebab-case-queries",
@@ -90,17 +90,17 @@
         "Why does searching for a hyphenated word behave oddly?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.2,
+        "ndcg": 0.38685280723454163,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 398.92
+      "latency_ms": 277.219
     },
     {
       "id": "backup-archive",
@@ -116,10 +116,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 267.534
+      "latency_ms": 390.034
     },
     {
       "id": "no-restore-command",
@@ -135,10 +135,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 261.289
+      "latency_ms": 267.981
     },
     {
       "id": "data-root",
@@ -154,10 +154,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 277.775
+      "latency_ms": 280.262
     },
     {
       "id": "deterministic-answers",
@@ -173,10 +173,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 281.818
+      "latency_ms": 274.681
     },
     {
       "id": "stale-extracted-text",
@@ -185,17 +185,17 @@
         "Why is my document not being re-extracted after improving the extractor?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 269.59
+      "latency_ms": 279.467
     },
     {
       "id": "duplicate-paths",
@@ -204,17 +204,17 @@
         "Is indexing triggered twice when the same file is opened by its relative and absolute paths?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 269.203
+      "latency_ms": 273.94
     },
     {
       "id": "exclusion-operator",
@@ -223,17 +223,17 @@
         "How do I exclude a word from a search?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 387.487
+      "latency_ms": 271.567
     },
     {
       "id": "chunk-size-tuning",
@@ -242,17 +242,17 @@
         "What changes should I make to my answers regarding one document to feel more complete?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.2,
+        "ndcg": 0.38685280723454163,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 273.207
+      "latency_ms": 397.26
     },
     {
       "id": "eval-purpose",
@@ -261,17 +261,17 @@
         "How do I determine if a settings change actually improved retrieval?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 0.82623465712856,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 266.569
+      "latency_ms": 275.168
     },
     {
       "id": "search-without-model-followup",
@@ -287,10 +287,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 274.118
+      "latency_ms": 276.37
     },
     {
       "id": "restore-followup",
@@ -306,10 +306,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 271.372
+      "latency_ms": 276.113
     },
     {
       "id": "reembed-followup",
@@ -325,10 +325,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 270.284
+      "latency_ms": 276.563
     },
     {
       "id": "context-window-followup",
@@ -344,10 +344,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 288.054
+      "latency_ms": 281.978
     },
     {
       "id": "folder-ingest-followup",
@@ -356,17 +356,17 @@
         "How do I add a whole folder?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 383.18
+      "latency_ms": 275.622
     },
     {
       "id": "custom-template-followup",
@@ -375,17 +375,17 @@
         "How do I create a custom prompt template?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.30657359638272924,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 272.612
+      "latency_ms": 400.298
     },
     {
       "id": "conversation-followup",
@@ -401,10 +401,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 268.141
+      "latency_ms": 277.762
     },
     {
       "id": "bare-followup-warning",
@@ -420,10 +420,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 270.458
+      "latency_ms": 276.589
     },
     {
       "id": "unnamed-chat-followup",
@@ -439,10 +439,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 267.048
+      "latency_ms": 275.468
     },
     {
       "id": "batch-size-followup",
@@ -458,10 +458,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 268.932
+      "latency_ms": 273.541
     },
     {
       "id": "stale-docs-followup",
@@ -477,10 +477,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 268.129
+      "latency_ms": 272.792
     }
   ]
 }

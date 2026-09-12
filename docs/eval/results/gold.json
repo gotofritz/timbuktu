@@ -7,22 +7,22 @@
     "stage": "retrieval",
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:03:21.632895Z"
+    "at": "2026-09-12T14:09:22.242491Z"
   },
   "overall": {
-    "hit": 0,
-    "recall": 0,
-    "precision": 0,
-    "mrr": 0,
-    "ndcg": 0,
+    "hit": 0.45454545454545453,
+    "recall": 0.4090909090909091,
+    "precision": 0.09090909090909091,
+    "mrr": 0.28030303030303033,
+    "ndcg": 0.3061981734570527,
     "cases": 11,
     "labels": 12,
-    "retrieved": 0,
-    "found": 0
+    "retrieved": 55,
+    "found": 5
   },
   "latency": {
-    "median_ms": 275.478,
-    "p95_ms": 390.339
+    "median_ms": 278.732,
+    "p95_ms": 399.353
   },
   "cases": [
     {
@@ -39,10 +39,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 275.877
+      "latency_ms": 278.732
     },
     {
       "id": "restore-followup",
@@ -51,17 +51,17 @@
         "how do I restore a knowledge base from an exported archive?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 268.785
+      "latency_ms": 269.213
     },
     {
       "id": "reembed-followup",
@@ -70,17 +70,17 @@
         "do I need to re-embed the whole corpus after changing the embedding model?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 284.909
+      "latency_ms": 277.805
     },
     {
       "id": "context-window-followup",
@@ -96,10 +96,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 276.899
+      "latency_ms": 279.151
     },
     {
       "id": "folder-ingest-followup",
@@ -108,17 +108,17 @@
         "how do I ingest an entire folder of documents including subfolders?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 271.901
+      "latency_ms": 277.816
     },
     {
       "id": "custom-template-followup",
@@ -127,17 +127,17 @@
         "how do I create a custom prompt template?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.30657359638272924,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 274.765
+      "latency_ms": 273.093
     },
     {
       "id": "conversation-followup",
@@ -153,10 +153,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 390.339
+      "latency_ms": 399.353
     },
     {
       "id": "bare-followup-warning",
@@ -172,10 +172,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 268.136
+      "latency_ms": 282.856
     },
     {
       "id": "unnamed-chat-followup",
@@ -191,10 +191,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 270.733
+      "latency_ms": 282.406
     },
     {
       "id": "batch-size-followup",
@@ -203,17 +203,17 @@
         "what is the maximum chunk size when serving embeddings with llama.cpp?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.25,
+        "ndcg": 0.4306765580733931,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 275.478
+      "latency_ms": 282.609
     },
     {
       "id": "stale-docs-followup",
@@ -229,10 +229,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 281.705
+      "latency_ms": 272.212
     }
   ],
   "skipped": [

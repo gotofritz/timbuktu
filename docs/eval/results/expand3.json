@@ -9,22 +9,22 @@
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "llm": "mlx/mlx-community/Qwen2.5-3B-Instruct-4bit",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:04:34.822749Z"
+    "at": "2026-09-12T14:10:35.12246Z"
   },
   "overall": {
-    "hit": 0,
-    "recall": 0,
-    "precision": 0,
-    "mrr": 0,
-    "ndcg": 0,
+    "hit": 0.3333333333333333,
+    "recall": 0.3125,
+    "precision": 0.06666666666666667,
+    "mrr": 0.2791666666666667,
+    "ndcg": 0.28516738408060666,
     "cases": 24,
     "labels": 26,
-    "retrieved": 0,
-    "found": 0
+    "retrieved": 120,
+    "found": 8
   },
   "latency": {
-    "median_ms": 1099.691,
-    "p95_ms": 1253.903
+    "median_ms": 1113.692,
+    "p95_ms": 1304.048
   },
   "cases": [
     {
@@ -42,10 +42,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 662.334
+      "latency_ms": 679.392
     },
     {
       "id": "reembed-after-model-change",
@@ -55,17 +55,17 @@
         "have I gotta redo everything after updating the embedding system?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 539.431
+      "latency_ms": 560.243
     },
     {
       "id": "code-search-encoding",
@@ -84,10 +84,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1066.675
+      "latency_ms": 1106.428
     },
     {
       "id": "kebab-case-queries",
@@ -106,10 +106,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1232.086
+      "latency_ms": 1330.071
     },
     {
       "id": "backup-archive",
@@ -128,10 +128,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1156.11
+      "latency_ms": 1172.336
     },
     {
       "id": "no-restore-command",
@@ -150,10 +150,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1076.053
+      "latency_ms": 1078.518
     },
     {
       "id": "data-root",
@@ -172,10 +172,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1253.903
+      "latency_ms": 1264.253
     },
     {
       "id": "deterministic-answers",
@@ -194,10 +194,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1067.286
+      "latency_ms": 1097.269
     },
     {
       "id": "stale-extracted-text",
@@ -216,10 +216,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1225.02
+      "latency_ms": 1304.048
     },
     {
       "id": "duplicate-paths",
@@ -231,17 +231,17 @@
         "will indexing be duplicated when a file is accessed using both a relative and an absolute path?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 1111.819
+      "latency_ms": 1134.885
     },
     {
       "id": "exclusion-operator",
@@ -253,17 +253,17 @@
         "filter out a specific phrase"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 1075.084
+      "latency_ms": 1079.37
     },
     {
       "id": "chunk-size-tuning",
@@ -275,17 +275,17 @@
         "my knowledge of one document is lacking, how can i improve?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 1200.546
+      "latency_ms": 1243.789
     },
     {
       "id": "eval-purpose",
@@ -297,17 +297,17 @@
         "can evaluating changes to settings confirm their effect on search performance?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 0.82623465712856,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 1098.163
+      "latency_ms": 1124.84
     },
     {
       "id": "search-without-model-followup",
@@ -326,10 +326,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1203.233
+      "latency_ms": 1232.873
     },
     {
       "id": "restore-followup",
@@ -341,17 +341,17 @@
         "what does the tbuk export function do? and how can i retrieve it?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.2,
+        "ndcg": 0.38685280723454163,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 1229.255
+      "latency_ms": 1244.11
     },
     {
       "id": "reembed-followup",
@@ -370,10 +370,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1095.74
+      "latency_ms": 1112.771
     },
     {
       "id": "context-window-followup",
@@ -392,10 +392,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1269.147
+      "latency_ms": 1259.773
     },
     {
       "id": "folder-ingest-followup",
@@ -405,17 +405,17 @@
         "how can i import a single document? and a whole folder?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 559.774
+      "latency_ms": 558.217
     },
     {
       "id": "custom-template-followup",
@@ -434,10 +434,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1105.88
+      "latency_ms": 1114.613
     },
     {
       "id": "conversation-followup",
@@ -454,10 +454,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 543.973
+      "latency_ms": 557.592
     },
     {
       "id": "bare-followup-warning",
@@ -474,10 +474,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 669.02
+      "latency_ms": 682.033
     },
     {
       "id": "unnamed-chat-followup",
@@ -496,10 +496,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1101.219
+      "latency_ms": 1102.688
     },
     {
       "id": "batch-size-followup",
@@ -509,17 +509,17 @@
         "increase chunk size how can i enlarge chunks limit on llama.cpp make chunks larger what is the maximum chunk size in llama.cpp how to increase the chunk size limit in llama.cpp how to enlarge chunks in llama.cpp how to increase the maximum chunk size in llama.cpp enlarge chunks in llama.cpp how to modify the chunk size limit in llama.cpp how to increase the size of chunks in llama.cpp how to adjust the chunk size limit in llama.cpp"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 706.293
+      "latency_ms": 715.285
     },
     {
       "id": "stale-docs-followup",
@@ -538,10 +538,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 1126.273
+      "latency_ms": 1135.829
     }
   ]
 }

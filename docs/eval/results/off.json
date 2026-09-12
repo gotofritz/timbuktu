@@ -7,22 +7,22 @@
     "stage": "retrieval",
     "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
     "host": "fritznew.local",
-    "at": "2026-09-12T14:03:11.748352Z"
+    "at": "2026-09-12T14:09:12.181807Z"
   },
   "overall": {
-    "hit": 0,
-    "recall": 0,
-    "precision": 0,
-    "mrr": 0,
-    "ndcg": 0,
+    "hit": 0.3333333333333333,
+    "recall": 0.3125,
+    "precision": 0.075,
+    "mrr": 0.22916666666666666,
+    "ndcg": 0.2482151837791674,
     "cases": 24,
     "labels": 26,
-    "retrieved": 0,
-    "found": 0
+    "retrieved": 120,
+    "found": 8
   },
   "latency": {
-    "median_ms": 274.10699999999997,
-    "p95_ms": 398.819
+    "median_ms": 274.704,
+    "p95_ms": 391.246
   },
   "cases": [
     {
@@ -39,10 +39,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 405.234
+      "latency_ms": 408.848
     },
     {
       "id": "reembed-after-model-change",
@@ -51,17 +51,17 @@
         "do I have to re-embed everything after changing the embedding model?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 267.069
+      "latency_ms": 278.219
     },
     {
       "id": "code-search-encoding",
@@ -77,10 +77,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 262.344
+      "latency_ms": 274.665
     },
     {
       "id": "kebab-case-queries",
@@ -96,10 +96,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 271.164
+      "latency_ms": 271.868
     },
     {
       "id": "backup-archive",
@@ -115,10 +115,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 275.871
+      "latency_ms": 277.821
     },
     {
       "id": "no-restore-command",
@@ -134,10 +134,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 279.748
+      "latency_ms": 274.743
     },
     {
       "id": "data-root",
@@ -146,17 +146,17 @@
         "how do I keep a second knowledge base in a different directory?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.5,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 278.486
+      "latency_ms": 280.319
     },
     {
       "id": "deterministic-answers",
@@ -172,10 +172,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 278.478
+      "latency_ms": 277.946
     },
     {
       "id": "stale-extracted-text",
@@ -184,17 +184,17 @@
         "why is my document not being re-extracted after I improved an extractor?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 271.688
+      "latency_ms": 275.687
     },
     {
       "id": "duplicate-paths",
@@ -203,17 +203,17 @@
         "will ingesting the same file by a relative and an absolute path index it twice?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.5,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 282.978
+      "latency_ms": 280.28
     },
     {
       "id": "exclusion-operator",
@@ -222,17 +222,17 @@
         "how do I exclude a word from a search?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 279.771
+      "latency_ms": 278.345
     },
     {
       "id": "chunk-size-tuning",
@@ -241,17 +241,17 @@
         "my answers about one document feel incomplete, what should I change?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.5,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 284.148
+      "latency_ms": 273.434
     },
     {
       "id": "eval-purpose",
@@ -260,17 +260,17 @@
         "how do I tell whether a settings change actually helped retrieval?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.4,
+        "mrr": 1,
+        "ndcg": 0.82623465712856,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 285.12
+      "latency_ms": 277.747
     },
     {
       "id": "search-without-model-followup",
@@ -286,10 +286,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 272.343
+      "latency_ms": 264.409
     },
     {
       "id": "restore-followup",
@@ -305,10 +305,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 271.283
+      "latency_ms": 265.707
     },
     {
       "id": "reembed-followup",
@@ -324,10 +324,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 271.602
+      "latency_ms": 269.676
     },
     {
       "id": "context-window-followup",
@@ -343,10 +343,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 263.877
+      "latency_ms": 265.911
     },
     {
       "id": "folder-ingest-followup",
@@ -355,17 +355,17 @@
         "and a whole folder?"
       ],
       "metrics": {
-        "hit": 0,
-        "recall": 0,
-        "precision": 0,
-        "mrr": 0,
-        "ndcg": 0,
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
-        "found": 0
+        "retrieved": 5,
+        "found": 1
       },
-      "latency_ms": 281.108
+      "latency_ms": 272.769
     },
     {
       "id": "custom-template-followup",
@@ -381,10 +381,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 2,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 398.819
+      "latency_ms": 391.246
     },
     {
       "id": "conversation-followup",
@@ -400,10 +400,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 266.169
+      "latency_ms": 266.592
     },
     {
       "id": "bare-followup-warning",
@@ -419,10 +419,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 283.415
+      "latency_ms": 267.686
     },
     {
       "id": "unnamed-chat-followup",
@@ -438,10 +438,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 271.918
+      "latency_ms": 268.207
     },
     {
       "id": "batch-size-followup",
@@ -457,10 +457,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 264.841
+      "latency_ms": 267.745
     },
     {
       "id": "stale-docs-followup",
@@ -476,10 +476,10 @@
         "ndcg": 0,
         "cases": 1,
         "labels": 1,
-        "retrieved": 0,
+        "retrieved": 5,
         "found": 0
       },
-      "latency_ms": 265.405
+      "latency_ms": 276.918
     }
   ]
 }
