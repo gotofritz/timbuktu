@@ -10,6 +10,15 @@ set -euo pipefail
 ROOT="${ROOT:-$HOME/.tbuk-eval}"
 TBUK="${TBUK:-tbuk}"
 
+# Ingest skips a document whose SHA256 is unchanged, which is right for a
+# working knowledge base and wrong after a run that recorded the documents and
+# then failed to embed them: the rows are there, the vectors are not, and every
+# re-run skips them. FORCE=1 re-ingests regardless.
+FORCE_FLAG=""
+if [ -n "${FORCE:-}" ]; then
+  FORCE_FLAG="--force"
+fi
+
 # One path per invocation: `tbuk ingest` takes exactly one argument.
 PATHS=(
   README.md
@@ -25,7 +34,8 @@ fi
 
 for p in "${PATHS[@]}"; do
   echo "==> ingest $p"
-  "$TBUK" --root "$ROOT" ingest "$p"
+  # shellcheck disable=SC2086 # FORCE_FLAG is one optional flag, not a list
+  "$TBUK" --root "$ROOT" ingest $FORCE_FLAG "$p"
 done
 
 echo

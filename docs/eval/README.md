@@ -68,6 +68,14 @@ every run and reads on the report exactly like a retrieval failure.
 `tbuk ingest` takes exactly one path per invocation, which is why this is a
 script and not a one-liner.
 
+**`FORCE=1 make eval-ingest`** re-ingests documents whose content has not
+changed. Ingest skips those by SHA256, which is right for a working knowledge
+base and wrong after a run that recorded the documents and then failed to embed
+them — the rows exist, so every re-run reports "skipped (unchanged)" while the
+corpus stays unsearchable and the sweeps keep scoring zero. If `doctor` shows
+documents but `Embedding / stored` says none, that is the state, and `FORCE=1`
+is the way out.
+
 ### Serving the models
 
 **Two servers on two ports.** Chat and embeddings are separate endpoints, and
