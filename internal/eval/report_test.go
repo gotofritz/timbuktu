@@ -654,3 +654,105 @@ func TestReportWriteText_skippedCountIsOverEveryCaseConsidered(t *testing.T) {
 		t.Errorf("want \"skipped 1 of 3 cases\":\n%s", sb.String())
 	}
 }
+
+// TestDiff_warnsWhenTheHostChanged covers D10: latency is the noisiest number
+// in the report, it moves with the machine as much as with the code, and a
+// baseline recorded somewhere else has to say so next to the latency deltas
+// rather than let a faster laptop read as a faster retriever.
+func TestDiff_warnsWhenTheHostChanged(t *testing.T) {
+	run := eval.Run{Mode: "hybrid", TopK: 5, Host: "studio.local"}
+	current := eval.NewReport("go-docs", run, []eval.CaseResult{
+		{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}, LatencyMS: 10},
+	})
+	baselineRun := run
+	baselineRun.Host = "laptop.local"
+	baseline := eval.NewReport("go-docs", baselineRun, []eval.CaseResult{
+		{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}, LatencyMS: 90},
+	})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	joined := strings.Join(d.Warnings, "\n")
+	if !strings.Contains(joined, "studio.local") || !strings.Contains(joined, "laptop.local") {
+		t.Errorf("want a warning naming both hosts: %v", d.Warnings)
+	}
+	if !strings.Contains(joined, "latency") {
+		t.Errorf("the host warning has to be about latency: %v", d.Warnings)
+	}
+}
+
+func TestDiff_sameHostIsNotAWarning(t *testing.T) {
+	run := eval.Run{Mode: "hybrid", TopK: 5, Host: "studio.local"}
+	rep := eval.NewReport("go-docs", run, []eval.CaseResult{
+		{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}, LatencyMS: 10},
+	})
+	d, err := eval.Diff(rep, rep)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(d.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", d.Warnings)
+	}
+}
+
+// TestNewReport_countsDegradedCases covers the harness's own honesty problem.
+// A query planner that falls back rather than failing produces a report that
+// looks exactly like one where it worked, so the count of cases it degraded on
+// belongs next to the numbers, not in a warning on stderr that scrolled past.
+func TestNewReport_countsDegradedCases(t *testing.T) {
+	rep := eval.NewReport("go-docs", eval.Run{Mode: "hybrid", TopK: 5, Rewrite: "condense"},
+		[]eval.CaseResult{
+			{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}},
+			{ID: "b", Metrics: eval.Metrics{Hit: 0, Cases: 1}, Degraded: "the model did not answer within 20s"},
+			{ID: "c", Metrics: eval.Metrics{Hit: 1, Cases: 1}, Degraded: "the model returned nothing to retrieve on"},
+		})
+
+	if rep.Degraded != 2 {
+		t.Fatalf("Degraded = %d, want 2", rep.Degraded)
+	}
+	var b strings.Builder
+	if err := rep.WriteText(&b, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if !strings.Contains(b.String(), "2 of 3") {
+		t.Errorf("the text report hides the degraded count:\n%s", b.String())
+	}
+}
+
+func TestNewReport_cleanRunCountsNoDegradation(t *testing.T) {
+	rep := eval.NewReport("go-docs", eval.Run{Mode: "hybrid", TopK: 5}, []eval.CaseResult{
+		{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}},
+	})
+	if rep.Degraded != 0 {
+		t.Fatalf("Degraded = %d, want 0", rep.Degraded)
+	}
+	var b strings.Builder
+	if err := rep.WriteText(&b, false); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if strings.Contains(b.String(), "fell back") {
+		t.Error("a clean run should say nothing about fallbacks")
+	}
+}
+
+// TestDiff_warnsWhenARunDegraded keeps a half-degraded run from being compared
+// as though it measured what it claims.
+func TestDiff_warnsWhenARunDegraded(t *testing.T) {
+	run := eval.Run{Mode: "hybrid", TopK: 5, Rewrite: "condense"}
+	current := eval.NewReport("go-docs", run, []eval.CaseResult{
+		{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}, Degraded: "timeout"},
+	})
+	baseline := eval.NewReport("go-docs", run, []eval.CaseResult{
+		{ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1}},
+	})
+
+	d, err := eval.Diff(current, baseline)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !strings.Contains(strings.Join(d.Warnings, "\n"), "fell back") {
+		t.Errorf("want a warning that a run degraded: %v", d.Warnings)
+	}
+}

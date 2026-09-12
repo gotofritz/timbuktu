@@ -1,0 +1,241 @@
+version: 1
+name: timbuktu-docs
+description: |
+  Questions over this repository's own documentation, written to settle the
+  deferred defaults: whether `condense` beats the free `window` on follow-up
+  turns (#24 / #159), and whether `--expand N` earns its model call (#25 /
+  #160).
+
+  Corpus: README.md, docs/user-guide.md, docs/initial-context.md, and
+  docs/plans/*.md — eleven documents. docs/archive/ is deliberately excluded:
+  an archived plan is a near-duplicate of the prose that replaced it, so
+  labelling one over the other would measure how the set was written rather
+  than how retrieval performs.
+
+  Half the cases carry a thread and a gold_query. That half is the point. A
+  single-shot question makes `window`, `off` and `condense` the same
+  measurement, so a set without threads scores every rewrite mode identically
+  and the default never flips. The single-shot cases are the control: a rewrite
+  that helps follow-ups must not hurt these.
+
+cases:
+  # ---------------------------------------------------------------- single-shot
+  # The control half. Every rewrite mode should score these about the same;
+  # one that does not is changing questions that needed no changing.
+
+  - id: context-budget
+    query: what happens when the prompt is too big for the model?
+    relevant:
+      - path: README.md
+        contains: oversized prompt fails locally
+        grade: 2
+
+  - id: reembed-after-model-change
+    query: do I have to re-embed everything after changing the embedding model?
+    relevant:
+      - path: README.md
+        contains: changes the vector dimension
+        grade: 2
+
+  - id: code-search-encoding
+    query: how is source code indexed for search?
+    relevant:
+      - path: README.md
+        contains: the comments, the identifiers, and the strings
+        grade: 2
+
+  - id: kebab-case-queries
+    query: why does searching for a hyphenated word behave oddly?
+    relevant:
+      - path: README.md
+        contains: kebab-case name is therefore indexed as its words
+
+  - id: backup-archive
+    query: how do I back up my knowledge base?
+    relevant:
+      - path: README.md
+        contains: writes a portable
+        grade: 2
+
+  - id: no-restore-command
+    query: is there a restore command?
+    relevant:
+      - path: README.md
+        contains: trusting an archive's embeddings is only safe
+        grade: 2
+
+  - id: data-root
+    query: how do I keep a second knowledge base in a different directory?
+    relevant:
+      - path: README.md
+        contains: relocates that whole directory for a single invocation
+
+  - id: deterministic-answers
+    query: how do I make the model's answers deterministic?
+    relevant:
+      - path: README.md
+        contains: deterministic answer
+
+  - id: stale-extracted-text
+    query: why is my document not being re-extracted after I improved an extractor?
+    relevant:
+      - path: README.md
+        contains: stops its old output from being reused
+
+  - id: duplicate-paths
+    query: will ingesting the same file by a relative and an absolute path index it twice?
+    relevant:
+      - path: README.md
+        contains: no double-indexing under different spellings
+        grade: 2
+
+  - id: exclusion-operator
+    query: how do I exclude a word from a search?
+    relevant:
+      - path: docs/user-guide.md
+        contains: leaves out anything containing it
+        grade: 2
+
+  - id: chunk-size-tuning
+    query: my answers about one document feel incomplete, what should I change?
+    relevant:
+      - path: docs/user-guide.md
+        contains: split a key piece of context across two chunks
+        grade: 2
+
+  - id: eval-purpose
+    query: how do I tell whether a settings change actually helped retrieval?
+    relevant:
+      - path: docs/user-guide.md
+        contains: you cannot tell by trying two questions
+        grade: 2
+      - path: README.md
+        contains: argued from numbers
+
+  # ------------------------------------------------------------------ follow-ups
+  # The measurement. Each is an elliptical question that reaches nothing on its
+  # own, a thread that supplies what it left out, and the standalone question a
+  # competent person would have typed instead — the ceiling, which costs no
+  # model call to score.
+
+  - id: search-without-model-followup
+    thread:
+      - question: how do I ask a question about my notes?
+        answer: Run tbuk ask with your question in quotes.
+    query: and without the model?
+    gold_query: how do I search the knowledge base without calling the language model?
+    relevant:
+      - path: docs/user-guide.md
+        contains: skips the language model entirely
+        grade: 2
+
+  - id: restore-followup
+    thread:
+      - question: what does tbuk export do?
+        answer: It writes a portable tar snapshot of the knowledge base.
+    query: and to get it back?
+    gold_query: how do I restore a knowledge base from an exported archive?
+    relevant:
+      - path: README.md
+        contains: untar it over the root
+        grade: 2
+
+  - id: reembed-followup
+    thread:
+      - question: how do I switch to a different embedding model?
+        answer: Change embedding.provider or embedding.model in config.yaml.
+    query: do I need to redo anything?
+    gold_query: do I need to re-embed the whole corpus after changing the embedding model?
+    relevant:
+      - path: README.md
+        contains: changes the vector dimension
+        grade: 2
+
+  - id: context-window-followup
+    thread:
+      - question: what is the context budget?
+        answer: It bounds the whole prompt against the model's context window before the call.
+    query: what if I want it bigger?
+    gold_query: how do I raise the context token limit for a larger model?
+    relevant:
+      - path: README.md
+        contains: turns the guard off
+        grade: 2
+
+  - id: folder-ingest-followup
+    thread:
+      - question: how do I add a single document?
+        answer: Run tbuk ingest with the path to the file.
+    query: and a whole folder?
+    gold_query: how do I ingest an entire folder of documents including subfolders?
+    relevant:
+      - path: docs/user-guide.md
+        contains: including subfolders
+        grade: 2
+
+  - id: custom-template-followup
+    thread:
+      - question: what is a prompt template?
+        answer: It controls how the model formats its answers; the default is qa.
+    query: how do I make my own?
+    gold_query: how do I create a custom prompt template?
+    relevant:
+      - path: docs/user-guide.md
+        contains: prompt templates
+      - path: README.md
+        contains: manifest.yaml
+
+  - id: conversation-followup
+    thread:
+      - question: does tbuk ask remember what I asked before?
+        answer: No, tbuk ask is single-shot by default.
+    query: how do I make it?
+    gold_query: how do I have a multi-turn conversation where tbuk remembers earlier turns?
+    relevant:
+      - path: README.md
+        contains: picks up the most recently used
+        grade: 2
+
+  - id: bare-followup-warning
+    thread:
+      - question: can I ask a follow-up question?
+        answer: Only inside a session; a bare follow-up has no idea what came before.
+    query: what happens if I don't?
+    gold_query: what happens if I ask a follow-up question without a session?
+    relevant:
+      - path: docs/user-guide.md
+        contains: it has no idea what came before
+        grade: 2
+
+  - id: unnamed-chat-followup
+    thread:
+      - question: how do I start a conversation?
+        answer: Run tbuk chat, optionally with --session NAME.
+    query: what if I forget to name it?
+    gold_query: is a tbuk chat saved if I do not give it a session name?
+    relevant:
+      - path: docs/user-guide.md
+        contains: a chat is not saved, by design
+        grade: 2
+
+  - id: batch-size-followup
+    thread:
+      - question: how do I make chunks bigger?
+        answer: Raise chunking.size in config.yaml and re-ingest.
+    query: is there a limit with llama.cpp?
+    gold_query: what is the maximum chunk size when serving embeddings with llama.cpp?
+    relevant:
+      - path: docs/user-guide.md
+        contains: below the server's physical batch size
+        grade: 2
+
+  - id: stale-docs-followup
+    thread:
+      - question: what does timbuktu not do well?
+        answer: It only knows what you have ingested.
+    query: so how do I keep it current?
+    gold_query: how do I keep the knowledge base up to date after editing my documents?
+    relevant:
+      - path: docs/user-guide.md
+        contains: after updating your documents
+        grade: 2

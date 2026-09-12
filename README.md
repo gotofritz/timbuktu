@@ -676,10 +676,17 @@ be slow or down, and none of that may cost the answer. `tbuk session show
 --verbose` prints the query each turn actually ran on, so a bad rewrite is
 visible rather than mysterious.
 
-`condense` is **opt-in**: `window` stays the default until the retrieval eval
-harness says condensing beats it on follow-up turns. `tbuk doctor` names the
-templates that use it, on the **Prompts / rewrite** line, since each one is a
-second model call per question.
+`condense` is **opt-in**, and stays that way: the retrieval eval harness was
+built to decide this and its answer was no. Over 24 labelled cases on this
+repository's own documentation, `condense` tied `window` on the follow-up
+turns — hit@5 0.182 for both, MRR 0.076 against 0.064 — which is inside the
+noise of an eleven-case set and not the win #159 deferred the flip for. It did
+improve the *single-shot* half, 0.538 to 0.692 hit, which is a different
+effect than the one anybody asked for. Numbers and full reasoning:
+[`docs/eval/`](docs/eval/README.md).
+
+`tbuk doctor` names the templates that use it, on the **Prompts / rewrite**
+line, since each one is a second model call per question.
 
 #### Query expansion — several wordings of one query
 
@@ -710,8 +717,14 @@ arrived at — so inside a thread the paraphrases carry the topic too. Like
 completion retrieves on the planned query alone and says so on stderr.
 
 It costs one model call plus one search per extra wording, so it is **off by
-default** and stays off until the eval harness says otherwise. `tbuk doctor`
-names the templates that expand, on the **Prompts / expand** line;
+default** and stays off. The eval harness measured it: on follow-up turns it is
+the best thing here short of a hand-written standalone question — hit@5 0.273
+against `window`'s 0.182 — but on single-shot questions it *loses* hit, 0.538
+to 0.385, and it costs 4× the latency of every question (1024ms against
+259ms). Worth reaching for on a thread, not worth making everyone pay for.
+Numbers: [`docs/eval/`](docs/eval/README.md).
+
+`tbuk doctor` names the templates that expand, on the **Prompts / expand** line;
 `tbuk session show --verbose` prints every query a turn ran on, separated by
 ` | `.
 
@@ -1018,7 +1031,7 @@ A knowledge base indexed before this change still holds chunks sized in bytes.
 | `tbuk ask -c` fails with `no conversation threads yet` | `--continue` has nothing to continue | Start one with `tbuk ask --session NAME "…"`; the fallback to a single-shot ask is deliberately not silent |
 | `tbuk ask --session` warns `dropped the N oldest of M replayed turns` | The thread plus the retrieved chunks exceeded the context budget | Expected when the budget is tight — history is dropped before evidence. Lower `session.history_turns`, or raise `llm.context_tokens` |
 | `tbuk session show/rename/delete` fails with `no conversation thread named …` | These never create a thread — there would be nothing in it | The error lists the threads that do exist; `tbuk ask --session NAME "…"` or `tbuk chat --session NAME` creates one |
-| `tbuk ask` warns `could not condense the question (…)` | The `condense` rewrite failed, timed out, or came back empty or absurd | Nothing is broken — the query was planned with the `window` instead, and the answer is grounded as usual. Check the model in the template's `model:`, or set `retrieval.rewrite: window` |
+| `tbuk ask` warns `could not condense the question (…)` | The `condense` rewrite failed, timed out, or came back empty or absurd | Nothing is broken — the query was planned with the `window` instead, and the answer is grounded as usual. The call is capped at 20s and 256 tokens (`rewrite.CondenseTimeout`, `CondenseMaxTokens`), so a slow model is the usual cause of a timeout — rewriting is a one-line job and does not need a large one. Check the template's `model:`, or set `retrieval.rewrite: window` |
 | `tbuk ask` warns `the model spent its 256-token budget reasoning without writing a question` | A reasoning model (Qwen3, DeepSeek-R1 and the like) was asked to rewrite the query. Thinking fills the rewrite budget before the question appears, so **every** rewrite falls back | Rewriting is a one-line job: point the template's `model:` at a model that does not reason, or raise its `max_tokens` enough for the thinking *and* the question. Inline `<think>` blocks are stripped, but a block that never closes leaves nothing to retrieve on |
 | `tbuk ask` warns `the model spent the whole budget reasoning and never wrote an answer` | Same cause on the answer rather than the rewrite: the whole `max_tokens` went into thinking the API returns separately | Raise the template's `max_tokens` — a reasoning model needs room for the thinking and the answer — or use a model that does not reason |
 | `tbuk ask` is suddenly making two model calls per question | A template sets `retrieval.rewrite: condense` | By design — `condense` spends a call planning the query. `tbuk doctor`'s **Prompts / rewrite** line names every template that does it; `--rewrite window` skips it for one run |

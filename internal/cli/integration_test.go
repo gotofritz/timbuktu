@@ -251,9 +251,13 @@ func TestCLI_fixtureCorpusEval(t *testing.T) {
 		Eval:       config.EvalConfig{Dir: filepath.Join(home, ".tbuk", "eval")},
 	})
 
-	// Ingest fixture corpus.
-	// The fixture is embedded in the binary at internal/eval/testdata/corpus/
-	// For now, copy the real fixture files for testing.
+	// A corpus of its own, written here rather than borrowed from
+	// internal/eval/testdata/corpus/. This test is about the command wiring —
+	// init, ingest, and `tbuk eval` reaching the knowledge base through the
+	// real cobra path with a faked embedding server. Pinning what the
+	// retriever ranks is a different job, done against the frozen vectors in
+	// TestFixtureCorpus_scoresItsRecordedBaseline, and doing it twice would
+	// mean two baselines to re-record every time the corpus moves.
 	corpusDir := filepath.Join(home, "corpus")
 	writeFile(t, filepath.Join(corpusDir, "slices.md"),
 		"# Go Slices\n\nWhen you append to a slice, Go reallocates the underlying array when len == cap.\nThe capacity is roughly doubled.\n")
@@ -281,9 +285,18 @@ func TestCLI_fixtureCorpusEval(t *testing.T) {
 	if report.Run.Mode != "keyword" {
 		t.Fatalf("report.Run.Mode = %q, want keyword", report.Run.Mode)
 	}
-	// Both cases should hit their labels.
-	if report.Overall.Cases != 2 || report.Overall.Hit < 1 {
-		t.Fatalf("overall = %+v, want 2 cases with at least 1 hit", report.Overall)
+	// Both cases hit their labels, and the run says what produced them.
+	if report.Overall.Cases != 2 || report.Overall.Hit != 1 {
+		t.Fatalf("overall = %+v, want 2 cases at hit 1.0", report.Overall)
+	}
+	if report.Overall.Found != report.Overall.Labels {
+		t.Fatalf("found %d of %d labels", report.Overall.Found, report.Overall.Labels)
+	}
+	if len(report.Skipped) != 0 {
+		t.Fatalf("keyword run skipped %+v", report.Skipped)
+	}
+	if report.Run.TopK == 0 || report.Run.Stage == "" {
+		t.Fatalf("run block is incomplete: %+v", report.Run)
 	}
 
 	// Eval in hybrid mode: vectors come from the httptest embedder (frozen),
@@ -295,9 +308,13 @@ func TestCLI_fixtureCorpusEval(t *testing.T) {
 	if report.Run.Mode != "hybrid" {
 		t.Fatalf("hybrid report.Run.Mode = %q, want hybrid", report.Run.Mode)
 	}
-	// Hybrid should also score the cases (maybe differently than keyword).
-	if report.Overall.Cases != 2 {
-		t.Fatalf("hybrid overall.Cases = %d, want 2", report.Overall.Cases)
+	// Hybrid reaches the same labels through the faked embedding server, which
+	// is the half of the path keyword mode never touches.
+	if report.Overall.Cases != 2 || report.Overall.Hit != 1 {
+		t.Fatalf("hybrid overall = %+v, want 2 cases at hit 1.0", report.Overall)
+	}
+	if report.Run.Embedding == "" {
+		t.Fatal("hybrid report names no embedding model")
 	}
 
 	// Test gold ceiling: run with --gold to score against gold_query.
@@ -308,6 +325,17 @@ func TestCLI_fixtureCorpusEval(t *testing.T) {
 	}
 	if report.Run.Rewrite != "gold" {
 		t.Fatalf("gold report.Run.Rewrite = %q, want gold", report.Run.Rewrite)
+	}
+	// Only the follow-up carries a gold query, so the ceiling scores one case
+	// and says out loud that it skipped the other rather than scoring it zero.
+	if report.Overall.Cases != 1 {
+		t.Fatalf("gold overall.Cases = %d, want 1", report.Overall.Cases)
+	}
+	if len(report.Skipped) != 1 || report.Skipped[0].ID != "slices" {
+		t.Fatalf("gold skipped = %+v, want the case with no gold_query", report.Skipped)
+	}
+	if report.Overall.Hit != 1 {
+		t.Fatalf("gold overall.Hit = %v, want the ceiling to reach its label", report.Overall.Hit)
 	}
 }
 

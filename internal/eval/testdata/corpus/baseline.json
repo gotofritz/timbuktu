@@ -1,0 +1,84 @@
+{
+  "model": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+  "dimension": 1024,
+  "top_k": 5,
+  "runs": {
+    "hybrid-gold": {
+      "hit": 1,
+      "recall": 1,
+      "precision": 0.4,
+      "mrr": 1,
+      "ndcg": 1,
+      "cases": 2,
+      "labels": 2,
+      "retrieved": 10,
+      "found": 2
+    },
+    "hybrid-off": {
+      "hit": 0.8,
+      "recall": 0.8,
+      "precision": 0.36,
+      "mrr": 0.55,
+      "ndcg": 0.61232126232897,
+      "cases": 5,
+      "labels": 5,
+      "retrieved": 25,
+      "found": 4
+    },
+    "hybrid-window": {
+      "hit": 0.6,
+      "recall": 0.6,
+      "precision": 0.24000000000000005,
+      "mrr": 0.4,
+      "ndcg": 0.4523719014285829,
+      "cases": 5,
+      "labels": 5,
+      "retrieved": 25,
+      "found": 3
+    },
+    "keyword-gold": {
+      "hit": 1,
+      "recall": 1,
+      "precision": 0.4,
+      "mrr": 0.75,
+      "ndcg": 0.8154648767857287,
+      "cases": 2,
+      "labels": 2,
+      "retrieved": 10,
+      "found": 2
+    },
+    "keyword-off": {
+      "hit": 0.6,
+      "recall": 0.6,
+      "precision": 0.36,
+      "mrr": 0.6,
+      "ndcg": 0.6,
+      "cases": 5,
+      "labels": 5,
+      "retrieved": 19,
+      "found": 3
+    },
+    "keyword-window": {
+      "hit": 0.6,
+      "recall": 0.6,
+      "precision": 0.27999999999999997,
+      "mrr": 0.5,
+      "ndcg": 0.5261859507142914,
+      "cases": 5,
+      "labels": 5,
+      "retrieved": 25,
+      "found": 3
+    },
+    "vector-window": {
+      "hit": 1,
+      "recall": 1,
+      "precision": 0.31999999999999995,
+      "mrr": 0.5166666666666666,
+      "ndcg": 0.6385072130432615,
+      "cases": 5,
+      "labels": 5,
+      "retrieved": 25,
+      "found": 5
+    }
+  }
+}

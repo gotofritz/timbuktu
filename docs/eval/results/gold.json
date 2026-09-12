@@ -1,0 +1,292 @@
+{
+  "set": "timbuktu-docs",
+  "run": {
+    "mode": "hybrid",
+    "top_k": 5,
+    "rewrite": "gold",
+    "stage": "retrieval",
+    "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+    "host": "fritznew.local",
+    "at": "2026-09-12T14:36:17.015899Z"
+  },
+  "overall": {
+    "hit": 0.45454545454545453,
+    "recall": 0.4090909090909091,
+    "precision": 0.09090909090909091,
+    "mrr": 0.28030303030303033,
+    "ndcg": 0.3061981734570527,
+    "cases": 11,
+    "labels": 12,
+    "retrieved": 55,
+    "found": 5
+  },
+  "latency": {
+    "median_ms": 264.278,
+    "p95_ms": 387.138
+  },
+  "cases": [
+    {
+      "id": "search-without-model-followup",
+      "query": "and without the model?",
+      "queries": [
+        "how do I search the knowledge base without calling the language model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 273.241
+    },
+    {
+      "id": "restore-followup",
+      "query": "and to get it back?",
+      "queries": [
+        "how do I restore a knowledge base from an exported archive?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.5,
+        "ndcg": 0.6309297535714574,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 294.264
+    },
+    {
+      "id": "reembed-followup",
+      "query": "do I need to redo anything?",
+      "queries": [
+        "do I need to re-embed the whole corpus after changing the embedding model?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 264.712
+    },
+    {
+      "id": "context-window-followup",
+      "query": "what if I want it bigger?",
+      "queries": [
+        "how do I raise the context token limit for a larger model?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 260.202
+    },
+    {
+      "id": "folder-ingest-followup",
+      "query": "and a whole folder?",
+      "queries": [
+        "how do I ingest an entire folder of documents including subfolders?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 1,
+        "ndcg": 1,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 260.01
+    },
+    {
+      "id": "custom-template-followup",
+      "query": "how do I make my own?",
+      "queries": [
+        "how do I create a custom prompt template?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 0.5,
+        "precision": 0.2,
+        "mrr": 0.3333333333333333,
+        "ndcg": 0.30657359638272924,
+        "cases": 1,
+        "labels": 2,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 254.069
+    },
+    {
+      "id": "conversation-followup",
+      "query": "how do I make it?",
+      "queries": [
+        "how do I have a multi-turn conversation where tbuk remembers earlier turns?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 259.692
+    },
+    {
+      "id": "bare-followup-warning",
+      "query": "what happens if I don't?",
+      "queries": [
+        "what happens if I ask a follow-up question without a session?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 259.397
+    },
+    {
+      "id": "unnamed-chat-followup",
+      "query": "what if I forget to name it?",
+      "queries": [
+        "is a tbuk chat saved if I do not give it a session name?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 269.233
+    },
+    {
+      "id": "batch-size-followup",
+      "query": "is there a limit with llama.cpp?",
+      "queries": [
+        "what is the maximum chunk size when serving embeddings with llama.cpp?"
+      ],
+      "metrics": {
+        "hit": 1,
+        "recall": 1,
+        "precision": 0.2,
+        "mrr": 0.25,
+        "ndcg": 0.4306765580733931,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 1
+      },
+      "latency_ms": 264.278
+    },
+    {
+      "id": "stale-docs-followup",
+      "query": "so how do I keep it current?",
+      "queries": [
+        "how do I keep the knowledge base up to date after editing my documents?"
+      ],
+      "metrics": {
+        "hit": 0,
+        "recall": 0,
+        "precision": 0,
+        "mrr": 0,
+        "ndcg": 0,
+        "cases": 1,
+        "labels": 1,
+        "retrieved": 5,
+        "found": 0
+      },
+      "latency_ms": 387.138
+    }
+  ],
+  "skipped": [
+    {
+      "id": "context-budget",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "reembed-after-model-change",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "code-search-encoding",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "kebab-case-queries",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "backup-archive",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "no-restore-command",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "data-root",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "deterministic-answers",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "stale-extracted-text",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "duplicate-paths",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "exclusion-operator",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "chunk-size-tuning",
+      "reason": "no gold_query to measure the ceiling against"
+    },
+    {
+      "id": "eval-purpose",
+      "reason": "no gold_query to measure the ceiling against"
+    }
+  ]
+}

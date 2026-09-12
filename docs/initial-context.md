@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
+  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture (with ChunkSpec), LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
@@ -1251,11 +1251,39 @@ generation half carries a latency of its own: a model call an answer is a
 different order of expense from an embedding call a query, and #28's kill
 criterion is stated in correctness and latency together.
 
+**An unscoreable run is refused, not reported.** Before scoring, `RunEval`
+resolves the set's labels against the documents the knowledge base actually
+holds (`Set.CheckPaths`, the same check doctor's Eval section runs). If *none*
+resolve, that is not a bad score — it is an empty knowledge base or the wrong
+corpus — and it errors out naming the labels, because a report of zeroes is
+indistinguishable from a retrieval failure. Some missing is a partial corpus:
+it scores, and `Report.UnindexedLabels` counts them above the metrics. An empty
+`Indexed` means the caller did not look, which is not the same as looking and
+finding none.
+
+**A degraded run says so.** `rewrite.Condense` cannot fail — it falls back to
+the window — so a sweep whose every model call timed out would otherwise report
+as a condense sweep carrying the window's numbers, which is the harness lying
+in the one way it exists to prevent. `rewrite.Options.OnFallback` reports each
+give-up, `cli.countingPlanner` collects them per case into
+`CaseResult.Degraded`, and `NewReport` counts them into `Report.Degraded`. The
+text report prints the count above the metrics, and `Diff` warns when either
+side has any: a run that fell back is not measuring the planner it names.
+
 A row scored on generation alone carries no retrieval metrics and stays out of
 the retrieval average; a run that scored no retrieval at all prints no
 retrieval headline, since a row of zeroes reads exactly like the failure this
 harness exists to find. `Report.Generation` is absent rather than zero when the
 stage did not run — nobody asked, so nothing was measured.
+
+**Query planning is timed apart from retrieval.** `CaseResult.PlanMS` and
+`Report.PlanLatency` carry what a rewrite spent before the search began — a
+model call under `condense` or an expansion, nothing under the deterministic
+modes. It used to be untimed entirely, the planner running before the stopwatch
+started, which made `condense` report the same latency as the free `window` and
+left #28's kill criterion — stated in latency — unmeasurable. Kept separate
+rather than folded into `Latency` because the criterion needs the sum while a
+reader deciding what to fix needs to know which half is slow.
 
 `Diff(current, baseline)` subtracts two reports, because "A/B'd with evidence"
 otherwise depends on someone subtracting nDCG in their head, and they stop by
@@ -1265,6 +1293,107 @@ point); a different corpus size, embedder, model or judge is. The judged axes
 are diffed only when both runs judged: a run without `--judge` scores them zero,
 and a zero minus a zero says nothing while looking exactly like a delta that
 says something.
+
+
+### Frozen vectors
+
+`make check-ci` has no embedding server, so the fixture corpus under
+`internal/eval/testdata/corpus/` is embedded **once** and the vectors committed
+as `vectors.json`. `CacheEmbedder` replays them; a cache miss is a hard failure
+naming the text, never a silent fallback, because a fallback would score half
+the corpus against nothing and still print a number.
+
+The naive alternative is a hashing embedder, and it is the wrong one: hashed
+pseudo-vectors carry no semantics, so the only thing they can pin is that a
+ranking did not move — a test that fails identically whether the change was a
+regression or an improvement.
+
+Keys are the `sha256` of **the exact text the embedder was shown**, which is
+two different things: `searchtext.Reduce`'s encoding for a chunk (what
+`ingest` embeds) and the planned query string for a query (what `search`
+embeds). Under the default `window` mode that query is the thread's last
+questions folded in front of the current one, not the question as typed, so a
+fixture records all three deterministic forms — `off`, `window`, and the gold
+ceiling. An edited corpus or an edited label set is therefore a **miss**, which
+is loud, rather than a quiet zero.
+
+The header records `model`, `dimension` and `recorded_at`, and a run whose
+embedder disagrees with it is an error rather than a warning: vectors from two
+models are never mixed, and a report says which instrument produced it.
+
+Recording is `make eval-record` — a Go test behind the `record` build tag,
+because the production surface owes nothing to a test concern, and it needs a
+machine with a model, which CI does not have. `make eval-record-lsa` records
+with `FitLSA` instead: TF-IDF over the corpus vocabulary projected onto the
+leading singular directions of its own term-document matrix. No weights, no
+network, deterministic, and real distributional semantics rather than a hash.
+It is a weak model and the header says so — enough to pin a ranking, not enough
+to decide anything about retrieval quality.
+
+The committed fixture is a real recording:
+`mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ` at 1024 dimensions, 40
+vectors, 781 KB. Only whoever has that model can re-record it; the LSA target
+stays because it can be re-recorded anywhere, offline, by anyone editing the
+corpus. Note that `config.Load` returns **defaults** for a missing
+`config.yaml` rather than failing, so a machine with no config records under
+whatever the default provider resolves to — the header still names it, and a
+server that is not there fails the embed call outright, so a fixture can never
+be labelled with an instrument that did not produce it.
+
+The header also records the **chunking** the corpus was split under, and both
+the recorder and the suite that replays the fixture take it from there rather
+than from a constant each holds separately. Chunk boundaries decide what the
+keys are, so two sides holding separate opinions about them is a fixture that
+misses on every lookup.
+
+That chunking is far finer than a real knowledge base would use (60 tokens,
+10 overlap). With one chunk per document a top-5 search over eight documents
+returns most of the corpus, every metric saturates at 1.0, and a ranking
+regression has nowhere to show. Small chunks give the fixture enough of them to
+rank: 31 chunks (plus 9 distinct query strings), and no metric at its ceiling
+except where the ceiling is the finding.
+
+The corpus carries more documents than it has labels. The unlabelled ones are
+distractors, and they are the point: a corpus whose every document is the right
+answer to something has no ranking left to get wrong.
+
+### The regression baseline
+
+`internal/eval/testdata/corpus/baseline.json` is what the fixture scored when it
+was last recorded, across seven deterministic sweeps — keyword, vector and
+hybrid, each under `off` and `window`, plus the gold ceiling.
+`TestFixtureCorpus_scoresItsRecordedBaseline` (in `internal/cli`, which is where
+the database wiring lives) ingests the corpus into an in-memory knowledge base
+against the frozen vectors and asserts every one of them.
+
+The baseline is **recorded, not hand-written**: `make eval-record` writes the
+vectors and then the metrics those vectors score, so changing the corpus, the
+labels or the embedder is one command followed by reading a diff — never
+editing a number in a test until it passes, which is how a regression test
+quietly becomes a record of whatever the code last did.
+
+A moved number is not automatically a regression. It is a change to look at and
+then re-record on purpose.
+
+What this catches and what it does not, measured rather than asserted, and
+re-measured after the fixture was re-recorded with a real model — the profile
+did not change:
+
+| Perturbation | Caught |
+|---|---|
+| Invert the keyword leg's BM25 ordering | yes, every sweep |
+| Nudge the RRF weighting constant | no |
+| Hybrid candidate depth `topK*2` → `topK*6` | no |
+
+Over 31 chunks at top 5, RRF is monotonic on a single query list and a deeper
+candidate set only adds tail entries. The fixture pins rankings, not every
+parameter that feeds one.
+
+`TestFixtureCorpus_goldCeilingBeatsTheWindow` scores the ceiling against the
+window on the follow-up cases alone, which is the comparison D14 exists for.
+Comparing the two reports' overall averages would be wrong: the ceiling scores
+only the cases carrying a `gold_query` and skips the rest, so its denominator
+is a different set of cases.
 
 ---
 

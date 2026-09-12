@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
 	"github.com/gotofritz/timbuktu/internal/conversation"
@@ -801,5 +802,163 @@ func TestEvalAnswerFn_streamErrorFailsTheCase(t *testing.T) {
 
 	if _, _, err := answer(context.Background(), "q", nil, nil); err == nil {
 		t.Fatal("a stream error scored the case instead of failing it")
+	}
+}
+
+// TestRunEval_recordsTheHost covers D10: latency belongs to a machine, so the
+// report names the one that produced it without the caller having to.
+func TestRunEval_recordsTheHost(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "keyword", TopK: 5})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.Run.Host == "" {
+		t.Fatal("the report names no host, so its latency cannot be traced to a machine")
+	}
+}
+
+// TestRunEval_recordsAQueryPlanThatFellBack is the end of the chain the
+// harness was missing: Condense degrades instead of failing, so without this
+// a sweep where the model timed out on every case still reports as a condense
+// sweep, with numbers that are really the window's.
+func TestRunEval_recordsAQueryPlanThatFellBack(t *testing.T) {
+	var seen [][]string
+	// A planner that always falls back, reporting it the way Condense does.
+	planner := fallingBackPlanner{reason: "the model did not answer within 20s"}
+
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "keyword", TopK: 5, Rewrite: "condense", Planner: planner})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+
+	if report.Degraded != 2 {
+		t.Fatalf("Degraded = %d, want both cases counted", report.Degraded)
+	}
+	for _, row := range report.Cases {
+		if row.Degraded == "" {
+			t.Errorf("case %s records no reason", row.ID)
+		}
+	}
+}
+
+// fallingBackPlanner stands in for a Condense whose model never answers.
+type fallingBackPlanner struct{ reason string }
+
+func (p fallingBackPlanner) Queries(_ context.Context, _ []conversation.Turn, question string) ([]string, error) {
+	return []string{question}, nil
+}
+
+func (p fallingBackPlanner) Fallbacks() []string { return []string{p.reason} }
+
+// TestRunEval_refusesWhenNoLabelIsInTheIndex is the guard for the failure that
+// wasted a real afternoon: five sweeps ran to completion against an empty
+// knowledge base and produced full reports — headline metrics, per-case rows,
+// latency percentiles, a named instrument — every number zero and nothing
+// saying why. Committed, those files read as a devastating retrieval result
+// rather than as a database with nothing in it.
+func TestRunEval_refusesWhenNoLabelIsInTheIndex(t *testing.T) {
+	var seen [][]string
+	_, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Indexed: []string{"/n/unrelated/other.md"}})
+	if err == nil {
+		t.Fatal("RunEval scored a set whose labels name nothing in the index")
+	}
+	if !strings.Contains(err.Error(), "index") {
+		t.Errorf("error does not say the labels are not indexed: %v", err)
+	}
+	// Naming one of them is what turns the error into an action.
+	if !strings.Contains(err.Error(), "go/slices.md") {
+		t.Errorf("error names no unresolved label: %v", err)
+	}
+}
+
+func TestRunEval_scoresWhenSomeLabelsResolve(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5,
+			// Only the first case's label is indexed. That is a partial corpus,
+			// not a broken one: score it, and say how much is missing.
+			Indexed: []string{"/n/go/slices.md"},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.UnindexedLabels != 1 {
+		t.Fatalf("UnindexedLabels = %d, want 1", report.UnindexedLabels)
+	}
+}
+
+// An empty Indexed means the caller did not look them up, which is not the
+// same as looking and finding none.
+func TestRunEval_withoutAnIndexListStillScores(t *testing.T) {
+	var seen [][]string
+	if _, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5}); err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+}
+
+// slowPlanner stands in for condense: a planner that spends a model call
+// before retrieval ever starts.
+type slowPlanner struct{ delay time.Duration }
+
+func (p slowPlanner) Queries(_ context.Context, _ []conversation.Turn, question string) ([]string, error) {
+	time.Sleep(p.delay)
+	return []string{question}, nil
+}
+
+// TestRunEval_timesTheQueryPlanner covers the gap that made the latency half
+// of #28's kill criterion unmeasurable: the planner ran before the timer
+// started, so a rewrite costing a model call a question reported the same
+// latency as the free deterministic window. D10 makes latency a first-class
+// output precisely because a kill criterion is stated in it.
+func TestRunEval_timesTheQueryPlanner(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "keyword", TopK: 5, Rewrite: "condense",
+			Planner: slowPlanner{delay: 20 * time.Millisecond},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+
+	if report.PlanLatency.MedianMS < 15 {
+		t.Errorf("plan latency = %.1fms, want the planner's cost recorded",
+			report.PlanLatency.MedianMS)
+	}
+	for _, row := range report.Cases {
+		if row.PlanMS < 15 {
+			t.Errorf("case %s records %.1fms of planning", row.ID, row.PlanMS)
+		}
+	}
+	// Retrieval's own number stays its own: the two costs are separable, which
+	// is what tells "the rewrite is slow" from "the search is slow".
+	if report.Latency.MedianMS > 15 {
+		t.Errorf("retrieval latency = %.1fms, contaminated by the planner",
+			report.Latency.MedianMS)
+	}
+}
+
+func TestRunEval_noPlannerCostsNoPlanningTime(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "keyword", TopK: 5})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.PlanLatency.MedianMS > 5 {
+		t.Errorf("plan latency = %.1fms with no planner", report.PlanLatency.MedianMS)
 	}
 }

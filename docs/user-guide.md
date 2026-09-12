@@ -2098,6 +2098,7 @@ tbuk eval my-notes
 my-notes — 2 cases, 2 labels
   mode hybrid   top 5   rewrite window
   embedding llama/nomic-embed-text
+  host workshop.local
 
   hit@5 1.00   recall@5 1.00   P@5 0.40   MRR 0.75   nDCG@5 0.82
   latency  median 84ms   p95 210ms
@@ -2109,6 +2110,38 @@ Reading those:
 |---|---|
 | **hit@5** | how often the right document appeared at all, in the top 5 |
 | **recall@5** | what fraction of the documents you labelled came back |
+
+### Three lines that mean "do not trust this run"
+
+The report prints these above the numbers when they apply, and each one means
+the score below it is measuring something other than what you asked for.
+
+```
+  ! 3 labels not in the index — each scores zero and reads as a retrieval failure
+```
+
+You labelled documents you never ingested. Those cases score zero on every run
+and look exactly like bad retrieval. Ingest them, or fix the paths. If *none*
+of your labels are in the index, `tbuk eval` refuses to run at all rather than
+hand you a page of zeroes.
+
+```
+  ! query planning fell back on 7 of 24 cases — this is not a condense measurement
+```
+
+`--rewrite condense` asks a model to rewrite each question, and it never fails
+— it quietly falls back to `window`. So a run where the model timed out on
+seven questions is seven `window` results wearing the `condense` label. Fix the
+rewrite model before believing the row.
+
+```
+  planning median 640ms   p95 900ms   (a model call per question, before retrieval)
+```
+
+Not a warning — a price. `condense` and `--expand N` spend a model call before
+retrieval starts, and that cost is reported separately from the search so you
+can tell "the rewrite is slow" from "the search is slow". The deterministic
+modes print no such line, because they cost nothing.
 | **P@5** | how much of what came back was actually relevant |
 | **MRR** | how near the top the first right answer was — 1.00 means first every time |
 | **nDCG@5** | the same idea, but crediting the best passages for being ranked highest |

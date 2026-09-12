@@ -67,6 +67,12 @@ type Condense struct {
 	// Warn receives the diagnostic when the rewrite is given up on. Nil is
 	// silence, which only a test should want.
 	Warn io.Writer
+	// OnFallback is called with the reason each time the rewrite is given up
+	// on. Warn tells a person; this tells a caller that has to count, because
+	// Condense cannot fail — it degrades — and a measurement over a run that
+	// silently degraded half its queries is a measurement of something else.
+	// Nil is no accounting.
+	OnFallback func(reason string)
 	// Timeout bounds one call. Zero takes CondenseTimeout.
 	Timeout time.Duration
 }
@@ -80,6 +86,9 @@ func (c Condense) Queries(ctx context.Context, thread []conversation.Turn, quest
 	}
 	condensed, err := c.condense(ctx, thread, question)
 	if err != nil {
+		if c.OnFallback != nil {
+			c.OnFallback(err.Error())
+		}
 		if c.Warn != nil {
 			_, _ = fmt.Fprintf(c.Warn,
 				"warning: could not condense the question (%v) — planning the query with the window instead\n", err)
