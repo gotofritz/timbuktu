@@ -327,6 +327,17 @@ instrument: `Qwen3-Embedding-0.6B-4bit-DWQ` retrieving,
 The baseline is committed as `results/hops0.json`; the `--hops 2` side was run
 with `--baseline` against it and read off the printed diff.
 
+**That file is a historical artifact, and three things in it no longer mean what
+they say.** `--hops` does not exist any more, so the name records which side of
+a dead A/B it was and nothing reproducible — the JSON itself never carried the
+hop count, since zero is omitted. Its `faithfulness: 0.413` is the axis that was
+removed on this run's own evidence. And its `citations: 0` over eight emitted is
+not a citation failure: every one of the eight was a config key or a dotted
+identifier, which is [#174](../../../../issues/174). What the file is still good
+for is what it was: the generation stage running end to end over this corpus,
+and the `correctness` and latency the criterion turned on. It also still works
+as a `--baseline`, since an unknown field is ignored on the way in.
+
 | | `--hops 0` | `--hops 2` | delta |
 |---|---|---|---|
 | **correctness** | 0.783 | 0.78 | **+0.00** |
