@@ -1250,8 +1250,17 @@ with `FitLSA` instead: TF-IDF over the corpus vocabulary projected onto the
 leading singular directions of its own term-document matrix. No weights, no
 network, deterministic, and real distributional semantics rather than a hash.
 It is a weak model and the header says so — enough to pin a ranking, not enough
-to decide anything about retrieval quality. There is no silent fallback between
-the two: recording without a usable config fails and names the stopgap.
+to decide anything about retrieval quality.
+
+The committed fixture is a real recording:
+`mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ` at 1024 dimensions, 40
+vectors, 781 KB. Only whoever has that model can re-record it; the LSA target
+stays because it can be re-recorded anywhere, offline, by anyone editing the
+corpus. Note that `config.Load` returns **defaults** for a missing
+`config.yaml` rather than failing, so a machine with no config records under
+whatever the default provider resolves to — the header still names it, and a
+server that is not there fails the embed call outright, so a fixture can never
+be labelled with an instrument that did not produce it.
 
 The header also records the **chunking** the corpus was split under, and both
 the recorder and the suite that replays the fixture take it from there rather
@@ -1263,7 +1272,8 @@ That chunking is far finer than a real knowledge base would use (60 tokens,
 10 overlap). With one chunk per document a top-5 search over eight documents
 returns most of the corpus, every metric saturates at 1.0, and a ranking
 regression has nowhere to show. Small chunks give the fixture enough of them to
-rank: 31 chunks, and no metric at its ceiling.
+rank: 31 chunks (plus 9 distinct query strings), and no metric at its ceiling
+except where the ceiling is the finding.
 
 The corpus carries more documents than it has labels. The unlabelled ones are
 distractors, and they are the point: a corpus whose every document is the right
@@ -1287,12 +1297,19 @@ quietly becomes a record of whatever the code last did.
 A moved number is not automatically a regression. It is a change to look at and
 then re-record on purpose.
 
-What this catches and what it does not, measured rather than asserted:
-inverting the keyword leg's BM25 ordering moves every sweep and fails loudly.
-Nudging the RRF weighting constant or the hybrid candidate depth moves nothing
-— over 31 chunks at top 5, RRF is monotonic on a single query list and the
-deeper candidate set only adds tail entries. The fixture pins rankings, not
-every parameter that feeds one.
+What this catches and what it does not, measured rather than asserted, and
+re-measured after the fixture was re-recorded with a real model — the profile
+did not change:
+
+| Perturbation | Caught |
+|---|---|
+| Invert the keyword leg's BM25 ordering | yes, every sweep |
+| Nudge the RRF weighting constant | no |
+| Hybrid candidate depth `topK*2` → `topK*6` | no |
+
+Over 31 chunks at top 5, RRF is monotonic on a single query list and a deeper
+candidate set only adds tail entries. The fixture pins rankings, not every
+parameter that feeds one.
 
 `TestFixtureCorpus_goldCeilingBeatsTheWindow` scores the ceiling against the
 window on the follow-up cases alone, which is the comparison D14 exists for.
