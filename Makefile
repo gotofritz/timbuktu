@@ -1,5 +1,5 @@
 .PHONY: help build install test test-verbose test-race coverage coverage-html lint lint-install vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump \
-	 eval-record eval-record-lsa eval-ingest eval-defaults
+	 eval-record eval-record-lsa eval-ingest eval-defaults eval-condense-spread
 
 .DEFAULT_GOAL := help
 
@@ -100,6 +100,13 @@ eval-ingest: ## Ingest this repo's docs into ~/.tbuk-eval and run doctor
 # why this is a target and not a test.
 eval-defaults: ## Sweep the rewrite/expand defaults over docs/eval (needs a KB and a model)
 	./scripts/eval-defaults.sh
+
+# condense is the one knob here whose output comes from a model, so its numbers
+# are a sample and not a measurement until the spread across runs is known
+# (#173). The window run alongside it is the control: deterministic, so a
+# non-zero spread there means the corpus moved under the runs.
+eval-condense-spread: ## Sample condense's run-to-run variance over docs/eval (needs a KB and a model)
+	./scripts/eval-condense-spread.sh
 
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and

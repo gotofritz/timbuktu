@@ -326,6 +326,10 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		}
 	}
 
+	if verbose {
+		r.writePlanning(&b)
+	}
+
 	if verbose && r.Generation != nil {
 		r.writeGenerationCases(&b)
 	}
@@ -341,6 +345,50 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		return fmt.Errorf("eval: write report: %w", err)
 	}
 	return nil
+}
+
+// writePlanning prints what a rewritten case actually searched on, next to what
+// it was asked.
+//
+// A query planner is argued about from the queries it wrote, and until now
+// those only existed in the JSON — which means the argument was had from the
+// scores instead, one level removed from the thing that produced them. Cases
+// the planner left alone are not listed: they are the majority under every
+// mode, and printing them would bury the handful that were changed.
+func (r Report) writePlanning(b *strings.Builder) {
+	var rewritten []CaseResult
+	for _, c := range r.Cases {
+		if plannedDiffers(c) {
+			rewritten = append(rewritten, c)
+		}
+	}
+	if len(rewritten) == 0 {
+		return
+	}
+
+	fmt.Fprintf(b, "\n  planning — %d of %s searched on something other than the question\n",
+		len(rewritten), Plural(len(r.Cases), "case"))
+	for _, c := range rewritten {
+		fmt.Fprintf(b, "    %s\n", c.ID)
+		fmt.Fprintf(b, "      asked  %s\n", c.Query)
+		for _, q := range c.Queries {
+			fmt.Fprintf(b, "      ran    %s\n", q)
+		}
+	}
+}
+
+// plannedDiffers reports whether planning changed what was searched for. One
+// query identical to the question is what every deterministic mode produces on
+// a single-shot case, and it is not a rewrite.
+func plannedDiffers(c CaseResult) bool {
+	switch len(c.Queries) {
+	case 0:
+		return false
+	case 1:
+		return strings.TrimSpace(c.Queries[0]) != strings.TrimSpace(c.Query)
+	default:
+		return true
+	}
 }
 
 // writeGeneration prints the generation half, when the stage ran.

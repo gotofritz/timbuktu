@@ -2179,6 +2179,42 @@ my-notes — this run against the baseline
 
 A `+` means this run is better. Now you know, rather than suspect.
 
+### Running the same thing three times
+
+Most of what `tbuk eval` measures is deterministic: the same corpus and the
+same settings give you the same report, to the last digit. `--rewrite condense`
+and `--expand N` are not, because a model writes the query, and a model asked
+the same question twice does not always write the same thing.
+
+`--repeat` runs the sweep several times and shows you the spread instead of one
+run's numbers:
+
+```bash
+tbuk eval my-notes --rewrite condense --repeat 3
+```
+
+```
+my-notes — 3 runs, 24 cases each
+  mode hybrid   top 5   rewrite condense
+
+  metric              mean     min     max   stddev     span
+  hit@5              0.458   0.417   0.500    0.042    0.083
+  mrr                0.258   0.247   0.271    0.012    0.024
+
+  note: 24 cases, so one case moving is ±0.042 on hit
+
+  2 of 24 cases changed between runs:
+    threads-and-sessions          1.00 0.00 1.00
+      ran on: how does a session store its turns
+      ran on: session turn storage
+```
+
+Nothing is re-ingested between the runs, so the corpus they disagree about is
+one corpus. If the spread is as large as the difference you were about to act
+on, you have not measured a difference yet. On a deterministic setting the
+spread comes out at exactly zero, which is a useful thing to check: anything
+else means something moved underneath the runs.
+
 ### Trying it without an AI model running
 
 `--mode keyword` searches with the keyword index only, so it needs no embedding

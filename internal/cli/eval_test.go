@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -961,4 +962,123 @@ func TestRunEval_noPlannerCostsNoPlanningTime(t *testing.T) {
 	if report.PlanLatency.MedianMS > 5 {
 		t.Errorf("plan latency = %.1fms with no planner", report.PlanLatency.MedianMS)
 	}
+}
+
+// varyingPlanner writes a different query every call, which is what a model
+// asked to rewrite the same question three times actually does.
+type varyingPlanner struct{ n int }
+
+func (p *varyingPlanner) Queries(_ context.Context, _ []conversation.Turn, question string) ([]string, error) {
+	p.n++
+	return []string{fmt.Sprintf("%s (take %d)", question, p.n)}, nil
+}
+
+func TestRunEvalRepeated_runsTheWholeSweepEachTime(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet)
+
+	spread, reports, err := cli.RunEvalRepeated(context.Background(), set,
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Rewrite: "condense"}, 3)
+	if err != nil {
+		t.Fatalf("RunEvalRepeated: %v", err)
+	}
+	if spread.Runs != 3 || len(reports) != 3 {
+		t.Fatalf("runs = %d, reports = %d, want 3 and 3", spread.Runs, len(reports))
+	}
+	// Two cases, three runs: the set is scored whole each time rather than
+	// once with the rewrite repeated.
+	if len(seen) != 6 {
+		t.Errorf("searches = %d, want 6", len(seen))
+	}
+	if spread.Set != "go-docs" {
+		t.Errorf("Set = %q", spread.Set)
+	}
+	// Nothing varies here, and a spread that says so is the useful answer.
+	if !spread.Stable() {
+		t.Errorf("a deterministic sweep should come out stable: %+v", spread.Metrics)
+	}
+}
+
+func TestRunEvalRepeated_needsMoreThanOneRun(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet)
+	for _, n := range []int{0, 1} {
+		if _, _, err := cli.RunEvalRepeated(context.Background(), set,
+			recordingRetriever(nil, &seen), cli.EvalOptions{Mode: "hybrid", TopK: 5}, n); err == nil {
+			t.Errorf("n = %d: want an error, one run is not a spread", n)
+		}
+	}
+}
+
+func TestRunEvalRepeated_namesTheCasesThatMoved(t *testing.T) {
+	set := evalSet(t, twoCaseSet)
+	// The labelled document comes back on the first run and not on the second:
+	// one case flips, which on a two-case set is half the headline.
+	run := 0
+	retrieve := func(context.Context, []string, int, map[string]string) ([]retrieval.RetrievedChunk, error) {
+		run++
+		if run <= 2 {
+			return []retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, nil
+		}
+		return nil, nil
+	}
+
+	spread, _, err := cli.RunEvalRepeated(context.Background(), set, retrieve,
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Rewrite: "condense", Planner: &varyingPlanner{}}, 2)
+	if err != nil {
+		t.Fatalf("RunEvalRepeated: %v", err)
+	}
+	if spread.Stable() {
+		t.Fatal("Stable() = true, but the first case scored 1 then 0")
+	}
+	if len(spread.Unstable()) != 1 || spread.Unstable()[0].ID != "slices" {
+		t.Fatalf("unstable = %+v, want the slices case", spread.Unstable())
+	}
+	// The queries are the point: a case that moved under a planner that wrote
+	// two different searches moved for a reason that can be read.
+	if len(spread.Unstable()[0].Queries) != 2 {
+		t.Errorf("queries = %v, want the two the planner wrote", spread.Unstable()[0].Queries)
+	}
+}
+
+func TestEvalSpreadOutput(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet)
+	spread, _, err := cli.RunEvalRepeated(context.Background(), set,
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5}, 2)
+	if err != nil {
+		t.Fatalf("RunEvalRepeated: %v", err)
+	}
+
+	t.Run("text", func(t *testing.T) {
+		var sb strings.Builder
+		if err := cli.EvalSpreadOutput(&sb, spread, "text"); err != nil {
+			t.Fatalf("EvalSpreadOutput: %v", err)
+		}
+		if !strings.Contains(sb.String(), "go-docs") || !strings.Contains(sb.String(), "stddev") {
+			t.Errorf("output = %s", sb.String())
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		var sb strings.Builder
+		if err := cli.EvalSpreadOutput(&sb, spread, "json"); err != nil {
+			t.Fatalf("EvalSpreadOutput: %v", err)
+		}
+		var back eval.Spread
+		if err := json.Unmarshal([]byte(sb.String()), &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if back.Runs != 2 {
+			t.Errorf("round-tripped runs = %d", back.Runs)
+		}
+	})
+
+	t.Run("unknown format", func(t *testing.T) {
+		if err := cli.EvalSpreadOutput(&strings.Builder{}, spread, "yaml"); err == nil {
+			t.Fatal("want an error")
+		}
+	})
 }

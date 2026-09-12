@@ -45,8 +45,9 @@ so labelling one over the other would measure how the set was written rather
 than how retrieval performs.
 
 ```bash
-make eval-ingest      # init + ingest + doctor, into ~/.tbuk-eval
-make eval-defaults    # the five sweeps, into docs/eval/results/*.json
+make eval-ingest           # init + ingest + doctor, into ~/.tbuk-eval
+make eval-defaults         # the five sweeps, into docs/eval/results/*.json
+make eval-condense-spread  # condense ×3, and window as the control (#173)
 ```
 
 Both targets use `~/.tbuk-eval` — a root of its own, so the measurement corpus
@@ -288,6 +289,95 @@ output is deterministic (`window`, `off`, `gold`) that is the whole story. For
 `condense`, whose rewrite comes from a model, it is not: a second and third run
 would sample its variance, and nobody has. The direction is clear enough to act
 on and the effect sizes are not.
+
+---
+
+## Sampling `condense`'s variance ([#173](../../../../issues/173))
+
+The tables above rest on one run each. For `off`, `window` and `gold` that is
+the whole story — they are deterministic, and a second run returns the same
+digits. `condense` is the one row a model wrote, and its variance has never
+been sampled.
+
+Thirteen single-shot cases means one case moving is ±0.077 on hit. The
+unexplained gain the decision above notes — 0.538 to 0.692 on the control half
+— is two cases. Until the spread across runs is known, that gain and two cases
+landing differently are the same observation.
+
+### Running it
+
+```bash
+make eval-ingest           # once, if ~/.tbuk-eval is not already built
+make eval-condense-spread  # RUNS=3 by default
+```
+
+It writes four files into `results/`: `condense-spread.{json,txt}` and
+`window-spread.{json,txt}`. No ingest happens between the runs — `tbuk eval`
+only reads — so the corpus they disagree about is one corpus, and the report's
+instrument block is what says so.
+
+**`window-spread` is the control, and it is read first.** The window is
+deterministic, so its spread must be exactly zero on hit, recall, precision,
+MRR and nDCG. Anything else means the corpus or the index moved underneath the
+runs, and the `condense` column measures that rather than the planner.
+
+The JSON carries a row per case — the question, the distinct queries it
+actually ran on, and its hit in each run — so the single-shot half can be
+re-split out of it afterwards, and so a case that moved can be read against the
+query it moved on. That is what answers the second half of #173: whether the
+rewrite is dropping interrogative framing and leaving noun phrases closer to
+the prose being searched, or doing something else entirely.
+
+### Results
+
+**Not yet run.** No number in this directory is produced by anything but a real
+run, and this one needs the corpus ingested and a chat model served — neither
+of which exists in the environment the harness was written in. The tables stay
+empty until `make eval-condense-spread` fills them.
+
+Whole set, 24 cases, `--rewrite condense`, three runs:
+
+| metric | mean | min | max | stddev | span |
+|---|---|---|---|---|---|
+| hit@5 | | | | | |
+| recall@5 | | | | | |
+| P@5 | | | | | |
+| MRR | | | | | |
+| nDCG@5 | | | | | |
+
+The thirteen single-shot cases, re-split from the per-case rows — the half the
+observation is about:
+
+| metric | mean | min | max | stddev | span |
+|---|---|---|---|---|---|
+| hit@5 | | | | | |
+| MRR | | | | | |
+
+The control, `--rewrite window`, three runs — every span expected to be `0.000`:
+
+| metric | span |
+|---|---|
+| hit@5 | |
+| MRR | |
+
+Cases that moved between runs, and what they searched on:
+
+| case | hit per run | queries |
+|---|---|---|
+| | | |
+
+### What each outcome means
+
+- **The single-shot gain is larger than the spread.** `condense` is doing
+  something to standalone questions, and #173 item 3 applies: that is a
+  different feature from the one [#159](../../../../issues/159) describes, and
+  it wants its own name, its own justification and its own default decision.
+  "Clean the question" is not "resolve the follow-up".
+- **The gain is inside the spread.** It was two cases landing well, and the
+  entry above is corrected to say so. `condense` stays off for the reason
+  already recorded, with nothing unexplained left over.
+- **The control is not zero.** Nothing is read off either column. The corpus
+  moved under the runs; re-ingest, confirm `doctor`, and sweep again.
 
 ---
 

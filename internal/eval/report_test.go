@@ -756,3 +756,59 @@ func TestDiff_warnsWhenARunDegraded(t *testing.T) {
 		t.Errorf("want a warning that a run degraded: %v", d.Warnings)
 	}
 }
+
+// TestReportWriteText_verbosePrintsWhatWasActuallySearched keeps the planned
+// query inspectable from the text report. A rewrite is argued about from what
+// it wrote, and reading that out of the JSON is a step nobody takes.
+func TestReportWriteText_verbosePrintsWhatWasActuallySearched(t *testing.T) {
+	run := eval.Run{Mode: "hybrid", TopK: 5, Rewrite: "condense"}
+	report := eval.NewReport("go-docs", run, []eval.CaseResult{
+		{
+			ID: "rewritten", Query: "and what about its defaults?",
+			Queries: []string{"timbuktu retrieval defaults"},
+			Metrics: eval.Metrics{Hit: 1, Cases: 1, Labels: 1, Retrieved: 5},
+		},
+		{
+			ID: "untouched", Query: "how does ingest chunk a file",
+			Queries: []string{"how does ingest chunk a file"},
+			Metrics: eval.Metrics{Hit: 0, Cases: 1, Labels: 1, Retrieved: 5},
+		},
+	})
+
+	var b strings.Builder
+	if err := report.WriteText(&b, true); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"planning", "rewritten",
+		"and what about its defaults?", // what the case asked
+		"timbuktu retrieval defaults",  // what retrieval ran on
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("verbose report is missing %q:\n%s", want, out)
+		}
+	}
+	// A case the planner left alone is not a rewrite, and listing it would bury
+	// the ones that are.
+	if strings.Contains(out, "how does ingest chunk a file") {
+		t.Errorf("an unchanged query should not be listed as a rewrite:\n%s", out)
+	}
+}
+
+// TestReportWriteText_noPlanningSectionWhenNothingWasRewritten keeps the
+// deterministic modes' reports as they were.
+func TestReportWriteText_noPlanningSectionWhenNothingWasRewritten(t *testing.T) {
+	run := eval.Run{Mode: "hybrid", TopK: 5, Rewrite: "window"}
+	report := eval.NewReport("go-docs", run, []eval.CaseResult{
+		{ID: "a", Query: "q", Queries: []string{"q"}, Metrics: eval.Metrics{Hit: 1, Cases: 1, Labels: 1, Retrieved: 5}},
+	})
+
+	var b strings.Builder
+	if err := report.WriteText(&b, true); err != nil {
+		t.Fatalf("WriteText: %v", err)
+	}
+	if strings.Contains(b.String(), "planning —") {
+		t.Errorf("nothing was rewritten, so there is no planning section to print:\n%s", b.String())
+	}
+}

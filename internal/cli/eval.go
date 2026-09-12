@@ -519,6 +519,56 @@ func EvalOutput(out io.Writer, report eval.Report, baseline *eval.Report, format
 	return diff.WriteText(out) //nolint:wrapcheck // already "eval: write diff: …"
 }
 
+// RunEvalRepeated runs one sweep n times over the same knowledge base and
+// summarises what moved between the runs.
+//
+// Every deterministic knob in this harness returns the same report twice, so
+// repeating those proves only that they are deterministic. The knobs that spend
+// a model do not: a condense sweep is a model writing a query per case, and a
+// single run of one cannot say whether a gain belongs to the setting or to that
+// afternoon's sampling. Nothing is ingested between runs — eval only reads —
+// so the corpus the runs disagree about is the same corpus.
+//
+// The reports are returned alongside the spread so a caller can keep the
+// individual runs: the spread is the finding, and the runs are the evidence.
+func RunEvalRepeated(
+	ctx context.Context,
+	set eval.Set,
+	retrieve retrieverFn,
+	opts EvalOptions,
+	n int,
+) (eval.Spread, []eval.Report, error) {
+	if n < 2 {
+		return eval.Spread{}, nil, fmt.Errorf(
+			"eval: --repeat samples what varies between runs, so it needs at least 2, got %d", n)
+	}
+	reports := make([]eval.Report, 0, n)
+	for i := 0; i < n; i++ {
+		report, err := RunEval(ctx, set, retrieve, opts)
+		if err != nil {
+			return eval.Spread{}, nil, fmt.Errorf("eval: run %d of %d: %w", i+1, n, err)
+		}
+		reports = append(reports, report)
+	}
+	spread, err := eval.NewSpread(reports)
+	if err != nil {
+		return eval.Spread{}, nil, err //nolint:wrapcheck // already "eval: …"
+	}
+	return spread, reports, nil
+}
+
+// EvalSpreadOutput writes a spread in the requested format.
+func EvalSpreadOutput(out io.Writer, spread eval.Spread, format string) error {
+	switch format {
+	case "text":
+		return spread.WriteText(out) //nolint:wrapcheck // already "eval: write spread: …"
+	case "json":
+		return spread.WriteJSON(out) //nolint:wrapcheck // already "eval: write spread: …"
+	default:
+		return fmt.Errorf("eval: invalid format %q: must be text or json", format)
+	}
+}
+
 // LoadBaselineReport reads a report written by a previous --format json run.
 func LoadBaselineReport(path string) (eval.Report, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // the path is the user's own argument
@@ -652,6 +702,7 @@ func newEvalCmd() *cobra.Command {
 		baselinePath string
 		format       string
 		verbose      bool
+		repeat       int
 	)
 
 	cmd := &cobra.Command{
@@ -682,6 +733,16 @@ evidence.
   tbuk eval go-docs --stage both
   tbuk eval go-docs --stage generation --judge --verbose
 
+--repeat N runs the same sweep N times and reports the spread — mean, min, max
+and standard deviation per metric — instead of one run's numbers, naming the
+cases that did not score the same every time. Every deterministic mode returns
+the same report every time, so this is for the ones that spend a model: a
+condense sweep is a model writing a query per case, and one run of it cannot
+say whether a gain is the setting or the sampling. Nothing is ingested between
+runs, so the corpus the runs disagree about is one corpus.
+
+  tbuk eval go-docs --rewrite condense --repeat 3
+
 --judge adds a model's marks — correctness against the case's answer, and
 faithfulness against the passages — to the deterministic scoring, which always
 runs alongside it. The judge's prompt is versioned with this binary rather than
@@ -705,6 +766,12 @@ configurable, so two runs cannot be scored by two different instruments;
 			}
 			if err := eval.ValidateStage(stage); err != nil {
 				return fmt.Errorf("--stage: %w", err)
+			}
+			// A repeat of one is a single run, not a spread of one: the
+			// summary would print a standard deviation of zero, which states
+			// something false in the language of a measurement.
+			if repeat < 1 {
+				return fmt.Errorf("--repeat must be at least 1, got %d", repeat)
 			}
 			// A judge with no answers to judge would open a model connection,
 			// score nothing, and print a report that looks exactly like one
@@ -872,14 +939,24 @@ configurable, so two runs cannot be scored by two different instruments;
 
 			out := cmd.OutOrStdout()
 			for i, set := range sets {
-				report, err := RunEval(cmd.Context(), set, ret.RetrieveMany, runOpts)
-				if err != nil {
-					return err
-				}
 				if i > 0 {
 					if _, err := io.WriteString(out, "\n"); err != nil {
 						return fmt.Errorf("eval: write report: %w", err)
 					}
+				}
+				if repeat > 1 {
+					spread, _, err := RunEvalRepeated(cmd.Context(), set, ret.RetrieveMany, runOpts, repeat)
+					if err != nil {
+						return err
+					}
+					if err := EvalSpreadOutput(out, spread, format); err != nil {
+						return err
+					}
+					continue
+				}
+				report, err := RunEval(cmd.Context(), set, ret.RetrieveMany, runOpts)
+				if err != nil {
+					return err
 				}
 				if err := EvalOutput(out, report, baseline, format, verbose); err != nil {
 					return err
@@ -903,7 +980,12 @@ configurable, so two runs cannot be scored by two different instruments;
 	cmd.Flags().StringVar(&baselinePath, "baseline", "", "a previous --format json report to diff against")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text or json")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print a row per case, and the skipped ones")
+	cmd.Flags().IntVar(&repeat, "repeat", 1,
+		"run the sweep this many times and report the spread instead of one run's numbers")
 	cmd.MarkFlagsMutuallyExclusive("gold", "rewrite")
+	// A spread has no single report for a baseline to be diffed against, and
+	// picking one of the runs to compare would be picking the answer.
+	cmd.MarkFlagsMutuallyExclusive("repeat", "baseline")
 	return cmd
 }
 
