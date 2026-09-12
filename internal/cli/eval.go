@@ -117,7 +117,9 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			continue
 		}
 
+		planStart := time.Now()
 		queries, skip, err := planCase(ctx, c, opts)
+		planElapsed := time.Since(planStart)
 		if err != nil {
 			return eval.Report{}, err
 		}
@@ -138,6 +140,7 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 			Query:     c.Query,
 			Queries:   queries,
 			LatencyMS: float64(elapsed.Microseconds()) / 1000,
+			PlanMS:    float64(planElapsed.Microseconds()) / 1000,
 			Degraded:  drainFallbacks(opts.Planner),
 		}
 		if scoreRetrieval {

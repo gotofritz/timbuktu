@@ -164,10 +164,19 @@ condense measurement and not the window's numbers wearing its name.
 not of the retriever. Most cases carry one label, so a precision near `0.20` is
 the ceiling — these sit well under even that.
 
-The rewrite latencies do not include the model call: the planner runs before
-the timer, so `condense` reads as 258ms while actually costing a round trip per
-question on top. `expand3`'s 1024ms is three extra searches, which the timer
-does see.
+**The latencies above exclude the rewrite's model call**, and that is a defect
+in the harness rather than a property of the runs: the planner used to run
+before the timer started, so `condense` reads as 258ms while actually costing a
+round trip per question on top. `expand3`'s 1024ms is its three extra searches,
+which the timer did see; its model call is missing too.
+
+Fixed since these numbers were recorded. Query planning is now timed and
+reported separately — `planning median … p95 …` in the text report,
+`plan_latency` in the JSON, and its own row in a `--baseline` diff — so a
+re-run will show what the rewrites actually cost. It changes none of the
+conclusions below, which turn on quality; it does mean **the latency column
+here understates `condense` and `expand3`**, and that #28's kill criterion,
+stated in latency, could not have been evaluated with the harness as it stood.
 
 ### The eleven follow-ups, against the ceiling
 

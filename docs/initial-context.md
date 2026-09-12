@@ -1276,6 +1276,15 @@ retrieval headline, since a row of zeroes reads exactly like the failure this
 harness exists to find. `Report.Generation` is absent rather than zero when the
 stage did not run — nobody asked, so nothing was measured.
 
+**Query planning is timed apart from retrieval.** `CaseResult.PlanMS` and
+`Report.PlanLatency` carry what a rewrite spent before the search began — a
+model call under `condense` or an expansion, nothing under the deterministic
+modes. It used to be untimed entirely, the planner running before the stopwatch
+started, which made `condense` report the same latency as the free `window` and
+left #28's kill criterion — stated in latency — unmeasurable. Kept separate
+rather than folded into `Latency` because the criterion needs the sum while a
+reader deciding what to fix needs to know which half is slow.
+
 `Diff(current, baseline)` subtracts two reports, because "A/B'd with evidence"
 otherwise depends on someone subtracting nDCG in their head, and they stop by
 Thursday. A baseline from a different label set is an error — comparing two

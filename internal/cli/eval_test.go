@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gotofritz/timbuktu/internal/cli"
 	"github.com/gotofritz/timbuktu/internal/conversation"
@@ -903,5 +904,61 @@ func TestRunEval_withoutAnIndexListStillScores(t *testing.T) {
 		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
 		cli.EvalOptions{Mode: "hybrid", TopK: 5}); err != nil {
 		t.Fatalf("RunEval: %v", err)
+	}
+}
+
+// slowPlanner stands in for condense: a planner that spends a model call
+// before retrieval ever starts.
+type slowPlanner struct{ delay time.Duration }
+
+func (p slowPlanner) Queries(_ context.Context, _ []conversation.Turn, question string) ([]string, error) {
+	time.Sleep(p.delay)
+	return []string{question}, nil
+}
+
+// TestRunEval_timesTheQueryPlanner covers the gap that made the latency half
+// of #28's kill criterion unmeasurable: the planner ran before the timer
+// started, so a rewrite costing a model call a question reported the same
+// latency as the free deterministic window. D10 makes latency a first-class
+// output precisely because a kill criterion is stated in it.
+func TestRunEval_timesTheQueryPlanner(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "keyword", TopK: 5, Rewrite: "condense",
+			Planner: slowPlanner{delay: 20 * time.Millisecond},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+
+	if report.PlanLatency.MedianMS < 15 {
+		t.Errorf("plan latency = %.1fms, want the planner's cost recorded",
+			report.PlanLatency.MedianMS)
+	}
+	for _, row := range report.Cases {
+		if row.PlanMS < 15 {
+			t.Errorf("case %s records %.1fms of planning", row.ID, row.PlanMS)
+		}
+	}
+	// Retrieval's own number stays its own: the two costs are separable, which
+	// is what tells "the rewrite is slow" from "the search is slow".
+	if report.Latency.MedianMS > 15 {
+		t.Errorf("retrieval latency = %.1fms, contaminated by the planner",
+			report.Latency.MedianMS)
+	}
+}
+
+func TestRunEval_noPlannerCostsNoPlanningTime(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "keyword", TopK: 5})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.PlanLatency.MedianMS > 5 {
+		t.Errorf("plan latency = %.1fms with no planner", report.PlanLatency.MedianMS)
 	}
 }
