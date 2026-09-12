@@ -775,9 +775,9 @@ runs, so the corpus the runs disagree about is one corpus.
 
   tbuk eval go-docs --rewrite condense --repeat 3
 
---judge adds a model's marks — correctness against the case's answer, and
-faithfulness against the passages — to the deterministic scoring, which always
-runs alongside it. The judge's prompt is versioned with this binary rather than
+--judge adds a model's mark — correctness against the case's reference answer —
+to the deterministic scoring, which always runs alongside it. Groundedness is
+the deterministic half of the same question and needs no judge at all. The judge's prompt is versioned with this binary rather than
 configurable, so two runs cannot be scored by two different instruments;
 --judge --verbose prints it.`,
 		Args: cobra.MaximumNArgs(1),
@@ -1008,7 +1008,7 @@ configurable, so two runs cannot be scored by two different instruments;
 	cmd.Flags().StringVar(&stage, "stage", eval.StageRetrieval,
 		"what to score: retrieval | generation | both (generation costs a model call a case)")
 	cmd.Flags().BoolVar(&judgeFlag, "judge", false,
-		"add an LLM judge's correctness and faithfulness marks to the generation stage")
+		"add an LLM judge's correctness mark to the generation stage")
 	cmd.Flags().StringVar(&baselinePath, "baseline", "", "a previous --format json report to diff against")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text or json")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "print a row per case, and the skipped ones")

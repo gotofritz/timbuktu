@@ -337,9 +337,12 @@ with `--baseline` against it and read off the printed diff.
 | MRR | 0.238 | 0.22 | −0.02 |
 | nDCG@5 | 0.264 | 0.23 | −0.04 |
 | includes | 0.50 | 0.46 | −0.04 |
-| faithfulness | 0.413 | 0.39 | −0.02 |
+| faithfulness † | 0.413 | 0.39 | −0.02 |
 | groundedness | 0.685 | 0.70 | +0.01 |
 | generation latency median | 8481ms | 8730ms | +250ms |
+
+† The judged `faithfulness` axis was **removed** after this run, on its own
+evidence — see below. The row is kept because it is what the run reported.
 
 **No case degraded**, so every hop really ran and the numbers are the loop's
 own: the +861ms is two model calls a question, which is what it cost. A run
@@ -384,6 +387,50 @@ Two things the milestone left behind, both worth keeping:
 - **The set carries an `answer` and a `must_include` per case**, and a test
   loads it and asserts every case is scorable by both stages. Nothing had ever
   loaded it, which is how it lost a whole stage unnoticed.
+
+### The judged `faithfulness` axis, removed on the same run's evidence
+
+The judge graded two axes, correctness and faithfulness. Over the 23 cases it
+managed to score, faithfulness came out like this:
+
+| correctness | faithfulness | cases |
+|---|---|---|
+| 2 | 1 | 15 |
+| 1 | 1 | 4 |
+| 0 | 0 | 3 |
+| 2 | 0 | 1 |
+
+**It never scored 2. Not once.** Nineteen of twenty-three landed on "partly",
+which is the whole of the reported 0.413 — that is 0.826 on a 0–2 scale, not
+"41% of claims are supported". Correctness, from the same judge on the same
+answers, awarded 2 sixteen times, so this is not a model that cannot say
+"fully"; it is a model that never says it about *support*, including on the
+sixteen answers it had just called fully correct against a reference drawn from
+the very passages the answer was shown.
+
+One case shows the rubric being misread outright. `conversation-followup`
+scored correctness 2 and faithfulness 0, with the reason:
+
+> not at all faithful to the question asked
+
+That is relevance, which `JudgeSystem` forbids in as many words — *grade support
+only, never correctness* — and it warns that an answer wrong in exactly the way
+the passages are wrong is still faithful.
+
+The instrument explains the rest: a 3B model marking a two-axis JSON rubric on
+answers it also wrote, and those answers are the `qa` template's ≤280-character
+telegraphic fragments, which are the hardest possible shape to trace claim by
+claim back to a passage. A cautious judge lands on "partly" and stays there.
+
+So the axis is gone. `groundedness` — the share of the answer's distinct content
+words that appear in the passages it was shown — answers the same question with
+arithmetic, needs no model, and is reproducible. Nothing was lost that a small
+judge could be trusted to say.
+
+Worth noting for the record: faithfulness moved −0.02 across the A/B, well
+inside this noise, so it contributed nothing to the decision either way. The
+criterion turned on correctness and latency, which is the pair that was written
+down in advance.
 
 ### What this does not settle
 

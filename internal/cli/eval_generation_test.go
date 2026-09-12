@@ -13,6 +13,12 @@ import (
 	"github.com/gotofritz/timbuktu/internal/eval"
 )
 
+// judgeMarker is the first line of the judge's own prompt, so this fake cannot
+// fall out of step with it. Matching a hand-copied phrase did exactly that
+// once: the prompt was reworded, the fake stopped recognising the judge call,
+// and every judged assertion quietly became an unjudged one.
+var judgeMarker = strings.SplitN(eval.JudgeSystem, "\n", 2)[0]
+
 // fakeAnsweringServer answers questions and, when the judge's own prompt turns
 // up, returns a verdict instead. One server stands in for both calls the
 // generation stage makes, which is also how a real run spends one provider.
@@ -25,7 +31,7 @@ func fakeAnsweringServer(t *testing.T, answer, verdict string) *httptest.Server 
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		reply := answer
-		if strings.Contains(string(body), "Grade two things separately") {
+		if strings.Contains(string(body), judgeMarker) {
 			reply = verdict
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -81,7 +87,7 @@ cases:
 func TestEvalCommand_stageBothWithJudge(t *testing.T) {
 	srv := fakeAnsweringServer(t,
 		"Slices grow by doubling their capacity (go.md).",
-		`{"correctness": 2, "correctness_reason": "right", "faithfulness": 2, "faithfulness_reason": "supported"}`)
+		`{"correctness": 2, "correctness_reason": "right"}`)
 	evalHome(t, srv, generationLabels)
 
 	out := mustRun(t, "eval", "--stage", "both", "--judge", "--format", "json")
@@ -109,9 +115,9 @@ func TestEvalCommand_stageBothWithJudge(t *testing.T) {
 	if g.Groundedness <= 0 {
 		t.Errorf("groundedness = %.2f, want more than 0 — the answer quotes the passage", g.Groundedness)
 	}
-	if g.Judged != 1 || g.Correctness != 1 || g.Faithfulness != 1 {
-		t.Errorf("judge = %d judged, %.2f/%.2f, want 1 judged at 1.00/1.00",
-			g.Judged, g.Correctness, g.Faithfulness)
+	if g.Judged != 1 || g.Correctness != 1 {
+		t.Errorf("judge = %d judged, correctness %.2f, want 1 judged at 1.00",
+			g.Judged, g.Correctness)
 	}
 	if report.Run.Judge == "" {
 		t.Error("Run.Judge is empty; a judged number has to name the judge that produced it")
@@ -126,16 +132,16 @@ func TestEvalCommand_stageBothWithJudge(t *testing.T) {
 
 func TestEvalCommand_judgePromptIsPrintedUnderVerbose(t *testing.T) {
 	srv := fakeAnsweringServer(t, "Slices double.",
-		`{"correctness": 1, "correctness_reason": "partly", "faithfulness": 1, "faithfulness_reason": "partly"}`)
+		`{"correctness": 1, "correctness_reason": "partly"}`)
 	evalHome(t, srv, generationLabels)
 
 	// D6: the judge's prompt is versioned code, and printing it is what lets a
 	// number be traced back to the question that produced it.
 	out := mustRun(t, "eval", "--stage", "generation", "--judge", "--verbose")
-	if !strings.Contains(out, "Grade two things separately") {
+	if !strings.Contains(out, "Grade the answer on this scale") {
 		t.Errorf("--judge --verbose did not print the judge's prompt:\n%s", out)
 	}
-	for _, want := range []string{"generation", "correctness", "faithfulness", "partly"} {
+	for _, want := range []string{"generation", "correctness", "partly"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("verbose report is missing %q:\n%s", want, out)
 		}

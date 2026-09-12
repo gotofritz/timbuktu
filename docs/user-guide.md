@@ -2341,20 +2341,26 @@ tbuk eval my-notes --stage generation --judge --verbose
 ```
   generation — 4 answers
     includes 1.00   citations 0.75 (of 3)   groundedness 0.61
-    correctness 0.88   faithfulness 0.75   (4 of 4 judged)
+    correctness 0.88   (4 of 4 judged)
     latency  median 1840ms   p95 3100ms
 
   judge:
     alpha-decision
       correctness 2 — names PostgreSQL and the reason, as the reference does
-      faithfulness 1 — the JSON claim is not in the retrieved passages
 ```
 
-The judge grades each answer twice, 0–2, and gives a reason both times.
-**Correctness** is against your `answer:`; **faithfulness** is against the
-passages, and it is deliberately blind to correctness — an answer that is right
-for a reason your documents never gave is unfaithful, and that is a real problem
-even though nothing about it is wrong.
+The judge grades each answer 0–2 and gives a reason. **Correctness** is against
+your `answer:` — does it say what the reference says, judged on the facts and
+not the wording.
+
+It used to grade a second axis, **faithfulness**: is every claim supported by
+the passages, blind to whether it is right. That was dropped. Over 23 cases on
+this repository's own documentation it never once awarded full marks, 19 landed
+on "partly", and at least one was graded on relevance to the question, which its
+own rubric forbids. A number whose top score is never used is not ranking
+anything. **Groundedness** asks the same question — how much of the answer
+appears in the passages — with arithmetic instead of a model, so nothing was
+lost by dropping it.
 
 Four things worth knowing before you trust the number:
 

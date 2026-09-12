@@ -487,8 +487,7 @@ func TestNewReport_generationOnlyRunHasNoRetrievalHeadline(t *testing.T) {
 func TestReportWriteText_generationBlock(t *testing.T) {
 	cases := []eval.CaseResult{genCase("slices-growth", 1, 0.5, 1000), genCase("maps", 0.5, 1, 3000)}
 	cases[0].Judge = &eval.Judgement{
-		Correctness:  eval.Verdict{Score: 2, Reason: "says what the reference says"},
-		Faithfulness: eval.Verdict{Score: 1, Reason: "one claim is not in the passages"},
+		Correctness: eval.Verdict{Score: 2, Reason: "says what the reference says"},
 	}
 	cases[0].Generation = ptrGen(cases[0].Generation.WithJudgement(*cases[0].Judge))
 	cases[1].Unjudged = "the judge did not return a verdict"
@@ -505,10 +504,10 @@ func TestReportWriteText_generationBlock(t *testing.T) {
 	out := sb.String()
 	for _, want := range []string{
 		"generation", "includes", "citations", "groundedness",
-		"correctness", "faithfulness",
+		"correctness",
 		"judge llama/llama3",
-		// The judge's reasons are what make a judged number arguable.
-		"says what the reference says", "one claim is not in the passages",
+		// The judge's reason is what makes a judged number arguable.
+		"says what the reference says",
 		// A case the judge could not score says so rather than scoring zero.
 		"the judge did not return a verdict",
 	} {

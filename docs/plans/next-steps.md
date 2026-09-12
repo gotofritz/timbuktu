@@ -183,7 +183,7 @@ Coupled levers that raise answer quality without adding documents. Ordered by **
 
 ## Evaluation — measure before tuning
 
-30. ✅ **Separate retrieval eval from generation eval.** *(user-asked; expands #7)* Score the two stages independently so a regression is attributable: - **Retrieval:** recall / precision / MRR / nDCG on labelled query→relevant-chunk sets. - **Generation:** answer quality — faithfulness / groundedness and correctness — via an LLM-judge or reference answers. This is the gate for the whole **Retrieval Quality** cluster: land it before #24–#29 (and before #8) so every change is proved, not hoped. *Shipped with #7:* `--stage retrieval|generation|both` scores the halves apart, and the retrieval half has now gated #24 and #25. The generation half exists and is untested against a real corpus — nothing about those two decisions turned on it, so it was not run.
+30. ✅ **Separate retrieval eval from generation eval.** *(user-asked; expands #7)* Score the two stages independently so a regression is attributable: - **Retrieval:** recall / precision / MRR / nDCG on labelled query→relevant-chunk sets. - **Generation:** answer quality — groundedness and correctness — via an LLM-judge or reference answers. This is the gate for the whole **Retrieval Quality** cluster: land it before #24–#29 (and before #8) so every change is proved, not hoped. *Shipped with #7:* `--stage retrieval|generation|both` scores the halves apart, and the retrieval half has now gated #24 and #25. The generation half has now been run against the real corpus, by #161's kill criterion: it works, and it cost a judged `faithfulness` axis that never awarded full marks in 23 cases and was dropped in favour of the deterministic `groundedness`.
 
 ---
 

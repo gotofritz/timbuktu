@@ -195,14 +195,10 @@ func TestScoreAnswer_groundedness(t *testing.T) {
 
 func TestGenMetrics_WithJudgement_rescales(t *testing.T) {
 	m := eval.GenMetrics{Cases: 1}.WithJudgement(eval.Judgement{
-		Correctness:  eval.Verdict{Score: 2, Reason: "says what the reference says"},
-		Faithfulness: eval.Verdict{Score: 1, Reason: "one claim is not in the passages"},
+		Correctness: eval.Verdict{Score: 2, Reason: "says what the reference says"},
 	})
 	if !closeTo(m.Correctness, 1) {
 		t.Errorf("Correctness = %.2f, want 1.00", m.Correctness)
-	}
-	if !closeTo(m.Faithfulness, 0.5) {
-		t.Errorf("Faithfulness = %.2f, want 0.50", m.Faithfulness)
 	}
 	if m.Judged != 1 {
 		t.Errorf("Judged = %d, want 1", m.Judged)
@@ -244,8 +240,8 @@ func fakeChat(reply string, err error) eval.ChatFn {
 	}
 }
 
-const goodVerdict = `{"correctness": 2, "correctness_reason": "matches the reference",
- "faithfulness": 1, "faithfulness_reason": "one claim is unsupported"}`
+const goodVerdict = `{"correctness": 2, "correctness_reason": "matches the reference"
+}`
 
 func TestJudge_wellFormedVerdict(t *testing.T) {
 	var seen []llm.Message
@@ -263,8 +259,8 @@ func TestJudge_wellFormedVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
 	}
-	if got.Correctness.Score != 2 || got.Faithfulness.Score != 1 {
-		t.Errorf("scores = %d/%d, want 2/1", got.Correctness.Score, got.Faithfulness.Score)
+	if got.Correctness.Score != 2 {
+		t.Errorf("score = %d, want 2", got.Correctness.Score)
 	}
 	if got.Correctness.Reason != "matches the reference" {
 		t.Errorf("correctness reason = %q", got.Correctness.Reason)
@@ -287,7 +283,7 @@ func TestJudge_failuresAreUnjudgedNotZero(t *testing.T) {
 		chat eval.ChatFn
 	}{
 		{"a malformed verdict", fakeChat("the answer looks fine to me", nil)},
-		{"a verdict off the scale", fakeChat(`{"correctness": 7, "faithfulness": 1}`, nil)},
+		{"a verdict off the scale", fakeChat(`{"correctness": 7}`, nil)},
 		{"an empty completion", fakeChat("", nil)},
 		{"the call failed", fakeChat("", errors.New("connection refused"))},
 		{"no model configured", nil},

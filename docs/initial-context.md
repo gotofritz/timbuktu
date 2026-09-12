@@ -1190,8 +1190,14 @@ everything it was asked for.
 | includes | `must_include` substrings present ÷ required (folded like `contains`) |
 | citations | citations the answer emitted that resolve to an indexed document ÷ emitted |
 | groundedness | distinct content words of the answer appearing in the passages |
-| correctness | judge, 0–2 against `answer:`, rescaled (needs `--judge`) |
-| faithfulness | judge, 0–2 against the passages, rescaled (needs `--judge`) |
+| correctness | judge, 0–2 against `answer:`, rescaled (needs `--judge`) — the only judged axis |
+
+A second judged axis, `faithfulness` (0–2 for whether every claim was supported
+by the passages), was removed after one real run: across 23 cases it never
+scored 2, 19 of them scored 1, and one was graded on relevance to the question
+rather than on support, which `JudgeSystem` forbids explicitly. `groundedness`
+answers the same question deterministically, so the axis bought nothing a small
+judge could be trusted to say. `docs/eval/README.md` records the run.
 
 `ExtractCitations` reads a citation as a filename-shaped token — a two-to-eight
 character extension carrying a letter, on a base of at least two — which

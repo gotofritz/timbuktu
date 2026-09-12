@@ -408,8 +408,8 @@ func (r Report) writeGeneration(b *strings.Builder) {
 		rateOver(g.Citations, g.WithCitations, g.Cases),
 		rateOver(g.Groundedness, g.WithWords, g.Cases))
 	if g.Judged > 0 {
-		fmt.Fprintf(b, "    correctness %.2f   faithfulness %.2f   (%d of %d judged)\n",
-			g.Correctness, g.Faithfulness, g.Judged, g.Cases)
+		fmt.Fprintf(b, "    correctness %.2f   (%d of %d judged)\n",
+			g.Correctness, g.Judged, g.Cases)
 	}
 	fmt.Fprintf(b, "    latency  median %.0fms   p95 %.0fms\n",
 		r.Generation.Latency.MedianMS, r.Generation.Latency.P95MS)
@@ -433,16 +433,16 @@ func rateOver(rate float64, over, cases int) string {
 // judge said about them. The reasons are the point of a judged number: without
 // them a 1 is an oracle, and an oracle cannot be argued with or debugged.
 func (r Report) writeGenerationCases(b *strings.Builder) {
-	fmt.Fprintf(b, "\n  %-28s %8s %8s %8s %6s %7s %8s\n",
-		"answer", "includes", "cites", "grounded", "corr", "faith", "ms")
+	fmt.Fprintf(b, "\n  %-28s %8s %8s %8s %6s %8s\n",
+		"answer", "includes", "cites", "grounded", "corr", "ms")
 	for _, c := range r.Cases {
 		if c.Generation == nil {
 			continue
 		}
 		g := c.Generation
-		fmt.Fprintf(b, "  %-28s %8.2f %8.2f %8.2f %6s %7s %8.0f\n",
+		fmt.Fprintf(b, "  %-28s %8.2f %8.2f %8.2f %6s %8.0f\n",
 			truncate(c.ID, 28), g.Includes, g.Citations, g.Groundedness,
-			judgedCell(g.Correctness, g.Judged), judgedCell(g.Faithfulness, g.Judged), c.GenLatencyMS)
+			judgedCell(g.Correctness, g.Judged), c.GenLatencyMS)
 	}
 
 	var judged, unjudged []CaseResult
@@ -459,7 +459,6 @@ func (r Report) writeGenerationCases(b *strings.Builder) {
 		for _, c := range judged {
 			fmt.Fprintf(b, "    %s\n", c.ID)
 			fmt.Fprintf(b, "      correctness %d — %s\n", c.Judge.Correctness.Score, orNoReason(c.Judge.Correctness.Reason))
-			fmt.Fprintf(b, "      faithfulness %d — %s\n", c.Judge.Faithfulness.Score, orNoReason(c.Judge.Faithfulness.Reason))
 		}
 	}
 	if len(unjudged) > 0 {
@@ -648,8 +647,8 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 	// is about the answers rather than about the instrument.
 	if current.Run.Judge != baseline.Run.Judge {
 		d.Warnings = append(d.Warnings, fmt.Sprintf(
-			"the judge changed (%s, was %s): correctness and faithfulness are two different "+
-				"instruments here, and the deterministic scores are the ones still comparable",
+			"the judge changed (%s, was %s): a judged correctness is a different instrument "+
+				"either side, and the deterministic scores are the ones still comparable",
 			orNone(current.Run.Judge), orNone(baseline.Run.Judge)))
 	}
 	return d, nil
@@ -671,9 +670,7 @@ func diffGeneration(current, baseline Report) ([]MetricDelta, *MetricDelta) {
 	// without --judge scores them zero, and a zero minus a zero is a delta that
 	// says nothing while looking exactly like one that says something.
 	if c.Judged > 0 && b.Judged > 0 {
-		deltas = append(deltas,
-			newDelta("correctness", c.Correctness, b.Correctness),
-			newDelta("faithfulness", c.Faithfulness, b.Faithfulness))
+		deltas = append(deltas, newDelta("correctness", c.Correctness, b.Correctness))
 	}
 	latency := newDelta("gen latency median",
 		current.Generation.Latency.MedianMS, baseline.Generation.Latency.MedianMS)

@@ -658,8 +658,7 @@ cases:
 		calls++
 		ch := make(chan llm.Token, 1)
 		if calls == 1 {
-			ch <- llm.Token{Text: `{"correctness": 2, "correctness_reason": "right",
-				"faithfulness": 0, "faithfulness_reason": "unsupported"}`, Done: true}
+			ch <- llm.Token{Text: `{"correctness": 2, "correctness_reason": "right"}`, Done: true}
 		} else {
 			ch <- llm.Token{Text: "I think it's fine", Done: true} // not a verdict
 		}
@@ -682,8 +681,8 @@ cases:
 		t.Fatalf("judged = %d of 2, want 1 — the malformed verdict is unjudged, not zero", g.Judged)
 	}
 	// Averaged over the one case actually judged, not over both.
-	if g.Correctness != 1 || g.Faithfulness != 0 {
-		t.Errorf("correctness/faithfulness = %.2f/%.2f, want 1.00/0.00", g.Correctness, g.Faithfulness)
+	if g.Correctness != 1 {
+		t.Errorf("correctness = %.2f, want 1.00", g.Correctness)
 	}
 	if report.Cases[0].Judge == nil || report.Cases[0].Judge.Correctness.Reason != "right" {
 		t.Errorf("case a judge = %+v, want the verdict and its reason", report.Cases[0].Judge)
