@@ -70,28 +70,45 @@ script and not a one-liner.
 
 ### Serving the models
 
-Two servers, and they do different jobs. The embedding model must be the one
-the corpus was ingested with — changing it means re-ingesting.
+**Two servers on two ports.** Chat and embeddings are separate endpoints, and
+`mlx_lm.server` serves `/v1/chat/completions` only — pointing `embedding.base_url`
+at it gives `HTTP 404: Not Found` on every query. Run whatever serves
+`/v1/embeddings` on a port of its own and name it explicitly:
 
-```bash
-# embeddings (ingest, and the vector/hybrid legs)
-mlx_lm.server --model mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ --port 8081
-
-# generation, and the condense/expand rewrites
-mlx_lm.server --model mlx-community/Qwen3-4B-4bit --port 8080
+```yaml
+# $ROOT/config.yaml — the root the sweeps run against
+llm:
+  base_url: http://localhost:8080
+  model: mlx-community/Qwen2.5-3B-Instruct-4bit
+embedding:
+  base_url: http://localhost:8002
+  model: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+  dimension: 1024
 ```
 
-**Use a small model for the rewrite sweeps.** `condense` gets one line to write
-and is capped at 20 seconds and 256 tokens (`rewrite.CondenseTimeout`,
-`CondenseMaxTokens`); it cannot fail, it falls back to the window. A 27B model
-takes ~12s a call on an M-series laptop and crosses the deadline often enough
-to poison the run, and a reasoning model is worse: the thinking block fills the
-256-token budget before the rewritten question appears, so the completion comes
-back empty and every case falls back. A 4B does this task in under a second.
+An empty `base_url` is not "unset" — it resolves to `http://localhost:8080` for
+both, so leaving the embedding one blank silently aims it at the chat server.
+`dimension` must match the embedding model, or ingest stores vectors search
+will refuse to run against.
+
+**Name the chat model too.** With `llm.model` empty the request carries an
+empty `model` field and the server answers with whatever it has loaded — which
+another client can change underneath you. It is also what the report records as
+the instrument, and `modelLabel` has nothing to name when it is blank.
+
+**Use a model that does not reason for the rewrite sweeps.** `condense` gets one
+line to write and is capped at 20 seconds and 256 tokens
+(`rewrite.CondenseTimeout`, `CondenseMaxTokens`); it cannot fail, it falls back
+to the window. A reasoning model spends the whole budget thinking and never
+reaches the question, so **every** case falls back — the report says so rather
+than reporting the window's numbers as condense's. A large model fails the
+other way, crossing the 20s deadline. A small instruct model does this in under
+a second.
 
 That is a finding as much as a workaround. #24 is decided on correctness **and**
-latency (D10), and a rewrite costing 12s a question does not become a default
-whatever it does to MRR.
+latency (D10), and a rewrite that costs seconds a question, or that breaks
+outright on the local reasoning models people actually run, does not become a
+default whatever it does to MRR.
 
 ### What each row costs
 
