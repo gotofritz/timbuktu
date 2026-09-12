@@ -227,15 +227,18 @@ hit — the half of the set where a rewrite was supposed to be a no-op. A model
 asked to restate a standalone question is apparently cleaning it up in ways
 retrieval likes.
 
-Both readings come from a single run, and `condense` is the one knob here whose
-output is not deterministic. Sampling its variance is the obvious next thing to
-do, and it is what would turn "stays off, and here is an unexplained gain
-elsewhere" into a decision about the gain itself.
+Both readings came from a single run. Sampling that run's variance was the
+obvious next thing to do, and it has been done: three runs, spread zero — the
+rewrite is deterministic here — and the gain, read case by case, turns out to be
+one synonym swap and one capital letter. It is not the model cleaning up a
+question. See [Sampling `condense`'s variance](#sampling-condenses-variance-173).
 
-That is a real effect and a different feature from the one #159 describes.
-Flipping the default on it would be flipping it for a reason nobody stated and
-nobody measured against. So `condense` stays off, and the control-half gain is
-worth an issue of its own rather than a silent reinterpretation of this one.
+That looked like a real effect and a different feature from the one #159
+describes. Flipping the default on it would have been flipping it for a reason
+nobody stated and nobody measured against. So `condense` stays off — and the
+control-half gain got an issue of its own ([#173](../../../../issues/173))
+rather than a silent reinterpretation of this one. That issue is now answered
+below, and the answer is that the gain is two cases of surface-form luck.
 
 ### #25 / [#160](../../../../issues/160) — `expand: N` stays off
 
@@ -286,9 +289,11 @@ report.
 The practical consequence: **these decisions rest on one run each**, reproduced
 exactly rather than corroborated by an independent sample. For a knob whose
 output is deterministic (`window`, `off`, `gold`) that is the whole story. For
-`condense`, whose rewrite comes from a model, it is not: a second and third run
-would sample its variance, and nobody has. The direction is clear enough to act
-on and the effect sizes are not.
+`condense`, whose rewrite comes from a model, it was not — until it was
+sampled. It has been now, three times: the spread is **zero**, because the model
+rewrites deterministically at this temperature. See [Sampling `condense`'s
+variance](#sampling-condenses-variance-173) below, which also explains the
+single-shot gain and finds it is not what anybody assumed.
 
 ---
 
@@ -296,13 +301,17 @@ on and the effect sizes are not.
 
 The tables above rest on one run each. For `off`, `window` and `gold` that is
 the whole story — they are deterministic, and a second run returns the same
-digits. `condense` is the one row a model wrote, and its variance has never
-been sampled.
+digits. `condense` is the one row a model wrote, and its variance had never been
+sampled. It has now.
 
-Thirteen single-shot cases means one case moving is ±0.077 on hit. The
-unexplained gain the decision above notes — 0.538 to 0.692 on the control half
-— is two cases. Until the spread across runs is known, that gain and two cases
-landing differently are the same observation.
+Thirteen single-shot cases means one case moving is ±0.077 on hit. The gain the
+decision above notes — 0.538 to 0.692 on the control half — is two cases, so
+"the rewrite helps standalone questions" and "two cases landed differently"
+were the same observation until something told them apart.
+
+Two things do. The **spread** says whether the two cases land the same way
+twice. The **queries** say what the rewrite did to them. Both are below, and
+they do not agree with what the issue expected.
 
 ### Running it
 
@@ -330,54 +339,100 @@ the prose being searched, or doing something else entirely.
 
 ### Results
 
-**Not yet run.** No number in this directory is produced by anything but a real
-run, and this one needs the corpus ingested and a chat model served — neither
-of which exists in the environment the harness was written in. The tables stay
-empty until `make eval-condense-spread` fills them.
+Recorded 2026-09-12 from `results/condense-spread.json` and
+`results/window-spread.json`, three runs each, no ingest between them. Same
+instrument as the tables above — `Qwen3-Embedding-0.6B-4bit-DWQ`,
+`Qwen2.5-3B-Instruct-4bit`, `fritznew.local` — and the single-run figures
+reproduce exactly, which is the first thing the spread says.
 
-Whole set, 24 cases, `--rewrite condense`, three runs:
-
-| metric | mean | min | max | stddev | span |
-|---|---|---|---|---|---|
-| hit@5 | | | | | |
-| recall@5 | | | | | |
-| P@5 | | | | | |
-| MRR | | | | | |
-| nDCG@5 | | | | | |
-
-The thirteen single-shot cases, re-split from the per-case rows — the half the
-observation is about:
+**`condense`, 24 cases, three runs:**
 
 | metric | mean | min | max | stddev | span |
 |---|---|---|---|---|---|
-| hit@5 | | | | | |
-| MRR | | | | | |
+| hit@5 | 0.458 | 0.458 | 0.458 | 0.000 | **0.000** |
+| recall@5 | 0.417 | 0.417 | 0.417 | 0.000 | **0.000** |
+| P@5 | 0.092 | 0.092 | 0.092 | 0.000 | **0.000** |
+| MRR | 0.258 | 0.258 | 0.258 | 0.000 | **0.000** |
+| nDCG@5 | 0.291 | 0.291 | 0.291 | 0.000 | **0.000** |
+| latency median | 261ms | 260ms | 262ms | 1.4 | 4ms |
+| planning median | 457ms | 455ms | 460ms | 3.0 | 5ms |
 
-The control, `--rewrite window`, three runs — every span expected to be `0.000`:
+`degraded_per_run: [0, 0, 0]` — no case fell back, so this is a `condense`
+measurement and not the window's numbers wearing its name. **Zero cases moved
+between runs, and all 24 produced exactly one distinct plan across the three.**
+The model wrote the identical rewrite every time.
 
-| metric | span |
-|---|---|
-| hit@5 | |
-| MRR | |
+**The control, `window`, three runs:** span `0.000` on hit, recall, precision,
+MRR and nDCG, as it must be. Only latency moves (median 252–258ms), which is
+the machine and not the retriever.
 
-Cases that moved between runs, and what they searched on:
+**The two halves**, re-split from the per-case rows. Valid to read off the
+single-run reports because the spread is zero and the instrument block matches:
 
-| case | hit per run | queries |
+| | `window` | `condense` | delta |
+|---|---|---|---|
+| single-shot (13), hit@5 | 0.538 | **0.692** | **+0.154** |
+| single-shot, MRR | 0.385 | 0.412 | +0.027 |
+| single-shot, nDCG@5 | 0.410 | 0.465 | +0.055 |
+| follow-ups (11), hit@5 | 0.182 | 0.182 | 0.000 |
+| follow-ups, MRR | 0.064 | 0.076 | +0.012 |
+
+### What it means
+
+**The variance is not small. It is zero.** Greedy decoding at the template's
+temperature, on this model and this hardware, is deterministic: the same
+question produces the same rewrite, three times out of three, for every case in
+the set. So the question #173 asked — *does the gain survive resampling?* — has
+an answer, and it is that there was never anything to resample. The +0.154 on
+the control half is exactly as reproducible as the deterministic rows are.
+
+That closes item 1. **Item 2 is where it gets interesting, and the guess in the
+issue is wrong.**
+
+The guess was that `condense` "drops interrogative framing and leaves noun
+phrases closer to the prose being searched". It does not. Every one of the 13
+single-shot rewrites is still a question, and **4 of the 13 differ from what was
+asked only in capitalisation.** The two cases that flip from miss to hit:
+
+| case | asked | ran on |
 |---|---|---|
-| | | |
+| `context-budget` | what happens when the prompt is too **big** for the model? | What happens when the prompt is too **large** for the model? |
+| `kebab-case-queries` | **w**hy does searching for a hyphenated word behave oddly? | **W**hy does searching for a hyphenated word behave oddly? |
 
-### What each outcome means
+The second one is the whole finding. Nothing changed but a capital letter.
+`chunks_fts` is built with `unicode61`, which case-folds, so the keyword leg
+returned the identical ranking — **the flip came from the vector leg reacting to
+a capital W.** The first is a one-word synonym swap that happens to match the
+corpus's own wording.
 
-- **The single-shot gain is larger than the spread.** `condense` is doing
-  something to standalone questions, and #173 item 3 applies: that is a
-  different feature from the one [#159](../../../../issues/159) describes, and
-  it wants its own name, its own justification and its own default decision.
-  "Clean the question" is not "resolve the follow-up".
-- **The gain is inside the spread.** It was two cases landing well, and the
-  entry above is corrected to say so. `condense` stays off for the reason
-  already recorded, with nothing unexplained left over.
-- **The control is not zero.** Nothing is read off either column. The corpus
-  moved under the runs; re-ingest, confirm `doctor`, and sweep again.
+So the "single-shot gain" is two cases: one lexical luck, one surface-form
+perturbation of the embedding. Not a model cleaning up a question.
+
+**What that settles.** #173 item 3 asked whether `condense` is really a
+different feature — "clean the question" rather than "resolve the follow-up" —
+deserving its own name and its own default. On this evidence, no. Cleaning is
+not what it is doing. What it is doing on standalone questions is re-rolling the
+vector leg with a slightly different surface form, at **457ms of planning per
+question**, which is where `--rewrite condense` costs 2.7× the search it
+precedes. A knob that perturbs the query and sometimes lands better is not a
+feature; it is a coin with a latency bill.
+
+`condense` stays off, and the unexplained gain recorded above is now explained
+rather than outstanding. #24 and #25 are unaffected — both were already settled
+on the follow-up numbers, where `condense` ties the window exactly.
+
+### The one run that would confirm it
+
+Re-run both sweeps at `--mode keyword`. The keyword leg case-folds, so:
+
+- `kebab-case-queries` **must** score identically under both modes. If it still
+  flips, the mechanism is not what is written above.
+- `context-budget` may still flip — `big` and `large` are genuinely different
+  tokens to BM25.
+
+That is two model-free runs for `window` and two cheap ones for `condense`, and
+it separates "the embedder is surface-form sensitive" from "the rewrite found
+better words" without arguing about it.
 
 ---
 
