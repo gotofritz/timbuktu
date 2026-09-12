@@ -2,6 +2,8 @@ package eval
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,6 +327,22 @@ correctness: does the answer say what the reference answer says? Grade the facts
 Reply with one JSON object and nothing else, in this shape:
 
 {"correctness": 2, "correctness_reason": "one short sentence"}`
+
+// JudgeRubric fingerprints the grading instructions compiled into this binary,
+// so a report can name the rubric that produced its judged numbers.
+//
+// The prompt is versioned with the binary rather than configurable, which stops
+// two runs of *one* build being scored differently — but it does nothing across
+// builds, and an edit to it is an instrument change. Removing one of the two
+// axes moved correctness from 0.78 to 0.44 on byte-identical answers under an
+// unchanged model name.
+//
+// Short on purpose: it sits in a report header, and it only ever has to answer
+// "the same rubric, or a different one?".
+func JudgeRubric() string {
+	sum := sha256.Sum256([]byte(JudgeSystem))
+	return hex.EncodeToString(sum[:4])
+}
 
 // Verdict is the judge's mark on one axis: a score on the scale it was given,
 // and the reason it gave for it. The reason is what makes a judged number

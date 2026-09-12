@@ -352,3 +352,19 @@ func TestValidateStage(t *testing.T) {
 		t.Error("ValidateStage(\"answers\") = nil, want an error naming the three stages")
 	}
 }
+
+// The failure this closes: dropping one of the judge's two axes moved
+// correctness from 0.78 to 0.44 on byte-identical answers, under the same
+// model. Recording the model was not enough to tell the two instruments apart.
+func TestJudgeRubric(t *testing.T) {
+	got := eval.JudgeRubric()
+	if got == "" {
+		t.Fatal("JudgeRubric is empty; a judged number that cannot name its rubric is not traceable")
+	}
+	if got != eval.JudgeRubric() {
+		t.Error("JudgeRubric is not stable between calls")
+	}
+	if len(got) > 16 {
+		t.Errorf("JudgeRubric = %q, want something short enough to sit in a report header", got)
+	}
+}

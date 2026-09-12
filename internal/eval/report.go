@@ -30,6 +30,13 @@ type Run struct {
 	// the one that wrote them: a judge upgrade has to be visible as a judge
 	// upgrade rather than as a quality change.
 	Judge string `json:"judge,omitempty"`
+	// JudgeRubric fingerprints the grading instructions that model was given.
+	//
+	// The model name alone is not the instrument. Dropping one of the judge's
+	// two axes moved correctness from 0.78 to 0.44 on byte-identical answers
+	// under an unchanged model, and nothing in the report could tell the two
+	// runs apart. A rubric edit is an instrument change and has to read as one.
+	JudgeRubric string `json:"judge_rubric,omitempty"`
 	// Host is the machine that produced the latency figures. Latency is the
 	// noisiest number in the report — it moves with the hardware, the server
 	// and whatever else was running — so a baseline from somewhere else has to
@@ -278,7 +285,7 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		fmt.Fprintf(&b, "  llm %s\n", r.Run.LLM)
 	}
 	if r.Run.Judge != "" {
-		fmt.Fprintf(&b, "  judge %s\n", r.Run.Judge)
+		fmt.Fprintf(&b, "  judge %s%s\n", r.Run.Judge, rubricSuffix(r.Run.JudgeRubric))
 	}
 	if !r.Run.At.IsZero() {
 		fmt.Fprintf(&b, "  run %s\n", r.Run.At.UTC().Format(time.RFC3339))
@@ -529,6 +536,15 @@ func precisionCeiling(cases []CaseResult, k int) string {
 		labels/n, retrieved/n, k, ceiling)
 }
 
+// rubricSuffix renders the judge's rubric fingerprint beside its model, or
+// nothing when the report predates the fingerprint.
+func rubricSuffix(rubric string) string {
+	if rubric == "" {
+		return ""
+	}
+	return " (rubric " + rubric + ")"
+}
+
 // Plural renders a count with its noun, so a one-case run does not report
 // "1 cases" in the first line a reader sees.
 func Plural(n int, noun string) string {
@@ -641,6 +657,15 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 		d.Warnings = append(d.Warnings, fmt.Sprintf(
 			"the model changed (%s, was %s): generation scores and latency move with it",
 			orNone(current.Run.LLM), orNone(baseline.Run.LLM)))
+	}
+	// The same model given different grading instructions is two instruments,
+	// and the model name does not say so. This is the warning that would have
+	// caught a 0.34 swing in correctness on answers that never changed.
+	if current.Run.JudgeRubric != baseline.Run.JudgeRubric {
+		d.Warnings = append(d.Warnings, fmt.Sprintf(
+			"the judge's rubric changed (%s, was %s): the grading instructions are part of the "+
+				"instrument, so the judged scores either side were produced by two of them",
+			orNone(current.Run.JudgeRubric), orNone(baseline.Run.JudgeRubric)))
 	}
 	// A judge upgrade has to read as a judge upgrade. Without this the judged
 	// numbers move, the deterministic ones do not, and the obvious conclusion

@@ -166,8 +166,11 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		Embedding: opts.Embedding,
 		LLM:       opts.LLM,
 		Judge:     opts.JudgeModel,
-		Host:      evalHost(),
-		At:        time.Now().UTC(),
+		// The rubric is recorded whenever a judge ran, so a judged number can
+		// always name the instructions that produced it.
+		JudgeRubric: judgeRubricOf(opts),
+		Host:        evalHost(),
+		At:          time.Now().UTC(),
 	}, scored)
 	report.Skipped = skipped
 	report.UnindexedLabels = unindexed
@@ -244,6 +247,16 @@ func checkScorableAnswers(set eval.Set, stage string) error {
 			"read exactly like a model that answered nothing; add a reference answer to the cases "+
 			"you want marked, or score retrieval alone with --stage retrieval",
 		stage, eval.Plural(len(set.Cases), "case"), set.Name)
+}
+
+// judgeRubricOf fingerprints the grading instructions, but only for a run that
+// actually judged: a rubric on a report with no judged numbers would name an
+// instrument nothing here used.
+func judgeRubricOf(opts EvalOptions) string {
+	if opts.Judge == nil {
+		return ""
+	}
+	return eval.JudgeRubric()
 }
 
 // fallbackReporter is the half of a planner that admits to having degraded.

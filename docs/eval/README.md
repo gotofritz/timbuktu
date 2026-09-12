@@ -310,6 +310,50 @@ single-shot gain and finds it is not what anybody assumed.
 
 ---
 
+## A rubric edit is an instrument change ([#161](../../../../issues/161) fallout)
+
+Dropping the judge's `faithfulness` axis had a consequence nobody predicted and
+nothing would have caught.
+
+`results/generation.json` and `results/hops0.json` score **byte-identical
+answers** — `includes 0.500` and `groundedness 0.6854711348842667` agree to the
+last digit either side, and both are arithmetic over the completion, so the
+model wrote the same 24 answers both times. Same judge model, too. Only the
+grading instructions changed:
+
+| | judge with 2 axes | judge with 1 axis |
+|---|---|---|
+| correctness | 0.783 | **0.438** |
+| score points, 0–2 scale | 36 over 23 answers | 21 over 24 answers |
+| includes | 0.500 | 0.500 |
+| groundedness | 0.685 | 0.685 |
+
+**−0.345 on the headline, from editing the prompt.** The likely mechanism is
+that with two axes the judge had somewhere to put "right, but not well
+supported" — correctness 2, faithfulness 1, fifteen times over. Collapse the
+rubric to one axis and that nuance has nowhere to go but down.
+
+`Run.Judge` recorded the model and nothing else, so two runs across the change
+diffed as though they shared an instrument. They did not. `Run.JudgeRubric` now
+carries a short fingerprint of `JudgeSystem`, printed beside the model
+(`judge mlx/… (rubric 3f9c1a20)`), and both `Diff` and `Spread` warn when it
+moves. The prompt being compiled into the binary stops two runs of *one build*
+disagreeing; it does nothing across builds, which is where this happened.
+
+**What this does and does not invalidate.** Every judged number recorded before
+the change belongs to the two-axis rubric. #161's kill criterion is unaffected —
+both sides of that A/B were scored by the same rubric on the same day, and
+correctness moved +0.00 between them — so the loop was killed on a valid
+comparison. But `0.783` is not comparable to anything measured now, and the
+current baseline for judged correctness on this corpus is **0.438**.
+
+**The deterministic scores did not move at all**, which is the argument for
+having them. `includes` and `groundedness` were identical across a judge change
+that halved the judged number, and that is the whole reason this harness scores
+what it can without a model before it scores what it cannot.
+
+---
+
 ## The multi-hop loop, measured and removed ([#161](../../../../issues/161))
 
 Roadmap #28 asked whether `ask` should retrieve in rounds — retrieve, let the

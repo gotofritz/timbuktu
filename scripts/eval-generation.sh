@@ -59,7 +59,10 @@ fi
 # afford to. Text is the default because a spread is read, not diffed — a spread
 # is not a report, so it is not what --baseline consumes either way.
 echo "==> generation × $RUNS ($FORMAT)"
-out="$OUT/generation-spread.$FORMAT"
+# text lands in a .txt, not a .text: the format name is not the extension.
+ext="$FORMAT"
+[ "$ext" = "text" ] && ext="txt"
+out="$OUT/generation-spread.$ext"
 if [ "$FORMAT" = "text" ]; then
   "$TBUK" "${common[@]}" --repeat "$RUNS" | tee "$out"
 else
