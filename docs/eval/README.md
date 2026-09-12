@@ -49,10 +49,17 @@ make eval-ingest      # init + ingest + doctor, into ~/.tbuk-eval
 make eval-defaults    # the five sweeps, into docs/eval/results/*.json
 ```
 
-`eval-ingest` uses a root of its own so the measurement corpus stays out of a
-working knowledge base. Override with `ROOT=~/.tbuk make eval-ingest` to use
-yours instead, and `TBUK=./bin/tbuk` to point at a build rather than whatever
-is on `PATH`.
+Both targets use `~/.tbuk-eval` — a root of its own, so the measurement corpus
+stays out of a working knowledge base — and both pass `--root` explicitly.
+Override with `ROOT=~/.tbuk make eval-defaults` to use yours instead, and
+`TBUK=./bin/tbuk` to point at a build rather than whatever is on `PATH`. Set
+`ROOT` the same for both, or the sweeps score a corpus the labels were not
+written against.
+
+The root decides the config too, so `llm.model`, `embedding.model` and the base
+URLs come from `$ROOT/config.yaml`. A sweep reading a different root than the
+ingest is a measurement of another corpus through another model, and it looks
+exactly like a measurement of this one.
 
 It ends on `doctor`, which is not decoration. Read the **Eval** section before
 sweeping: a label naming a document that was never ingested scores zero on

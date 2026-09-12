@@ -10,14 +10,27 @@ SET="${SET:-docs/eval/timbuktu-docs.yaml}"
 OUT="${OUT:-docs/eval/results}"
 TBUK="${TBUK:-tbuk}"
 MODE="${MODE:-hybrid}"
+# The same default as scripts/eval-ingest.sh, and passed explicitly on every
+# run. Without it the sweeps read the default root instead — a different corpus
+# and a different config from the one just ingested, which is a measurement of
+# something else that looks exactly like a measurement of this.
+ROOT="${ROOT:-$HOME/.tbuk-eval}"
+
+if [ ! -f "$ROOT/config.yaml" ]; then
+  echo "no knowledge base at $ROOT — run 'make eval-ingest' first" >&2
+  exit 1
+fi
 
 mkdir -p "$OUT"
+echo "root  $ROOT"
+echo "set   $SET"
+echo
 
 run() {
   local name=$1; shift
   echo "==> $name"
   # A run that cannot complete must not leave a stale file behind claiming it did.
-  if ! "$TBUK" eval "$SET" --mode "$MODE" --format json "$@" > "$OUT/$name.json.tmp"; then
+  if ! "$TBUK" --root "$ROOT" eval "$SET" --mode "$MODE" --format json "$@" > "$OUT/$name.json.tmp"; then
     rm -f "$OUT/$name.json.tmp"
     echo "    FAILED — see above; later rows may need a model that is not running" >&2
     return 1
@@ -37,4 +50,4 @@ run expand3  --rewrite window --expand 3
 
 echo
 echo "wrote $OUT/*.json"
-echo "diff any two with: $TBUK eval $SET --format json --baseline $OUT/window.json ..."
+echo "diff any two with: $TBUK --root $ROOT eval $SET --format json --baseline $OUT/window.json ..."
