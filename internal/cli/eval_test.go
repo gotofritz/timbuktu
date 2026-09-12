@@ -803,3 +803,18 @@ func TestEvalAnswerFn_streamErrorFailsTheCase(t *testing.T) {
 		t.Fatal("a stream error scored the case instead of failing it")
 	}
 }
+
+// TestRunEval_recordsTheHost covers D10: latency belongs to a machine, so the
+// report names the one that produced it without the caller having to.
+func TestRunEval_recordsTheHost(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "keyword", TopK: 5})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.Run.Host == "" {
+		t.Fatal("the report names no host, so its latency cannot be traced to a machine")
+	}
+}

@@ -155,10 +155,22 @@ func RunEval(ctx context.Context, set eval.Set, retrieve retrieverFn, opts EvalO
 		Embedding: opts.Embedding,
 		LLM:       opts.LLM,
 		Judge:     opts.JudgeModel,
+		Host:      evalHost(),
 		At:        time.Now().UTC(),
 	}, scored)
 	report.Skipped = skipped
 	return report, nil
+}
+
+// evalHost names the machine the latency figures came from. An unreadable
+// hostname is left empty rather than guessed: a wrong name next to a latency
+// delta is worse than no name, because the reader would trust it.
+func evalHost() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 // scoreAnswer produces the case's answer, marks it, and — under --judge —

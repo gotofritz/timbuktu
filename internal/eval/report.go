@@ -29,8 +29,13 @@ type Run struct {
 	// Judge names the model that graded the answers, recorded separately from
 	// the one that wrote them: a judge upgrade has to be visible as a judge
 	// upgrade rather than as a quality change.
-	Judge string    `json:"judge,omitempty"`
-	At    time.Time `json:"at"`
+	Judge string `json:"judge,omitempty"`
+	// Host is the machine that produced the latency figures. Latency is the
+	// noisiest number in the report — it moves with the hardware, the server
+	// and whatever else was running — so a baseline from somewhere else has to
+	// say so rather than let a faster machine read as a faster retriever.
+	Host string    `json:"host,omitempty"`
+	At   time.Time `json:"at"`
 }
 
 // CaseResult is one case's row: what was asked, what retrieval actually ran on,
@@ -217,6 +222,9 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 	b.WriteString("\n")
 	if r.Run.Embedding != "" {
 		fmt.Fprintf(&b, "  embedding %s\n", r.Run.Embedding)
+	}
+	if r.Run.Host != "" {
+		fmt.Fprintf(&b, "  host %s\n", r.Run.Host)
 	}
 	if r.Run.LLM != "" {
 		fmt.Fprintf(&b, "  llm %s\n", r.Run.LLM)
@@ -509,6 +517,12 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 			"the embedding model changed (%s, was %s): this compares two instruments, "+
 				"and the latency deltas are not comparable at all",
 			orNone(current.Run.Embedding), orNone(baseline.Run.Embedding)))
+	}
+	if current.Run.Host != baseline.Run.Host {
+		d.Warnings = append(d.Warnings, fmt.Sprintf(
+			"the run moved machine (%s, was %s): the quality numbers still compare, "+
+				"the latency deltas do not",
+			orNone(current.Run.Host), orNone(baseline.Run.Host)))
 	}
 	if current.Run.LLM != baseline.Run.LLM {
 		d.Warnings = append(d.Warnings, fmt.Sprintf(

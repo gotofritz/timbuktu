@@ -1,4 +1,5 @@
-.PHONY: help build install test test-verbose test-race coverage coverage-html lint lint-install vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump
+.PHONY: help build install test test-verbose test-race coverage coverage-html lint lint-install vet fmt tidy clean check check-ci release release-snapshot release-patch release-minor release-major _bump \
+	 eval-record eval-record-lsa eval-defaults
 
 .DEFAULT_GOAL := help
 
@@ -87,6 +88,12 @@ eval-record: ## Record frozen vectors + their baseline (needs the configured emb
 eval-record-lsa: ## Record frozen vectors + their baseline with the offline LSA stopgap
 	EVAL_EMBEDDER=lsa go test -tags=record -count=1 -v -run TestRecordFixtureVectors ./internal/eval
 	go test -tags=record -count=1 -v -run TestRecordFixtureBaseline ./internal/cli
+
+# The measurement behind the deferred defaults (#24 condense, #25 expand). Runs
+# on a machine with the corpus ingested and a model; CI has neither, which is
+# why this is a target and not a test.
+eval-defaults: ## Sweep the rewrite/expand defaults over docs/eval (needs a KB and a model)
+	./scripts/eval-defaults.sh
 
 # Cut a release from an already-pushed tag (CI does this automatically on tag
 # push; run manually only for a local/off-CI release). Requires goreleaser and
