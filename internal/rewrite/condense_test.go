@@ -301,3 +301,90 @@ func TestCondense_keepsAnExplicitMaxTokens(t *testing.T) {
 func TestCondense_implementsPlanner(t *testing.T) {
 	var _ rewrite.Planner = rewrite.Condense{}
 }
+
+// chatReasoning is a reasoning model that spends its whole budget thinking and
+// never writes the answer — mlx_lm.server serving Qwen3 with the default
+// 256-token rewrite budget, which is the shape that made every case of a real
+// eval sweep fall back with a message pointing at the wrong thing.
+func chatReasoning(reasoning string, content ...string) rewrite.ChatFn {
+	return func(_ context.Context, _ []llm.Message, _ ...llm.CallOptions) (<-chan llm.Token, error) {
+		ch := make(chan llm.Token, len(content)+2)
+		ch <- llm.Token{Reasoning: reasoning}
+		for _, c := range content {
+			ch <- llm.Token{Text: c}
+		}
+		ch <- llm.Token{Done: true}
+		close(ch)
+		return ch, nil
+	}
+}
+
+func TestCondense_namesReasoningThatCrowdedOutTheAnswer(t *testing.T) {
+	var warn strings.Builder
+	c := rewrite.Condense{
+		Chat: chatReasoning("Okay, the user wrote \"and maps?\" after the previous message. I need to"),
+		Warn: &warn,
+	}
+	got, err := c.Queries(context.Background(), nil, "and maps?")
+	if err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	if len(got) != 1 || got[0] != "and maps?" {
+		t.Fatalf("Queries = %v, want the window's fallback", got)
+	}
+	// The old message said "returned nothing to retrieve on", which sends the
+	// reader looking at the prompt rather than at the token budget.
+	if !strings.Contains(warn.String(), "reasoning") {
+		t.Errorf("warning %q does not say the model reasoned instead of answering", warn.String())
+	}
+	if !strings.Contains(warn.String(), "256") {
+		t.Errorf("warning %q does not name the budget that ran out", warn.String())
+	}
+}
+
+func TestCondense_reasoningBeforeAnAnswerIsFine(t *testing.T) {
+	var warn strings.Builder
+	c := rewrite.Condense{
+		Chat: chatReasoning("thinking…", "how do Go maps grow?"),
+		Warn: &warn,
+	}
+	got, err := c.Queries(context.Background(), nil, "and maps?")
+	if err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	if len(got) != 1 || got[0] != "how do Go maps grow?" {
+		t.Fatalf("Queries = %v, want the rewrite", got)
+	}
+	if warn.String() != "" {
+		t.Fatalf("a model that reasoned and then answered is not a fallback: %s", warn.String())
+	}
+}
+
+// TestCondense_stripsInlineThinking covers the servers that put the thinking in
+// the content stream instead of a field of its own.
+func TestCondense_stripsInlineThinking(t *testing.T) {
+	c := rewrite.Condense{
+		Chat: chatReturning("<think>\nThe user means maps.\n</think>\n\nhow do Go maps grow?"),
+	}
+	got, err := c.Queries(context.Background(), nil, "and maps?")
+	if err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	if len(got) != 1 || got[0] != "how do Go maps grow?" {
+		t.Fatalf("Queries = %v, want the thinking stripped", got)
+	}
+}
+
+func TestCondense_inlineThinkingWithNoAnswerFallsBack(t *testing.T) {
+	var warn strings.Builder
+	c := rewrite.Condense{
+		Chat: chatReturning("<think>\nStill deciding what they meant"),
+		Warn: &warn,
+	}
+	if _, err := c.Queries(context.Background(), nil, "and maps?"); err != nil {
+		t.Fatalf("Queries: %v", err)
+	}
+	if !strings.Contains(warn.String(), "reasoning") {
+		t.Fatalf("warning %q does not name the reasoning", warn.String())
+	}
+}
