@@ -53,10 +53,7 @@ func newOpenAIEmbedder(cfg config.EmbeddingConfig) (*openAIEmbedder, error) {
 // is required; when MLX_API_KEY is set it is sent as a Bearer token and the
 // base URL must be HTTPS or loopback.
 func newMLXEmbedder(cfg config.EmbeddingConfig) (*openAIEmbedder, error) {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+	baseURL := config.ResolveBaseURL("mlx", cfg.BaseURL)
 	key := os.Getenv("MLX_API_KEY")
 	if key != "" {
 		if err := config.ValidateKeyedBaseURL(baseURL); err != nil {

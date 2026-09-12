@@ -310,6 +310,20 @@ func NewLLM(cfg *config.LLMConfig) (LLM, error)
 Stream: channel closed after `Token{Done:true}` or `Token{Error:...}`. Every send goes through `sendToken`, which selects on `ctx.Done()`, so a consumer that abandons the channel (e.g. `RunAsk` returning on a mid-stream error) releases the goroutine instead of leaking it. `RunAsk` runs retrieval and the chat call under a cancellable context derived from `cmd.Context()`, cancelled on return (Ctrl-C interrupts). System messages extracted from the messages slice and sent as top-level `"system"` field (Claude API requirement).
 
 
+**Base URLs resolve in one place.** `config.DefaultBaseURL` /
+`ResolveBaseURL` hold the local defaults (mlx and llama `:8080`, ollama
+`:11434`; hosted providers have none, since their adapters build their own
+endpoint). Every provider factory and `tbuk doctor` go through them.
+
+They were previously a table repeated in each factory, which is how doctor came
+to disagree with the runtime: an empty `base_url` is not "no server", the
+factories resolved it and the health check did not, so doctor probed `""`,
+failed with `unsupported protocol scheme ""`, and reported a reachable server
+as unreachable. Doctor also prints the resolved URL, marked when it came from
+the default, and its embedding line no longer claims `✓ same server as LLM`
+while the LLM line reports that same server unreachable.
+
+
 **Reasoning models.** The OpenAI-compatible providers stream a reasoning
 model's thinking in a field of its own — `reasoning` on `mlx_lm.server`,
 `reasoning_content` elsewhere — and it is not the answer. `llm.Token` carries

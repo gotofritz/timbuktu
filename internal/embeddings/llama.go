@@ -17,10 +17,7 @@ type llamaEmbedder struct {
 }
 
 func newLlamaEmbedder(cfg config.EmbeddingConfig) *llamaEmbedder {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+	baseURL := config.ResolveBaseURL("llama", cfg.BaseURL)
 	return &llamaEmbedder{
 		baseURL:   baseURL,
 		dimension: cfg.Dimension,
