@@ -459,6 +459,7 @@ internal/
   conversation/     Thread, Turn, Replay, Messages — how a thread is replayed into a prompt (pure)
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings) — turn (thread, question) into the queries retrieval runs
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
+  eval/             Set, Case, Label; Score/Aggregate (retrieval), ScoreAnswer/Judge (generation), Report, Diff, Spread — scoring a change against a labelled set, and sampling what varies between runs
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
 ```
