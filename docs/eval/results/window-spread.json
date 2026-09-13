@@ -1,0 +1,394 @@
+{
+  "set": "timbuktu-docs",
+  "run": {
+    "mode": "hybrid",
+    "top_k": 5,
+    "rewrite": "window",
+    "stage": "retrieval",
+    "embedding": "mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+    "host": "fritznew.local",
+    "at": "2026-09-12T16:15:43.96243Z"
+  },
+  "runs": 3,
+  "metrics": [
+    {
+      "name": "hit",
+      "runs": [
+        0.375,
+        0.375,
+        0.375
+      ],
+      "min": 0.375,
+      "max": 0.375,
+      "mean": 0.375,
+      "stddev": 0
+    },
+    {
+      "name": "recall",
+      "runs": [
+        0.3541666666666667,
+        0.3541666666666667,
+        0.3541666666666667
+      ],
+      "min": 0.3541666666666667,
+      "max": 0.3541666666666667,
+      "mean": 0.3541666666666667,
+      "stddev": 0
+    },
+    {
+      "name": "precision",
+      "runs": [
+        0.08333333333333333,
+        0.08333333333333333,
+        0.08333333333333333
+      ],
+      "min": 0.08333333333333333,
+      "max": 0.08333333333333333,
+      "mean": 0.08333333333333333,
+      "stddev": 0
+    },
+    {
+      "name": "mrr",
+      "runs": [
+        0.23750000000000002,
+        0.23750000000000002,
+        0.23750000000000002
+      ],
+      "min": 0.23750000000000002,
+      "max": 0.23750000000000002,
+      "mean": 0.23750000000000002,
+      "stddev": 0
+    },
+    {
+      "name": "ndcg",
+      "runs": [
+        0.2643340507472733,
+        0.2643340507472733,
+        0.2643340507472733
+      ],
+      "min": 0.2643340507472733,
+      "max": 0.2643340507472733,
+      "mean": 0.2643340507472733,
+      "stddev": 0
+    }
+  ],
+  "latency_median": {
+    "name": "latency median",
+    "runs": [
+      257.727,
+      254.27800000000002,
+      252.32999999999998
+    ],
+    "min": 252.32999999999998,
+    "max": 257.727,
+    "mean": 254.77833333333334,
+    "stddev": 2.733066470712575
+  },
+  "plan_median": {
+    "name": "planning median",
+    "runs": [
+      0.001,
+      0.001,
+      0.001
+    ],
+    "min": 0.001,
+    "max": 0.001,
+    "mean": 0.001,
+    "stddev": 0
+  },
+  "degraded_per_run": [
+    0,
+    0,
+    0
+  ],
+  "cases": [
+    {
+      "id": "context-budget",
+      "query": "what happens when the prompt is too big for the model?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "what happens when the prompt is too big for the model?"
+      ]
+    },
+    {
+      "id": "reembed-after-model-change",
+      "query": "do I have to re-embed everything after changing the embedding model?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "do I have to re-embed everything after changing the embedding model?"
+      ]
+    },
+    {
+      "id": "code-search-encoding",
+      "query": "how is source code indexed for search?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "how is source code indexed for search?"
+      ]
+    },
+    {
+      "id": "kebab-case-queries",
+      "query": "why does searching for a hyphenated word behave oddly?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "why does searching for a hyphenated word behave oddly?"
+      ]
+    },
+    {
+      "id": "backup-archive",
+      "query": "how do I back up my knowledge base?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "how do I back up my knowledge base?"
+      ]
+    },
+    {
+      "id": "no-restore-command",
+      "query": "is there a restore command?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "is there a restore command?"
+      ]
+    },
+    {
+      "id": "data-root",
+      "query": "how do I keep a second knowledge base in a different directory?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "how do I keep a second knowledge base in a different directory?"
+      ]
+    },
+    {
+      "id": "deterministic-answers",
+      "query": "how do I make the model's answers deterministic?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "how do I make the model's answers deterministic?"
+      ]
+    },
+    {
+      "id": "stale-extracted-text",
+      "query": "why is my document not being re-extracted after I improved an extractor?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "why is my document not being re-extracted after I improved an extractor?"
+      ]
+    },
+    {
+      "id": "duplicate-paths",
+      "query": "will ingesting the same file by a relative and an absolute path index it twice?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "will ingesting the same file by a relative and an absolute path index it twice?"
+      ]
+    },
+    {
+      "id": "exclusion-operator",
+      "query": "how do I exclude a word from a search?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "how do I exclude a word from a search?"
+      ]
+    },
+    {
+      "id": "chunk-size-tuning",
+      "query": "my answers about one document feel incomplete, what should I change?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "my answers about one document feel incomplete, what should I change?"
+      ]
+    },
+    {
+      "id": "eval-purpose",
+      "query": "how do I tell whether a settings change actually helped retrieval?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "how do I tell whether a settings change actually helped retrieval?"
+      ]
+    },
+    {
+      "id": "search-without-model-followup",
+      "query": "and without the model?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "how do I ask a question about my notes? and without the model?"
+      ]
+    },
+    {
+      "id": "restore-followup",
+      "query": "and to get it back?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "what does tbuk export do? and to get it back?"
+      ]
+    },
+    {
+      "id": "reembed-followup",
+      "query": "do I need to redo anything?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "how do I switch to a different embedding model? do I need to redo anything?"
+      ]
+    },
+    {
+      "id": "context-window-followup",
+      "query": "what if I want it bigger?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "what is the context budget? what if I want it bigger?"
+      ]
+    },
+    {
+      "id": "folder-ingest-followup",
+      "query": "and a whole folder?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "how do I add a single document? and a whole folder?"
+      ]
+    },
+    {
+      "id": "custom-template-followup",
+      "query": "how do I make my own?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "what is a prompt template? how do I make my own?"
+      ]
+    },
+    {
+      "id": "conversation-followup",
+      "query": "how do I make it?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "does tbuk ask remember what I asked before? how do I make it?"
+      ]
+    },
+    {
+      "id": "bare-followup-warning",
+      "query": "what happens if I don't?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "can I ask a follow-up question? what happens if I don't?"
+      ]
+    },
+    {
+      "id": "unnamed-chat-followup",
+      "query": "what if I forget to name it?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "how do I start a conversation? what if I forget to name it?"
+      ]
+    },
+    {
+      "id": "batch-size-followup",
+      "query": "is there a limit with llama.cpp?",
+      "hit": [
+        1,
+        1,
+        1
+      ],
+      "queries": [
+        "how do I make chunks bigger? is there a limit with llama.cpp?"
+      ]
+    },
+    {
+      "id": "stale-docs-followup",
+      "query": "so how do I keep it current?",
+      "hit": [
+        0,
+        0,
+        0
+      ],
+      "queries": [
+        "what does timbuktu not do well? so how do I keep it current?"
+      ]
+    }
+  ]
+}

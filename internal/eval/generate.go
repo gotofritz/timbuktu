@@ -2,6 +2,8 @@ package eval
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,11 +25,17 @@ type GenMetrics struct {
 	Includes     float64 `json:"includes"`
 	Citations    float64 `json:"citations"`
 	Groundedness float64 `json:"groundedness"`
-	// Correctness and Faithfulness are the judge's marks, rescaled from the
-	// 0–JudgeScale scale it grades on. They are zero and uncounted unless the
-	// judge ran and returned something usable.
-	Correctness  float64 `json:"correctness"`
-	Faithfulness float64 `json:"faithfulness"`
+	// Correctness is the judge's mark, rescaled from the 0–JudgeScale scale it
+	// grades on. It is zero and uncounted unless the judge ran and returned
+	// something usable.
+	//
+	// It is the only judged axis. Faithfulness was one too, and was dropped:
+	// over 23 cases it never once scored full marks, 19 of them landed on
+	// "partly", and at least one was graded on relevance to the question —
+	// which the rubric forbids in as many words. A metric whose top score is
+	// never used is not ranking answers. `Groundedness` answers the same
+	// question deterministically, so there was nothing to replace.
+	Correctness float64 `json:"correctness"`
 
 	Cases int `json:"cases"`
 	// With* are the cases each rate averages over: the ones that had something
@@ -102,7 +110,6 @@ func AggregateGen(ms []GenMetrics) GenMetrics {
 		out.Citations += m.Citations
 		out.Groundedness += m.Groundedness
 		out.Correctness += m.Correctness
-		out.Faithfulness += m.Faithfulness
 
 		out.Cases += m.Cases
 		out.WithIncludes += m.WithIncludes
@@ -114,7 +121,6 @@ func AggregateGen(ms []GenMetrics) GenMetrics {
 	out.Citations = mean(out.Citations, out.WithCitations)
 	out.Groundedness = mean(out.Groundedness, out.WithWords)
 	out.Correctness = mean(out.Correctness, out.Judged)
-	out.Faithfulness = mean(out.Faithfulness, out.Judged)
 	return out
 }
 
@@ -310,7 +316,7 @@ const (
 // always be traced back to the question that produced it.
 const JudgeSystem = `You are grading one answer produced by a retrieval-augmented question answering system.
 
-Grade two things separately, each on this scale:
+Grade the answer on this scale:
 
   2 - fully
   1 - partly
@@ -318,11 +324,25 @@ Grade two things separately, each on this scale:
 
 correctness: does the answer say what the reference answer says? Grade the facts, not the wording, the length or the style. Extra detail that is correct is not a fault; contradicting the reference is.
 
-faithfulness: is every claim in the answer supported by the retrieved passages? Grade support only, never correctness. An answer that is right for a reason the passages do not give is unfaithful; an answer that is wrong in exactly the way the passages are wrong is faithful.
-
 Reply with one JSON object and nothing else, in this shape:
 
-{"correctness": 2, "correctness_reason": "one short sentence", "faithfulness": 1, "faithfulness_reason": "one short sentence"}`
+{"correctness": 2, "correctness_reason": "one short sentence"}`
+
+// JudgeRubric fingerprints the grading instructions compiled into this binary,
+// so a report can name the rubric that produced its judged numbers.
+//
+// The prompt is versioned with the binary rather than configurable, which stops
+// two runs of *one* build being scored differently — but it does nothing across
+// builds, and an edit to it is an instrument change. Removing one of the two
+// axes moved correctness from 0.78 to 0.44 on byte-identical answers under an
+// unchanged model name.
+//
+// Short on purpose: it sits in a report header, and it only ever has to answer
+// "the same rubric, or a different one?".
+func JudgeRubric() string {
+	sum := sha256.Sum256([]byte(JudgeSystem))
+	return hex.EncodeToString(sum[:4])
+}
 
 // Verdict is the judge's mark on one axis: a score on the scale it was given,
 // and the reason it gave for it. The reason is what makes a judged number
@@ -334,15 +354,13 @@ type Verdict struct {
 
 // Judgement is what one judge call returned.
 type Judgement struct {
-	Correctness  Verdict `json:"correctness"`
-	Faithfulness Verdict `json:"faithfulness"`
+	Correctness Verdict `json:"correctness"`
 }
 
 // WithJudgement folds the judge's marks into the deterministic metrics,
 // rescaled to the 0–1 every other metric here is on.
 func (m GenMetrics) WithJudgement(j Judgement) GenMetrics {
 	m.Correctness = float64(j.Correctness.Score) / JudgeScale
-	m.Faithfulness = float64(j.Faithfulness.Score) / JudgeScale
 	m.Judged = 1
 	return m
 }
@@ -442,10 +460,8 @@ func JudgeMessages(c Case, a Answer) []llm.Message {
 // nothing" and "the judge said wrong" is the whole reason a failure is not a
 // zero.
 type rawJudgement struct {
-	Correctness        *int   `json:"correctness"`
-	CorrectnessReason  string `json:"correctness_reason"`
-	Faithfulness       *int   `json:"faithfulness"`
-	FaithfulnessReason string `json:"faithfulness_reason"`
+	Correctness       *int   `json:"correctness"`
+	CorrectnessReason string `json:"correctness_reason"`
 }
 
 // ParseJudgement reads a verdict out of a completion, tolerating the code fence
@@ -461,18 +477,15 @@ func ParseJudgement(s string) (Judgement, error) {
 	if err := json.Unmarshal([]byte(s[start:end+1]), &raw); err != nil {
 		return Judgement{}, fmt.Errorf("the judge's verdict is not readable (%w): %q", err, truncateForError(s))
 	}
-	if raw.Correctness == nil || raw.Faithfulness == nil {
-		return Judgement{}, fmt.Errorf("the judge graded only one of the two axes: %q", truncateForError(s))
+	if raw.Correctness == nil {
+		return Judgement{}, fmt.Errorf("the judge did not grade correctness: %q", truncateForError(s))
 	}
-	for name, score := range map[string]int{"correctness": *raw.Correctness, "faithfulness": *raw.Faithfulness} {
-		if score < 0 || score > JudgeScale {
-			return Judgement{}, fmt.Errorf("the judge scored %s %d, off the 0-%d scale it was given",
-				name, score, JudgeScale)
-		}
+	if score := *raw.Correctness; score < 0 || score > JudgeScale {
+		return Judgement{}, fmt.Errorf("the judge scored correctness %d, off the 0-%d scale it was given",
+			score, JudgeScale)
 	}
 	return Judgement{
-		Correctness:  Verdict{Score: *raw.Correctness, Reason: strings.TrimSpace(raw.CorrectnessReason)},
-		Faithfulness: Verdict{Score: *raw.Faithfulness, Reason: strings.TrimSpace(raw.FaithfulnessReason)},
+		Correctness: Verdict{Score: *raw.Correctness, Reason: strings.TrimSpace(raw.CorrectnessReason)},
 	}, nil
 }
 

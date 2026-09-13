@@ -30,6 +30,13 @@ type Run struct {
 	// the one that wrote them: a judge upgrade has to be visible as a judge
 	// upgrade rather than as a quality change.
 	Judge string `json:"judge,omitempty"`
+	// JudgeRubric fingerprints the grading instructions that model was given.
+	//
+	// The model name alone is not the instrument. Dropping one of the judge's
+	// two axes moved correctness from 0.78 to 0.44 on byte-identical answers
+	// under an unchanged model, and nothing in the report could tell the two
+	// runs apart. A rubric edit is an instrument change and has to read as one.
+	JudgeRubric string `json:"judge_rubric,omitempty"`
 	// Host is the machine that produced the latency figures. Latency is the
 	// noisiest number in the report — it moves with the hardware, the server
 	// and whatever else was running — so a baseline from somewhere else has to
@@ -278,7 +285,7 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		fmt.Fprintf(&b, "  llm %s\n", r.Run.LLM)
 	}
 	if r.Run.Judge != "" {
-		fmt.Fprintf(&b, "  judge %s\n", r.Run.Judge)
+		fmt.Fprintf(&b, "  judge %s%s\n", r.Run.Judge, rubricSuffix(r.Run.JudgeRubric))
 	}
 	if !r.Run.At.IsZero() {
 		fmt.Fprintf(&b, "  run %s\n", r.Run.At.UTC().Format(time.RFC3339))
@@ -326,6 +333,10 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		}
 	}
 
+	if verbose {
+		r.writePlanning(&b)
+	}
+
 	if verbose && r.Generation != nil {
 		r.writeGenerationCases(&b)
 	}
@@ -341,6 +352,50 @@ func (r Report) WriteText(w io.Writer, verbose bool) error {
 		return fmt.Errorf("eval: write report: %w", err)
 	}
 	return nil
+}
+
+// writePlanning prints what a rewritten case actually searched on, next to what
+// it was asked.
+//
+// A query planner is argued about from the queries it wrote, and until now
+// those only existed in the JSON — which means the argument was had from the
+// scores instead, one level removed from the thing that produced them. Cases
+// the planner left alone are not listed: they are the majority under every
+// mode, and printing them would bury the handful that were changed.
+func (r Report) writePlanning(b *strings.Builder) {
+	var rewritten []CaseResult
+	for _, c := range r.Cases {
+		if plannedDiffers(c) {
+			rewritten = append(rewritten, c)
+		}
+	}
+	if len(rewritten) == 0 {
+		return
+	}
+
+	fmt.Fprintf(b, "\n  planning — %d of %s searched on something other than the question\n",
+		len(rewritten), Plural(len(r.Cases), "case"))
+	for _, c := range rewritten {
+		fmt.Fprintf(b, "    %s\n", c.ID)
+		fmt.Fprintf(b, "      asked  %s\n", c.Query)
+		for _, q := range c.Queries {
+			fmt.Fprintf(b, "      ran    %s\n", q)
+		}
+	}
+}
+
+// plannedDiffers reports whether planning changed what was searched for. One
+// query identical to the question is what every deterministic mode produces on
+// a single-shot case, and it is not a rewrite.
+func plannedDiffers(c CaseResult) bool {
+	switch len(c.Queries) {
+	case 0:
+		return false
+	case 1:
+		return strings.TrimSpace(c.Queries[0]) != strings.TrimSpace(c.Query)
+	default:
+		return true
+	}
 }
 
 // writeGeneration prints the generation half, when the stage ran.
@@ -360,8 +415,8 @@ func (r Report) writeGeneration(b *strings.Builder) {
 		rateOver(g.Citations, g.WithCitations, g.Cases),
 		rateOver(g.Groundedness, g.WithWords, g.Cases))
 	if g.Judged > 0 {
-		fmt.Fprintf(b, "    correctness %.2f   faithfulness %.2f   (%d of %d judged)\n",
-			g.Correctness, g.Faithfulness, g.Judged, g.Cases)
+		fmt.Fprintf(b, "    correctness %.2f   (%d of %d judged)\n",
+			g.Correctness, g.Judged, g.Cases)
 	}
 	fmt.Fprintf(b, "    latency  median %.0fms   p95 %.0fms\n",
 		r.Generation.Latency.MedianMS, r.Generation.Latency.P95MS)
@@ -385,16 +440,16 @@ func rateOver(rate float64, over, cases int) string {
 // judge said about them. The reasons are the point of a judged number: without
 // them a 1 is an oracle, and an oracle cannot be argued with or debugged.
 func (r Report) writeGenerationCases(b *strings.Builder) {
-	fmt.Fprintf(b, "\n  %-28s %8s %8s %8s %6s %7s %8s\n",
-		"answer", "includes", "cites", "grounded", "corr", "faith", "ms")
+	fmt.Fprintf(b, "\n  %-28s %8s %8s %8s %6s %8s\n",
+		"answer", "includes", "cites", "grounded", "corr", "ms")
 	for _, c := range r.Cases {
 		if c.Generation == nil {
 			continue
 		}
 		g := c.Generation
-		fmt.Fprintf(b, "  %-28s %8.2f %8.2f %8.2f %6s %7s %8.0f\n",
+		fmt.Fprintf(b, "  %-28s %8.2f %8.2f %8.2f %6s %8.0f\n",
 			truncate(c.ID, 28), g.Includes, g.Citations, g.Groundedness,
-			judgedCell(g.Correctness, g.Judged), judgedCell(g.Faithfulness, g.Judged), c.GenLatencyMS)
+			judgedCell(g.Correctness, g.Judged), c.GenLatencyMS)
 	}
 
 	var judged, unjudged []CaseResult
@@ -411,7 +466,6 @@ func (r Report) writeGenerationCases(b *strings.Builder) {
 		for _, c := range judged {
 			fmt.Fprintf(b, "    %s\n", c.ID)
 			fmt.Fprintf(b, "      correctness %d — %s\n", c.Judge.Correctness.Score, orNoReason(c.Judge.Correctness.Reason))
-			fmt.Fprintf(b, "      faithfulness %d — %s\n", c.Judge.Faithfulness.Score, orNoReason(c.Judge.Faithfulness.Reason))
 		}
 	}
 	if len(unjudged) > 0 {
@@ -480,6 +534,15 @@ func precisionCeiling(cases []CaseResult, k int) string {
 	}
 	return fmt.Sprintf("note: %.1f labels and %.1f retrieved passages a case, so P@%d cannot exceed %.2f here",
 		labels/n, retrieved/n, k, ceiling)
+}
+
+// rubricSuffix renders the judge's rubric fingerprint beside its model, or
+// nothing when the report predates the fingerprint.
+func rubricSuffix(rubric string) string {
+	if rubric == "" {
+		return ""
+	}
+	return " (rubric " + rubric + ")"
 }
 
 // Plural renders a count with its noun, so a one-case run does not report
@@ -595,13 +658,22 @@ func Diff(current, baseline Report) (ReportDiff, error) {
 			"the model changed (%s, was %s): generation scores and latency move with it",
 			orNone(current.Run.LLM), orNone(baseline.Run.LLM)))
 	}
+	// The same model given different grading instructions is two instruments,
+	// and the model name does not say so. This is the warning that would have
+	// caught a 0.34 swing in correctness on answers that never changed.
+	if current.Run.JudgeRubric != baseline.Run.JudgeRubric {
+		d.Warnings = append(d.Warnings, fmt.Sprintf(
+			"the judge's rubric changed (%s, was %s): the grading instructions are part of the "+
+				"instrument, so the judged scores either side were produced by two of them",
+			orNone(current.Run.JudgeRubric), orNone(baseline.Run.JudgeRubric)))
+	}
 	// A judge upgrade has to read as a judge upgrade. Without this the judged
 	// numbers move, the deterministic ones do not, and the obvious conclusion
 	// is about the answers rather than about the instrument.
 	if current.Run.Judge != baseline.Run.Judge {
 		d.Warnings = append(d.Warnings, fmt.Sprintf(
-			"the judge changed (%s, was %s): correctness and faithfulness are two different "+
-				"instruments here, and the deterministic scores are the ones still comparable",
+			"the judge changed (%s, was %s): a judged correctness is a different instrument "+
+				"either side, and the deterministic scores are the ones still comparable",
 			orNone(current.Run.Judge), orNone(baseline.Run.Judge)))
 	}
 	return d, nil
@@ -623,9 +695,7 @@ func diffGeneration(current, baseline Report) ([]MetricDelta, *MetricDelta) {
 	// without --judge scores them zero, and a zero minus a zero is a delta that
 	// says nothing while looking exactly like one that says something.
 	if c.Judged > 0 && b.Judged > 0 {
-		deltas = append(deltas,
-			newDelta("correctness", c.Correctness, b.Correctness),
-			newDelta("faithfulness", c.Faithfulness, b.Faithfulness))
+		deltas = append(deltas, newDelta("correctness", c.Correctness, b.Correctness))
 	}
 	latency := newDelta("gen latency median",
 		current.Generation.Latency.MedianMS, baseline.Generation.Latency.MedianMS)

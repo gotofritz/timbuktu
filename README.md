@@ -90,8 +90,10 @@ tbuk search <query>      # search chunks by vector/keyword/hybrid (--mode, --top
                          #   --min-score filters hybrid on fused RRF sums (different scale from cosine)
 tbuk eval [set]          # score retrieval and generation against a labelled set of cases
                          #   (--mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format, --verbose)
+                         #   --repeat N runs the sweep N times and reports the spread, not one run's numbers
+                         #     the spread covers the generation half too when --stage scored one
                          #   --stage retrieval|generation|both picks what is scored (default retrieval)
-                         #   --judge adds an LLM judge's correctness and faithfulness to the generation stage
+                         #   --judge adds an LLM judge's correctness mark to the generation stage
                          #   --mode keyword with the retrieval stage needs no embedder and no model at all
 tbuk find <key=value>... # find documents by metadata filters (--limit, --format)
 tbuk meta set <path> k=v # attach metadata to a document (one value per key; distinct keys per call)
@@ -457,6 +459,7 @@ internal/
   conversation/     Thread, Turn, Replay, Messages — how a thread is replayed into a prompt (pure)
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings) — turn (thread, question) into the queries retrieval runs
   prompts/          TemplateDir, Manifest, Template.Render — disk-based text/template system
+  eval/             Set, Case, Label; Score/Aggregate (retrieval), ScoreAnswer/Judge (generation), Report, Diff, Spread — scoring a change against a labelled set, and sampling what varies between runs
   export/           Create — tar snapshot of config + data folders (portable, path-commented config)
   importer/         Extract — take a tar snapshot's raw sources, templates and index; ignores config and extracted cache
 ```
@@ -849,8 +852,8 @@ of the answer's vocabulary appears in the passages it was given. All three are
 arithmetic, all three run without an API key, and `--verbose` prints the
 citations that resolved to nothing so a low number can be traced.
 
-`--judge` adds a model's marks on top — correctness against the case's
-`answer:`, faithfulness against the passages, each 0–2 with a reason. The
+`--judge` adds a model's mark on top — correctness against the case's
+`answer:`, 0–2 with a reason. The
 deterministic scores keep running alongside it, so a judge upgrade shows up as
 the judged numbers moving while the free ones stay put. The judge's prompt is
 compiled into the binary rather than configurable, so two runs cannot be scored

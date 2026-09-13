@@ -1,3 +1,5 @@
-Reports from `make eval-defaults` land here and are committed on purpose: a
-number quoted in README.md has to be re-derivable from the run that produced
-it. This file only keeps the directory in git until the first sweep lands.
+Reports from `make eval-defaults`, `make eval-condense-spread` and
+`make eval-generation` land here and are committed on purpose: a number quoted
+in README.md or in this directory's own README has to be re-derivable from the
+run that produced it. This file only keeps the directory in git until the first
+sweep lands.

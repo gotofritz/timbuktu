@@ -252,6 +252,53 @@ the loop does not ship. The planner interface and the fusion stay — they are
 milestones 3 and 4's — and milestone 5 is closed as "measured, not worth it".
 Same discipline as plan 33's D7.
 
+**Measured 2026-09-12. The criterion fired, and the loop does not ship.**
+
+Built, run against the eval split at `--hops 0` and `--hops 2`
+(`--stage both --judge`, `Qwen2.5-3B-Instruct-4bit` answering and judging,
+`fritznew.local`), and removed:
+
+| | `--hops 0` | `--hops 2` | |
+|---|---|---|---|
+| correctness | 0.783 | 0.78 | **+0.00 — did not beat one** |
+| latency median | 412ms | 1273ms | **3.1× — the cap was 2×** |
+| hit@5 | 0.375 | 0.29 | −0.08 |
+| recall@5 | 0.354 | 0.27 | −0.08 |
+| nDCG@5 | 0.264 | 0.23 | −0.04 |
+| includes | 0.50 | 0.46 | −0.04 |
+
+No case degraded, so every hop really ran; the +861ms is two model calls a
+question, which is what it cost. It failed both limbs of the criterion and was
+not close on either, and it made retrieval **worse** rather than leaving it
+alone — which is the design working exactly as written and being wrong for this
+corpus. Every round re-runs all queries and fuses them, so the follow-up query
+brings a ranked list of its own and RRF averages the two; a passage that was
+first on the original question is pushed below the cutoff by agreement with a
+query that was never the question. Where the ceiling is 0.455 hit@5 there is
+not enough signal for a second opinion to add to, so it only dilutes the first.
+
+`rewrite.Hop`, `cli.RetrieveWithHops`, `--hops` and `retrieval.max_hops` came
+back out. `search.FuseRRF` and the `Planner` interface stay — they are
+milestones 3 and 4's, and neither depended on the loop. Numbers:
+`docs/eval/README.md`.
+
+Two things the milestone learned on its way out, both kept:
+
+- `tbuk eval` **refuses** a generation run over a label set with nothing to mark
+  an answer against. The first `--hops 0` baseline was spent discovering that
+  `docs/eval/timbuktu-docs.yaml` carried no reference answers at all, so
+  `--stage both --judge` scored retrieval and reported no generation half —
+  indistinguishable, on the page, from a model that answered nothing.
+- That set now carries an `answer` and a `must_include` per case, and a test
+  loads it and asserts every case is scorable by both stages. Nothing had ever
+  loaded it, which is how it lost a stage unnoticed.
+
+**Roadmap #28 is answered on evidence, not abandoned.** What was measured is
+this loop, on this corpus, with this model: retrieve → name what is missing →
+retrieve → fuse. A different shape — reranking the union rather than fusing it,
+or a corpus whose ceiling leaves room for a second opinion — is a different
+question, and would need its own criterion written before the work.
+
 ### D13. Appends are transactional
 
 `UNIQUE(session_id, turn_index)` plus `MAX(turn_index)+1` computed inside the

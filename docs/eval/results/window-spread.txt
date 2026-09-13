@@ -1,0 +1,16 @@
+timbuktu-docs — 3 runs, 24 cases each
+  mode hybrid   top 5   rewrite window
+  embedding mlx/mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+  host fritznew.local
+
+  metric              mean     min     max   stddev     span
+  hit@5              0.375   0.375   0.375    0.000    0.000
+  recall@5           0.354   0.354   0.354    0.000    0.000
+  precision@5        0.083   0.083   0.083    0.000    0.000
+  mrr                0.238   0.238   0.238    0.000    0.000
+  ndcg@5             0.264   0.264   0.264    0.000    0.000
+  latency median       260     256     267        6       11   ms
+  planning median        0       0       0        0        0   ms
+
+  note: 24 cases, so one case moving is ±0.042 on hit
+  every metric identical across 3 runs — nothing here varies

@@ -45,8 +45,9 @@ so labelling one over the other would measure how the set was written rather
 than how retrieval performs.
 
 ```bash
-make eval-ingest      # init + ingest + doctor, into ~/.tbuk-eval
-make eval-defaults    # the five sweeps, into docs/eval/results/*.json
+make eval-ingest           # init + ingest + doctor, into ~/.tbuk-eval
+make eval-defaults         # the five sweeps, into docs/eval/results/*.json
+make eval-condense-spread  # condense ×3, and window as the control (#173)
 ```
 
 Both targets use `~/.tbuk-eval` — a root of its own, so the measurement corpus
@@ -126,7 +127,7 @@ default whatever it does to MRR.
 | `gold` (the ceiling) | nothing beyond the labels |
 | `condense` | one model call per case |
 | `expand3` | one model call per case, plus a search per wording |
-| generation, `--judge` | one or two model calls per case |
+| generation, `--judge` | one or two model calls per case; needs `answer` / `must_include` on the cases. `make eval-generation`, and `make eval-generation-spread` for its variance |
 
 Ingesting the corpus needs the embedding server whichever row you want, because
 every chunk is embedded on the way in. "Free" means free of a *model* call at
@@ -206,9 +207,22 @@ an identity on a question with nothing behind it.
 
 ### Generation
 
-Not run. `--stage both` costs a model call a case and `--judge` another, and
-nothing about #24 or #25 turns on them. The retrieval half is what the two
-deferred defaults are about.
+Not run at the time those numbers were recorded, and it could not have been:
+the set carried **no reference answers at all**. `--stage both --judge` over it
+scored the retrieval half normally and reported no generation block — which on
+the page is indistinguishable from a model that answered nothing, and which is
+exactly how one `--hops 0` baseline run was spent finding out.
+
+Two things changed after that. Every case now carries an `answer` (the
+reference the judge marks correctness against) and a `must_include` list (short
+substrings a correct answer has to contain, scored without a model at all), and
+`tbuk eval` **refuses** a generation run over a set with nothing to mark against
+rather than reporting an empty half. A set where only some cases are scorable
+still runs — that is a partial set, and the skipped list records it.
+
+So the generation half is now runnable. Nothing about #24 or #25 turns on it —
+those were settled on retrieval — but [#161](../../../../issues/161)'s kill
+criterion is stated in answer correctness, and this is what it needs.
 
 ---
 
@@ -226,15 +240,18 @@ hit — the half of the set where a rewrite was supposed to be a no-op. A model
 asked to restate a standalone question is apparently cleaning it up in ways
 retrieval likes.
 
-Both readings come from a single run, and `condense` is the one knob here whose
-output is not deterministic. Sampling its variance is the obvious next thing to
-do, and it is what would turn "stays off, and here is an unexplained gain
-elsewhere" into a decision about the gain itself.
+Both readings came from a single run. Sampling that run's variance was the
+obvious next thing to do, and it has been done: three runs, spread zero — the
+rewrite is deterministic here — and the gain, read case by case, turns out to be
+one synonym swap and one capital letter. It is not the model cleaning up a
+question. See [Sampling `condense`'s variance](#sampling-condenses-variance-173).
 
-That is a real effect and a different feature from the one #159 describes.
-Flipping the default on it would be flipping it for a reason nobody stated and
-nobody measured against. So `condense` stays off, and the control-half gain is
-worth an issue of its own rather than a silent reinterpretation of this one.
+That looked like a real effect and a different feature from the one #159
+describes. Flipping the default on it would have been flipping it for a reason
+nobody stated and nobody measured against. So `condense` stays off — and the
+control-half gain got an issue of its own ([#173](../../../../issues/173))
+rather than a silent reinterpretation of this one. That issue is now answered
+below, and the answer is that the gain is two cases of surface-form luck.
 
 ### #25 / [#160](../../../../issues/160) — `expand: N` stays off
 
@@ -285,9 +302,369 @@ report.
 The practical consequence: **these decisions rest on one run each**, reproduced
 exactly rather than corroborated by an independent sample. For a knob whose
 output is deterministic (`window`, `off`, `gold`) that is the whole story. For
-`condense`, whose rewrite comes from a model, it is not: a second and third run
-would sample its variance, and nobody has. The direction is clear enough to act
-on and the effect sizes are not.
+`condense`, whose rewrite comes from a model, it was not — until it was
+sampled. It has been now, three times: the spread is **zero**, because the model
+rewrites deterministically at this temperature. See [Sampling `condense`'s
+variance](#sampling-condenses-variance-173) below, which also explains the
+single-shot gain and finds it is not what anybody assumed.
+
+---
+
+## A rubric edit is an instrument change ([#161](../../../../issues/161) fallout)
+
+Dropping the judge's `faithfulness` axis had a consequence nobody predicted and
+nothing would have caught.
+
+`results/generation.json` and `results/hops0.json` score **byte-identical
+answers** — `includes 0.500` and `groundedness 0.6854711348842667` agree to the
+last digit either side, and both are arithmetic over the completion, so the
+model wrote the same 24 answers both times. Same judge model, too. Only the
+grading instructions changed:
+
+| | judge with 2 axes | judge with 1 axis |
+|---|---|---|
+| correctness | 0.783 | **0.438** |
+| score points, 0–2 scale | 36 over 23 answers | 21 over 24 answers |
+| includes | 0.500 | 0.500 |
+| groundedness | 0.685 | 0.685 |
+
+**−0.345 on the headline, from editing the prompt.** The likely mechanism is
+that with two axes the judge had somewhere to put "right, but not well
+supported" — correctness 2, faithfulness 1, fifteen times over. Collapse the
+rubric to one axis and that nuance has nowhere to go but down.
+
+`Run.Judge` recorded the model and nothing else, so two runs across the change
+diffed as though they shared an instrument. They did not. `Run.JudgeRubric` now
+carries a short fingerprint of `JudgeSystem`, printed beside the model
+(`judge mlx/… (rubric 3f9c1a20)`), and both `Diff` and `Spread` warn when it
+moves. The prompt being compiled into the binary stops two runs of *one build*
+disagreeing; it does nothing across builds, which is where this happened.
+
+**What this does and does not invalidate.** Every judged number recorded before
+the change belongs to the two-axis rubric. #161's kill criterion is unaffected —
+both sides of that A/B were scored by the same rubric on the same day, and
+correctness moved +0.00 between them — so the loop was killed on a valid
+comparison. But `0.783` is not comparable to anything measured now, and the
+current baseline for judged correctness on this corpus is **0.438**.
+
+**Corroborated.** That figure comes from two independent three-run sweeps on
+separate days — six runs — each reporting `span 0.000` on every quality metric,
+`judged 24` every time, and `correctness 0.438` to the digit. The judge is as
+deterministic at this temperature as `condense` turned out to be, so a single
+judged run of *one rubric* is reproducible; it is only across a rubric edit that
+the number moves. `results/generation-spread.txt` is the second of the two, and
+the first to carry `(rubric 3ce9d82f)` in its header.
+
+The two sweeps also differ in every latency figure and in nothing else —
+generation median 8337ms then 6278ms, retrieval 410ms then 378ms, sixteen
+minutes of wall clock then twelve — which is this directory's standing claim
+about latency demonstrated rather than asserted: it moves with the machine, and
+the quality numbers do not move with it.
+
+One gap worth knowing: `results/generation.json`, the single-run baseline, was
+produced before the fingerprint existed and so records no `judge_rubric`. It
+was in fact scored by `3ce9d82f` — its `correctness 0.4375` matches both sweeps
+— but the file cannot say so itself. Re-run `make eval-generation` if you want a
+baseline that names its own instrument.
+
+**The deterministic scores did not move at all**, which is the argument for
+having them. `includes` and `groundedness` were identical across a judge change
+that halved the judged number, and that is the whole reason this harness scores
+what it can without a model before it scores what it cannot.
+
+---
+
+## The multi-hop loop, measured and removed ([#161](../../../../issues/161))
+
+Roadmap #28 asked whether `ask` should retrieve in rounds — retrieve, let the
+model name what is still missing, retrieve again, fuse — and carried a kill
+criterion written before the work started: **two hops must beat one on answer
+correctness at no worse than 2× median latency, or the loop does not ship.**
+
+It was built, measured, and taken back out.
+
+### The A/B
+
+Both sides `--stage both --judge` over all 24 cases, same corpus, same
+instrument: `Qwen3-Embedding-0.6B-4bit-DWQ` retrieving,
+`Qwen2.5-3B-Instruct-4bit` answering and judging, `fritznew.local`, 2026-09-12.
+The baseline is committed as `results/hops0.json`; the `--hops 2` side was run
+with `--baseline` against it and read off the printed diff.
+
+**That file is a historical artifact, and three things in it no longer mean what
+they say.** `--hops` does not exist any more, so the name records which side of
+a dead A/B it was and nothing reproducible — the JSON itself never carried the
+hop count, since zero is omitted. Its `faithfulness: 0.413` is the axis that was
+removed on this run's own evidence. And its `citations: 0` over eight emitted is
+not a citation failure: every one of the eight was a config key or a dotted
+identifier, which is [#174](../../../../issues/174). What the file is still good
+for is what it was: the generation stage running end to end over this corpus,
+and the `correctness` and latency the criterion turned on. It also still works
+as a `--baseline`, since an unknown field is ignored on the way in.
+
+| | `--hops 0` | `--hops 2` | delta |
+|---|---|---|---|
+| **correctness** | 0.783 | 0.78 | **+0.00** |
+| **latency median** | 412ms | 1273ms | **+861ms (3.1×)** |
+| latency p95 | 438ms | 3358ms | +2920ms |
+| hit@5 | 0.375 | 0.29 | −0.08 |
+| recall@5 | 0.354 | 0.27 | −0.08 |
+| MRR | 0.238 | 0.22 | −0.02 |
+| nDCG@5 | 0.264 | 0.23 | −0.04 |
+| includes | 0.50 | 0.46 | −0.04 |
+| faithfulness † | 0.413 | 0.39 | −0.02 |
+| groundedness | 0.685 | 0.70 | +0.01 |
+| generation latency median | 8481ms | 8730ms | +250ms |
+
+† The judged `faithfulness` axis was **removed** after this run, on its own
+evidence — see below. The row is kept because it is what the run reported.
+
+**No case degraded**, so every hop really ran and the numbers are the loop's
+own: the +861ms is two model calls a question, which is what it cost. A run
+whose hops had all timed out would have shown the baseline's latency and the
+baseline's scores, and the report says when that happens.
+
+### It failed both limbs, and made retrieval worse
+
+Correctness did not move at all, and the latency was 3.1× against a cap of 2×.
+Nothing else moved up either: every retrieval metric fell, and so did the
+deterministic `includes` score that depends on them.
+
+That is the design working exactly as documented and being wrong for this
+corpus. Every round re-runs **all** queries and fuses them, deliberately — RRF
+is not associative, so folding one round's ranking into the next would score a
+chunk by its rank in a fusion rather than its rank in a search. The cost of
+doing it correctly is that the follow-up query brings a full ranked list of its
+own, and the fusion averages the two: a passage that was first on the question
+actually asked gets pushed below the cutoff by agreement with a query that was
+never the question.
+
+Where the ceiling is **0.455 hit@5** there is not enough signal for a second
+opinion to add to. It only dilutes the first. The headroom on this corpus is
+where it always was — chunking, ranking, fusion (#8, #27, #29) — and a loop over
+a retriever that finds the right passage less than half the time inherits that
+problem twice.
+
+### What came out, and what stayed
+
+`rewrite.Hop`, `cli.RetrieveWithHops`, `--hops` on `ask`/`chat`/`eval` and the
+manifest's `retrieval.max_hops` were removed. `search.FuseRRF` and the
+`Planner` interface stay: they belong to [#160](../../../../issues/160) and
+[#159](../../../../issues/159), and neither depended on the loop.
+
+Two things the milestone left behind, both worth keeping:
+
+- **`tbuk eval` refuses a generation run over a set with nothing to mark an
+  answer against.** The first `--hops 0` baseline was spent discovering that
+  this label set carried no reference answers at all, so `--stage both --judge`
+  scored the retrieval half and reported no generation block — on the page,
+  indistinguishable from a model that answered nothing.
+- **The set carries an `answer` and a `must_include` per case**, and a test
+  loads it and asserts every case is scorable by both stages. Nothing had ever
+  loaded it, which is how it lost a whole stage unnoticed.
+
+### The judged `faithfulness` axis, removed on the same run's evidence
+
+The judge graded two axes, correctness and faithfulness. Over the 23 cases it
+managed to score, faithfulness came out like this:
+
+| correctness | faithfulness | cases |
+|---|---|---|
+| 2 | 1 | 15 |
+| 1 | 1 | 4 |
+| 0 | 0 | 3 |
+| 2 | 0 | 1 |
+
+**It never scored 2. Not once.** Nineteen of twenty-three landed on "partly",
+which is the whole of the reported 0.413 — that is 0.826 on a 0–2 scale, not
+"41% of claims are supported". Correctness, from the same judge on the same
+answers, awarded 2 sixteen times, so this is not a model that cannot say
+"fully"; it is a model that never says it about *support*, including on the
+sixteen answers it had just called fully correct against a reference drawn from
+the very passages the answer was shown.
+
+One case shows the rubric being misread outright. `conversation-followup`
+scored correctness 2 and faithfulness 0, with the reason:
+
+> not at all faithful to the question asked
+
+That is relevance, which `JudgeSystem` forbids in as many words — *grade support
+only, never correctness* — and it warns that an answer wrong in exactly the way
+the passages are wrong is still faithful.
+
+The instrument explains the rest: a 3B model marking a two-axis JSON rubric on
+answers it also wrote, and those answers are the `qa` template's ≤280-character
+telegraphic fragments, which are the hardest possible shape to trace claim by
+claim back to a passage. A cautious judge lands on "partly" and stays there.
+
+So the axis is gone. `groundedness` — the share of the answer's distinct content
+words that appear in the passages it was shown — answers the same question with
+arithmetic, needs no model, and is reproducible. Nothing was lost that a small
+judge could be trusted to say.
+
+Worth noting for the record: faithfulness moved −0.02 across the A/B, well
+inside this noise, so it contributed nothing to the decision either way. The
+criterion turned on correctness and latency, which is the pair that was written
+down in advance.
+
+### What this does not settle
+
+What was measured is *this* loop, on *this* corpus, with *this* model. A
+different shape — reranking the union rather than fusing it, or a corpus whose
+ceiling leaves room for a second opinion to find something — is a different
+question, and would want its own criterion written before the work rather than
+after. #28 is answered on evidence, not abandoned.
+
+---
+
+## Sampling `condense`'s variance ([#173](../../../../issues/173))
+
+The tables above rest on one run each. For `off`, `window` and `gold` that is
+the whole story — they are deterministic, and a second run returns the same
+digits. `condense` is the one row a model wrote, and its variance had never been
+sampled. It has now.
+
+Thirteen single-shot cases means one case moving is ±0.077 on hit. The gain the
+decision above notes — 0.538 to 0.692 on the control half — is two cases, so
+"the rewrite helps standalone questions" and "two cases landed differently"
+were the same observation until something told them apart.
+
+Two things do. The **spread** says whether the two cases land the same way
+twice. The **queries** say what the rewrite did to them. Both are below, and
+they do not agree with what the issue expected.
+
+### Running it
+
+```bash
+make eval-ingest           # once, if ~/.tbuk-eval is not already built
+make eval-condense-spread  # RUNS=3 by default
+```
+
+The generation stage has targets of its own, and they are the expensive ones —
+a model call to answer each case and another to mark it:
+
+```bash
+make eval-generation         # one run, into results/generation.json
+make eval-generation-spread  # three runs, reporting the spread instead
+```
+
+`--repeat` summarises **both** halves. A judged correctness is model-written,
+and everything this directory has learned about model-written numbers says a
+single run of one is an anecdote until its spread is known.
+
+It writes four files into `results/`: `condense-spread.{json,txt}` and
+`window-spread.{json,txt}`. No ingest happens between the runs — `tbuk eval`
+only reads — so the corpus they disagree about is one corpus, and the report's
+instrument block is what says so.
+
+**`window-spread` is the control, and it is read first.** The window is
+deterministic, so its spread must be exactly zero on hit, recall, precision,
+MRR and nDCG. Anything else means the corpus or the index moved underneath the
+runs, and the `condense` column measures that rather than the planner.
+
+The JSON carries a row per case — the question, the distinct queries it
+actually ran on, and its hit in each run — so the single-shot half can be
+re-split out of it afterwards, and so a case that moved can be read against the
+query it moved on. That is what answers the second half of #173: whether the
+rewrite is dropping interrogative framing and leaving noun phrases closer to
+the prose being searched, or doing something else entirely.
+
+### Results
+
+Recorded 2026-09-12 from `results/condense-spread.json` and
+`results/window-spread.json`, three runs each, no ingest between them. Same
+instrument as the tables above — `Qwen3-Embedding-0.6B-4bit-DWQ`,
+`Qwen2.5-3B-Instruct-4bit`, `fritznew.local` — and the single-run figures
+reproduce exactly, which is the first thing the spread says.
+
+**`condense`, 24 cases, three runs:**
+
+| metric | mean | min | max | stddev | span |
+|---|---|---|---|---|---|
+| hit@5 | 0.458 | 0.458 | 0.458 | 0.000 | **0.000** |
+| recall@5 | 0.417 | 0.417 | 0.417 | 0.000 | **0.000** |
+| P@5 | 0.092 | 0.092 | 0.092 | 0.000 | **0.000** |
+| MRR | 0.258 | 0.258 | 0.258 | 0.000 | **0.000** |
+| nDCG@5 | 0.291 | 0.291 | 0.291 | 0.000 | **0.000** |
+| latency median | 261ms | 260ms | 262ms | 1.4 | 4ms |
+| planning median | 457ms | 455ms | 460ms | 3.0 | 5ms |
+
+`degraded_per_run: [0, 0, 0]` — no case fell back, so this is a `condense`
+measurement and not the window's numbers wearing its name. **Zero cases moved
+between runs, and all 24 produced exactly one distinct plan across the three.**
+The model wrote the identical rewrite every time.
+
+**The control, `window`, three runs:** span `0.000` on hit, recall, precision,
+MRR and nDCG, as it must be. Only latency moves (median 252–258ms), which is
+the machine and not the retriever.
+
+**The two halves**, re-split from the per-case rows. Valid to read off the
+single-run reports because the spread is zero and the instrument block matches:
+
+| | `window` | `condense` | delta |
+|---|---|---|---|
+| single-shot (13), hit@5 | 0.538 | **0.692** | **+0.154** |
+| single-shot, MRR | 0.385 | 0.412 | +0.027 |
+| single-shot, nDCG@5 | 0.410 | 0.465 | +0.055 |
+| follow-ups (11), hit@5 | 0.182 | 0.182 | 0.000 |
+| follow-ups, MRR | 0.064 | 0.076 | +0.012 |
+
+### What it means
+
+**The variance is not small. It is zero.** Greedy decoding at the template's
+temperature, on this model and this hardware, is deterministic: the same
+question produces the same rewrite, three times out of three, for every case in
+the set. So the question #173 asked — *does the gain survive resampling?* — has
+an answer, and it is that there was never anything to resample. The +0.154 on
+the control half is exactly as reproducible as the deterministic rows are.
+
+That closes item 1. **Item 2 is where it gets interesting, and the guess in the
+issue is wrong.**
+
+The guess was that `condense` "drops interrogative framing and leaves noun
+phrases closer to the prose being searched". It does not. Every one of the 13
+single-shot rewrites is still a question, and **4 of the 13 differ from what was
+asked only in capitalisation.** The two cases that flip from miss to hit:
+
+| case | asked | ran on |
+|---|---|---|
+| `context-budget` | what happens when the prompt is too **big** for the model? | What happens when the prompt is too **large** for the model? |
+| `kebab-case-queries` | **w**hy does searching for a hyphenated word behave oddly? | **W**hy does searching for a hyphenated word behave oddly? |
+
+The second one is the whole finding. Nothing changed but a capital letter.
+`chunks_fts` is built with `unicode61`, which case-folds, so the keyword leg
+returned the identical ranking — **the flip came from the vector leg reacting to
+a capital W.** The first is a one-word synonym swap that happens to match the
+corpus's own wording.
+
+So the "single-shot gain" is two cases: one lexical luck, one surface-form
+perturbation of the embedding. Not a model cleaning up a question.
+
+**What that settles.** #173 item 3 asked whether `condense` is really a
+different feature — "clean the question" rather than "resolve the follow-up" —
+deserving its own name and its own default. On this evidence, no. Cleaning is
+not what it is doing. What it is doing on standalone questions is re-rolling the
+vector leg with a slightly different surface form, at **457ms of planning per
+question**, which is where `--rewrite condense` costs 2.7× the search it
+precedes. A knob that perturbs the query and sometimes lands better is not a
+feature; it is a coin with a latency bill.
+
+`condense` stays off, and the unexplained gain recorded above is now explained
+rather than outstanding. #24 and #25 are unaffected — both were already settled
+on the follow-up numbers, where `condense` ties the window exactly.
+
+### The one run that would confirm it
+
+Re-run both sweeps at `--mode keyword`. The keyword leg case-folds, so:
+
+- `kebab-case-queries` **must** score identically under both modes. If it still
+  flips, the mechanism is not what is written above.
+- `context-budget` may still flip — `big` and `large` are genuinely different
+  tokens to BM25.
+
+That is two model-free runs for `window` and two cheap ones for `condense`, and
+it separates "the embedder is surface-form sensitive" from "the rewrite found
+better words" without arguing about it.
 
 ---
 

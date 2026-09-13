@@ -2179,6 +2179,54 @@ my-notes — this run against the baseline
 
 A `+` means this run is better. Now you know, rather than suspect.
 
+### Running the same thing three times
+
+Most of what `tbuk eval` measures is deterministic: the same corpus and the
+same settings give you the same report, to the last digit. `--rewrite condense`
+and `--expand N` are not, because a model writes the query, and a model asked
+the same question twice does not always write the same thing. Nor is
+`--judge`: a judged correctness is a model marking an answer, and it can mark
+the same answer differently on Tuesday.
+
+`--repeat` runs the sweep several times and shows you the spread instead of one
+run's numbers:
+
+```bash
+tbuk eval my-notes --rewrite condense --repeat 3
+```
+
+```
+my-notes — 3 runs, 24 cases each
+  mode hybrid   top 5   rewrite condense
+
+  metric              mean     min     max   stddev     span
+  hit@5              0.458   0.417   0.500    0.042    0.083
+  mrr                0.258   0.247   0.271    0.012    0.024
+
+  note: 24 cases, so one case moving is ±0.042 on hit
+
+  2 of 24 cases changed between runs:
+    threads-and-sessions          1.00 0.00 1.00
+      ran on: how does a session store its turns
+      ran on: session turn storage
+```
+
+If you scored answers as well — `--stage both --judge` — the spread covers that
+half too: includes, citations, groundedness, correctness, and how many answers
+the judge actually managed to mark each time. A judge that fails a different
+case each run is worth seeing, because it moves every average above it.
+
+Nothing is re-ingested between the runs, so the corpus they disagree about is
+one corpus. If the spread is as large as the difference you were about to act
+on, you have not measured a difference yet. On a deterministic setting the
+spread comes out at exactly zero, which is a useful thing to check: anything
+else means something moved underneath the runs.
+
+This repository keeps two ready-made sweeps of its own documentation, if you
+want to see the shape of one: `make eval-condense-spread` (cheap) and
+`make eval-generation-spread` (a model call per answer and another per mark, so
+minutes rather than seconds).
+
 ### Trying it without an AI model running
 
 `--mode keyword` searches with the keyword index only, so it needs no embedding
@@ -2305,20 +2353,26 @@ tbuk eval my-notes --stage generation --judge --verbose
 ```
   generation — 4 answers
     includes 1.00   citations 0.75 (of 3)   groundedness 0.61
-    correctness 0.88   faithfulness 0.75   (4 of 4 judged)
+    correctness 0.88   (4 of 4 judged)
     latency  median 1840ms   p95 3100ms
 
   judge:
     alpha-decision
       correctness 2 — names PostgreSQL and the reason, as the reference does
-      faithfulness 1 — the JSON claim is not in the retrieved passages
 ```
 
-The judge grades each answer twice, 0–2, and gives a reason both times.
-**Correctness** is against your `answer:`; **faithfulness** is against the
-passages, and it is deliberately blind to correctness — an answer that is right
-for a reason your documents never gave is unfaithful, and that is a real problem
-even though nothing about it is wrong.
+The judge grades each answer 0–2 and gives a reason. **Correctness** is against
+your `answer:` — does it say what the reference says, judged on the facts and
+not the wording.
+
+It used to grade a second axis, **faithfulness**: is every claim supported by
+the passages, blind to whether it is right. That was dropped. Over 23 cases on
+this repository's own documentation it never once awarded full marks, 19 landed
+on "partly", and at least one was graded on relevance to the question, which its
+own rubric forbids. A number whose top score is never used is not ranking
+anything. **Groundedness** asks the same question — how much of the answer
+appears in the passages — with arithmetic instead of a model, so nothing was
+lost by dropping it.
 
 Four things worth knowing before you trust the number:
 

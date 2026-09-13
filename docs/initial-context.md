@@ -22,7 +22,7 @@ internal/
   ingest/           Ingester, FileExtractor, DefaultFileExtractor; IngestFile(), IngestDir()
   prompts/          TemplateDir, Load(), List(), Render(); Manifest (YAML); TemplateData
   conversation/     Thread, Turn; Replay(turns, limit), Messages(system, user, turns) — pure, no DB/LLM/cobra
-  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff — retrieval scoring; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture (with ChunkSpec), LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
+  eval/             Set, Case, Label; ParseSet/LoadSet, MatchesPath/MatchesText, Score, Aggregate, Report, Diff, Spread/NewSpread — retrieval scoring and repeated-run sampling; ScoreAnswer, AggregateGen, Judge — generation scoring; Fixture (with ChunkSpec), LoadFixture, VectorKey, CacheEmbedder, FitLSA — frozen vectors for a CI run with no embedding server. No DB, no cobra; the judge is the one model call, behind a ChatFn seam
   rewrite/          Planner interface; Window (deterministic), Condense (one LLM call), Expand (N wordings, one call) — turn (thread, question) into the queries retrieval runs
   retrieval/        Retriever, RetrievedChunk (with Citation); Retrieve, RetrieveMany (fuses several queries); HybridSearcher interface
   search/           Searcher; Vector, Keyword, Metadata, Hybrid methods; FuseRRF; CheckFTS5; parseQuery (phrases, exclusions)
@@ -1085,6 +1085,17 @@ Each stage has its own skip rule, so a case carrying only one half is scored by
 that half rather than counted as a zero in the other. The denominators
 therefore differ between the two blocks of one report, and both are printed.
 
+A set where **no** case can be scored by the stage asked for is refused, not
+reported. `checkScorableAnswers` is the generation half's counterpart to
+`checkIndexedLabels`: under `--stage both`, a set with no `answer` and no
+`must_include` anywhere scores its retrieval half normally and reports no
+generation block at all, which on the page is indistinguishable from a model
+that answered nothing — and it costs no model call either, since every case
+falls out before the answer is asked for, so nothing announces that the stage
+the user named measured nothing. A run was spent on exactly that. Some cases
+scorable and some not is a partial set and still runs; the skipped list records
+the rest.
+
 `tbuk eval` reads the knowledge base and writes nothing to it. A case's thread
 is replayed to the query planner exactly as a stored one would be and is never
 persisted — a run that left conversation threads behind would change the corpus
@@ -1190,8 +1201,14 @@ everything it was asked for.
 | includes | `must_include` substrings present ÷ required (folded like `contains`) |
 | citations | citations the answer emitted that resolve to an indexed document ÷ emitted |
 | groundedness | distinct content words of the answer appearing in the passages |
-| correctness | judge, 0–2 against `answer:`, rescaled (needs `--judge`) |
-| faithfulness | judge, 0–2 against the passages, rescaled (needs `--judge`) |
+| correctness | judge, 0–2 against `answer:`, rescaled (needs `--judge`) — the only judged axis |
+
+A second judged axis, `faithfulness` (0–2 for whether every claim was supported
+by the passages), was removed after one real run: across 23 cases it never
+scored 2, 19 of them scored 1, and one was graded on relevance to the question
+rather than on support, which `JudgeSystem` forbids explicitly. `groundedness`
+answers the same question deterministically, so the axis bought nothing a small
+judge could be trusted to say. `docs/eval/README.md` records the run.
 
 `ExtractCitations` reads a citation as a filename-shaped token — a two-to-eight
 character extension carrying a letter, on a base of at least two — which
@@ -1282,18 +1299,59 @@ model call under `condense` or an expansion, nothing under the deterministic
 modes. It used to be untimed entirely, the planner running before the stopwatch
 started, which made `condense` report the same latency as the free `window` and
 left #28's kill criterion — stated in latency — unmeasurable. Kept separate
-rather than folded into `Latency` because the criterion needs the sum while a
-reader deciding what to fix needs to know which half is slow.
+rather than folded into `Latency` because such a criterion needs the sum while
+a reader deciding what to fix needs to know which half is slow. #28 was
+subsequently measured on this and the multi-hop loop removed
+(`docs/eval/README.md`); the split stands on its own merits.
 
 `Diff(current, baseline)` subtracts two reports, because "A/B'd with evidence"
 otherwise depends on someone subtracting nDCG in their head, and they stop by
 Thursday. A baseline from a different label set is an error — comparing two
 corpora is not a comparison. A swept knob is never a warning (sweeping is the
-point); a different corpus size, embedder, model or judge is. The judged axes
-are diffed only when both runs judged: a run without `--judge` scores them zero,
+point); a different corpus size, embedder, model or judge is. The judged axis
+is diffed only when both runs judged: a run without `--judge` scores it zero,
 and a zero minus a zero says nothing while looking exactly like a delta that
 says something.
 
+
+### Repeated runs
+
+`Diff` compares two settings. `Spread` compares one setting with itself:
+`NewSpread(reports)` summarises repeated runs of the same sweep, and
+`tbuk eval --repeat N` is what produces them. Mean, min, max, sample standard
+deviation and span per metric, with the runs kept alongside — three numbers are
+few enough to read, and a mean over three samples hides whether the middle run
+sat between the other two or on top of one of them.
+
+Fewer than two runs is an error rather than a degenerate spread: a report of one
+run with a standard deviation of zero states something false in the language of
+a measurement. Runs over two different label sets are an error for the same
+reason `Diff` refuses them. Everything else that makes two runs incomparable —
+a different embedder, model, host, or a swept knob — is a warning carried with
+the numbers, as is any run whose query planning degraded.
+
+**It exists because most of this harness is deterministic and some of it is
+not.** `window`, `off` and `gold` return the same report twice, so repeating
+them proves only that. The knobs that spend a model do not: a `condense` sweep
+is a model writing a query per case, and a judged `correctness` is a model
+marking an answer. A single run of either is a sample nobody has sized. Nothing
+is ingested between runs — eval only reads — so the corpus the runs disagree
+about is one corpus.
+
+`Spread.Cases` keeps a row per case, not just the ones that moved: the question,
+the distinct query plans it ran on, its hit per run, and its judged correctness
+per run when every run marked it. A set whose halves are read apart — follow-ups
+against single-shot — can only be re-split from the rows, and a case whose
+retrieval never moved while the judge changed its mind is invisible in an
+average. `Spread.Generation` mirrors the report's own rule: present only when
+**every** run scored the stage, since a run that scored no answers and one that
+did are not two samples of one measurement. `Judged` is a row of its own there,
+because a judge that fails a different case each run is instability worth seeing
+and it moves every average above it.
+
+`Stable()` covers the quality metrics of both halves and deliberately excludes
+latency, which moves with the machine on every run of everything — folding it in
+would make every spread unstable and the word useless.
 
 ### Frozen vectors
 
@@ -1594,7 +1652,7 @@ tbuk doctor                    probe config, DB (with doc/chunk/thread counts), 
 tbuk preprocess <path>         extract text → save to extracted store (--dry-run, --output-dir)
 tbuk ingest <path>             read extracted text → chunk → embed → store (--force, --verbose)
 tbuk search <query>            search chunks; query read as an expression — "phrase", -exclude (--mode vector|keyword|hybrid, --top N, --min-score F, --format text|json)
-tbuk eval [set]                score retrieval and generation against a labelled set (--stage retrieval|generation|both, --judge, --mode, --top, --rewrite, --expand, --gold, --case, --baseline, --format text|json, --verbose); reads the KB, writes nothing to it
+tbuk eval [set]                score retrieval and generation against a labelled set (--stage retrieval|generation|both, --judge, --mode, --top, --rewrite, --expand, --gold, --case, --baseline, --repeat N, --format text|json, --verbose); reads the KB, writes nothing to it
 tbuk find <key=value>...       find docs by metadata filters (--limit N, --format text|json)
 tbuk meta set <path> k=v...    attach metadata key=value pairs to a document
 tbuk meta list <path>          list all metadata for a document

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -657,8 +658,7 @@ cases:
 		calls++
 		ch := make(chan llm.Token, 1)
 		if calls == 1 {
-			ch <- llm.Token{Text: `{"correctness": 2, "correctness_reason": "right",
-				"faithfulness": 0, "faithfulness_reason": "unsupported"}`, Done: true}
+			ch <- llm.Token{Text: `{"correctness": 2, "correctness_reason": "right"}`, Done: true}
 		} else {
 			ch <- llm.Token{Text: "I think it's fine", Done: true} // not a verdict
 		}
@@ -681,8 +681,8 @@ cases:
 		t.Fatalf("judged = %d of 2, want 1 — the malformed verdict is unjudged, not zero", g.Judged)
 	}
 	// Averaged over the one case actually judged, not over both.
-	if g.Correctness != 1 || g.Faithfulness != 0 {
-		t.Errorf("correctness/faithfulness = %.2f/%.2f, want 1.00/0.00", g.Correctness, g.Faithfulness)
+	if g.Correctness != 1 {
+		t.Errorf("correctness = %.2f, want 1.00", g.Correctness)
 	}
 	if report.Cases[0].Judge == nil || report.Cases[0].Judge.Correctness.Reason != "right" {
 		t.Errorf("case a judge = %+v, want the verdict and its reason", report.Cases[0].Judge)
@@ -960,5 +960,186 @@ func TestRunEval_noPlannerCostsNoPlanningTime(t *testing.T) {
 	}
 	if report.PlanLatency.MedianMS > 5 {
 		t.Errorf("plan latency = %.1fms with no planner", report.PlanLatency.MedianMS)
+	}
+}
+
+// varyingPlanner writes a different query every call, which is what a model
+// asked to rewrite the same question three times actually does.
+type varyingPlanner struct{ n int }
+
+func (p *varyingPlanner) Queries(_ context.Context, _ []conversation.Turn, question string) ([]string, error) {
+	p.n++
+	return []string{fmt.Sprintf("%s (take %d)", question, p.n)}, nil
+}
+
+func TestRunEvalRepeated_runsTheWholeSweepEachTime(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet)
+
+	spread, reports, err := cli.RunEvalRepeated(context.Background(), set,
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Rewrite: "condense"}, 3)
+	if err != nil {
+		t.Fatalf("RunEvalRepeated: %v", err)
+	}
+	if spread.Runs != 3 || len(reports) != 3 {
+		t.Fatalf("runs = %d, reports = %d, want 3 and 3", spread.Runs, len(reports))
+	}
+	// Two cases, three runs: the set is scored whole each time rather than
+	// once with the rewrite repeated.
+	if len(seen) != 6 {
+		t.Errorf("searches = %d, want 6", len(seen))
+	}
+	if spread.Set != "go-docs" {
+		t.Errorf("Set = %q", spread.Set)
+	}
+	// Nothing varies here, and a spread that says so is the useful answer.
+	if !spread.Stable() {
+		t.Errorf("a deterministic sweep should come out stable: %+v", spread.Metrics)
+	}
+}
+
+func TestRunEvalRepeated_needsMoreThanOneRun(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet)
+	for _, n := range []int{0, 1} {
+		if _, _, err := cli.RunEvalRepeated(context.Background(), set,
+			recordingRetriever(nil, &seen), cli.EvalOptions{Mode: "hybrid", TopK: 5}, n); err == nil {
+			t.Errorf("n = %d: want an error, one run is not a spread", n)
+		}
+	}
+}
+
+func TestRunEvalRepeated_namesTheCasesThatMoved(t *testing.T) {
+	set := evalSet(t, twoCaseSet)
+	// The labelled document comes back on the first run and not on the second:
+	// one case flips, which on a two-case set is half the headline.
+	run := 0
+	retrieve := func(context.Context, []string, int, map[string]string) ([]retrieval.RetrievedChunk, error) {
+		run++
+		if run <= 2 {
+			return []retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, nil
+		}
+		return nil, nil
+	}
+
+	spread, _, err := cli.RunEvalRepeated(context.Background(), set, retrieve,
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Rewrite: "condense", Planner: &varyingPlanner{}}, 2)
+	if err != nil {
+		t.Fatalf("RunEvalRepeated: %v", err)
+	}
+	if spread.Stable() {
+		t.Fatal("Stable() = true, but the first case scored 1 then 0")
+	}
+	if len(spread.Unstable()) != 1 || spread.Unstable()[0].ID != "slices" {
+		t.Fatalf("unstable = %+v, want the slices case", spread.Unstable())
+	}
+	// The queries are the point: a case that moved under a planner that wrote
+	// two different searches moved for a reason that can be read.
+	if len(spread.Unstable()[0].Queries) != 2 {
+		t.Errorf("queries = %v, want the two the planner wrote", spread.Unstable()[0].Queries)
+	}
+}
+
+func TestEvalSpreadOutput(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet)
+	spread, _, err := cli.RunEvalRepeated(context.Background(), set,
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5}, 2)
+	if err != nil {
+		t.Fatalf("RunEvalRepeated: %v", err)
+	}
+
+	t.Run("text", func(t *testing.T) {
+		var sb strings.Builder
+		if err := cli.EvalSpreadOutput(&sb, spread, "text"); err != nil {
+			t.Fatalf("EvalSpreadOutput: %v", err)
+		}
+		if !strings.Contains(sb.String(), "go-docs") || !strings.Contains(sb.String(), "stddev") {
+			t.Errorf("output = %s", sb.String())
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		var sb strings.Builder
+		if err := cli.EvalSpreadOutput(&sb, spread, "json"); err != nil {
+			t.Fatalf("EvalSpreadOutput: %v", err)
+		}
+		var back eval.Spread
+		if err := json.Unmarshal([]byte(sb.String()), &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if back.Runs != 2 {
+			t.Errorf("round-tripped runs = %d", back.Runs)
+		}
+	})
+
+	t.Run("unknown format", func(t *testing.T) {
+		if err := cli.EvalSpreadOutput(&strings.Builder{}, spread, "yaml"); err == nil {
+			t.Fatal("want an error")
+		}
+	})
+}
+
+// #28's kill criterion is "two hops beat one", which means the harness has to
+// be able to run two. The loop's extra searches land in the row's queries, so
+// a report says what each case actually retrieved on.
+// A run whose hops all failed is a single-shot run wearing the loop's name.
+// The default has to stay exactly what it was: one search on the planned query.
+// The failure this guard exists to prevent, seen in the wild: a label set with
+// no reference answers scored under --stage both reported a full retrieval half
+// and no generation block at all — indistinguishable, on the page, from a run
+// where the model answered nothing.
+func TestRunEval_refusesGenerationWithNothingToMarkAgainst(t *testing.T) {
+	var seen [][]string
+	set := evalSet(t, twoCaseSet) // relevant labels, no answer, no must_include
+
+	for _, stage := range []string{eval.StageGeneration, eval.StageBoth} {
+		t.Run(stage, func(t *testing.T) {
+			_, err := cli.RunEval(context.Background(), set,
+				recordingRetriever(nil, &seen),
+				cli.EvalOptions{
+					Mode: "hybrid", TopK: 5, Stage: stage,
+					Answer: fixedAnswer("anything at all"),
+				})
+			if err == nil {
+				t.Fatal("want an error: the generation half would be empty and read as a failure")
+			}
+			for _, want := range []string{"go-docs", "answer", "must_include"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// The guard is about the stage that was asked for. A retrieval run over a set
+// with no reference answers is the normal case and must stay silent.
+func TestRunEval_retrievalStageIgnoresMissingAnswers(t *testing.T) {
+	var seen [][]string
+	if _, err := cli.RunEval(context.Background(), evalSet(t, twoCaseSet),
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{Mode: "hybrid", TopK: 5, Stage: eval.StageRetrieval}); err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+}
+
+// Some cases scorable and some not is a partial set, not a broken one: it
+// scores what it can and the skipped list records the rest.
+func TestRunEval_partiallyScorableSetStillRuns(t *testing.T) {
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), evalSet(t, genSet),
+		recordingRetriever([]retrieval.RetrievedChunk{chunkAt("/n/go/slices.md")}, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageBoth,
+			Answer: fixedAnswer("append reallocates when len == cap."),
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if report.Generation == nil || report.Generation.Overall.Cases != 1 {
+		t.Errorf("Generation = %+v, want the one scorable case scored", report.Generation)
 	}
 }

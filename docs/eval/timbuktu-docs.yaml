@@ -29,6 +29,16 @@ cases:
       - path: README.md
         contains: oversized prompt fails locally
         grade: 2
+    answer: >-
+      `tbuk ask` bounds the whole prompt — system prompt, template, retrieved chunks
+      and question — against the model's context window before calling the provider,
+      so an oversized prompt fails locally with an actionable message rather than
+      remotely as an HTTP 4xx context-length error. The window is
+      `llm.context_tokens` (default 8192; 0 turns the guard off), and what is left
+      for the prompt is that window minus the answer's own budget.
+    must_include:
+      - context_tokens
+      - context window
 
   - id: reembed-after-model-change
     query: do I have to re-embed everything after changing the embedding model?
@@ -36,6 +46,14 @@ cases:
       - path: README.md
         contains: changes the vector dimension
         grade: 2
+    answer: >-
+      Yes. Changing `embedding.provider` or `embedding.model` changes the vector
+      dimension, and chunks already indexed stay at the old one — a state `tbuk
+      doctor` flags and that searches refuse to run against. `tbuk reindex` re-
+      embeds every document in one command, reading each from the raw archive.
+    must_include:
+      - tbuk reindex
+      - dimension
 
   - id: code-search-encoding
     query: how is source code indexed for search?
@@ -43,12 +61,29 @@ cases:
       - path: README.md
         contains: the comments, the identifiers, and the strings
         grade: 2
+    answer: >-
+      Each chunk is stored twice. `chunks.text` stays faithful to the document,
+      while `chunks.search_text` holds a reduced encoding: prose passes through as
+      it stands, and a code region becomes its comments, its identifiers and the
+      contents of its string literals, with keywords and operators dropped. The
+      keyword index is built from `search_text`.
+    must_include:
+      - search_text
+      - identifiers
 
   - id: kebab-case-queries
     query: why does searching for a hyphenated word behave oddly?
     relevant:
       - path: README.md
         contains: kebab-case name is therefore indexed as its words
+    answer: >-
+      The FTS5 index keeps `_` inside a token but treats `-` as a separator, so a
+      kebab-case name is indexed as its separate words and `check-ci` matches those
+      words adjacent and in order. A leading `-` means "exclude" only at the start
+      of a word, so `check-ci` still searches for the words together.
+    must_include:
+      - kebab-case
+      - words
 
   - id: backup-archive
     query: how do I back up my knowledge base?
@@ -56,6 +91,15 @@ cases:
       - path: README.md
         contains: writes a portable
         grade: 2
+    answer: >-
+      `tbuk export <path>` writes a portable `.tar` snapshot of the knowledge base:
+      the config plus every data folder — the database with its SQLite WAL sidecars,
+      the extracted-text cache, the raw archive and the prompt templates. A
+      directory target gets a timestamped filename inside it; a file target is used
+      as it is.
+    must_include:
+      - tbuk export
+      - .tar
 
   - id: no-restore-command
     query: is there a restore command?
@@ -63,24 +107,58 @@ cases:
       - path: README.md
         contains: trusting an archive's embeddings is only safe
         grade: 2
+    answer: >-
+      No, and deliberately so: trusting an archive's embeddings is only safe when
+      the two machines share an embedding model, which tbuk cannot verify. To roll
+      your own machine back to a snapshot, untar the archive over the root. `tbuk
+      import` is the other direction — it takes the documents and templates and re-
+      indexes them with this machine's config, never the archive's embeddings.
+    must_include:
+      - untar
+      - tbuk import
 
   - id: data-root
     query: how do I keep a second knowledge base in a different directory?
     relevant:
       - path: README.md
         contains: relocates that whole directory for a single invocation
+    answer: >-
+      The global `--root DIR` flag relocates the whole data directory — database,
+      extracted-text cache, raw archive, prompt templates and `config.yaml` — for a
+      single invocation. `tbuk init --root DIR` writes a portable `config.yaml`
+      whose data paths are relative to DIR, and every later command needs only the
+      same `--root DIR`. Pointing `--root` at different directories keeps several
+      knowledge bases side by side.
+    must_include:
+      - --root
+      - config.yaml
 
   - id: deterministic-answers
     query: how do I make the model's answers deterministic?
     relevant:
       - path: README.md
         contains: deterministic answer
+    answer: >-
+      Set `temperature: 0` in the template's `manifest.yaml`. An explicit 0 is
+      honored rather than treated as unset, and omitting `temperature` altogether
+      uses the provider's own default.
+    must_include:
+      - temperature
+      - manifest.yaml
 
   - id: stale-extracted-text
     query: why is my document not being re-extracted after I improved an extractor?
     relevant:
       - path: README.md
         contains: stops its old output from being reused
+    answer: >-
+      The extracted-text cache filename carries `preprocess.ExtractorVersion`, so an
+      improved extractor keeps reusing its old output for content that has not
+      changed until that constant is bumped. Bump it and the next ingest or reindex
+      re-extracts.
+    must_include:
+      - extractorversion
+      - re-extract
 
   - id: duplicate-paths
     query: will ingesting the same file by a relative and an absolute path index it twice?
@@ -88,6 +166,13 @@ cases:
       - path: README.md
         contains: no double-indexing under different spellings
         grade: 2
+    answer: >-
+      No. `tbuk ingest`, `update` and `delete` resolve their path argument to an
+      absolute, cleaned form, so a document ingested as `docs/a.md` is the same
+      document as `./docs/a.md` or its full absolute path — there is no double-
+      indexing under different spellings.
+    must_include:
+      - absolute
 
   - id: exclusion-operator
     query: how do I exclude a word from a search?
@@ -95,6 +180,14 @@ cases:
       - path: docs/user-guide.md
         contains: leaves out anything containing it
         grade: 2
+    answer: >-
+      Put a `-` in front of the word: `tbuk search 'meter -deprecated'` leaves out
+      anything containing it. The dash only means "exclude" at the start of a word,
+      and a query of nothing but exclusions returns no results, since an exclusion
+      needs something to exclude from.
+    must_include:
+      - tbuk search
+      - exclude
 
   - id: chunk-size-tuning
     query: my answers about one document feel incomplete, what should I change?
@@ -102,6 +195,14 @@ cases:
       - path: docs/user-guide.md
         contains: split a key piece of context across two chunks
         grade: 2
+    answer: >-
+      Chunking may have split a key piece of context across two chunks. Re-ingest
+      with a larger `chunking.size` (for example 500). With llama.cpp, keep it below
+      the server's physical batch size (default 512 tokens) and raise `-b` and `-ub`
+      at server startup to go higher.
+    must_include:
+      - chunking.size
+      - re-ingest
 
   - id: eval-purpose
     query: how do I tell whether a settings change actually helped retrieval?
@@ -111,6 +212,15 @@ cases:
         grade: 2
       - path: README.md
         contains: argued from numbers
+    answer: >-
+      You cannot tell from trying two questions — one or two examples will agree
+      with whatever you were hoping. `tbuk eval` scores retrieval against a labelled
+      set of cases and reports hit@k, recall@k, precision@k, MRR and nDCG@k. Save
+      one run with `--format json` and diff the next against it with `--baseline`,
+      so the change is argued from numbers rather than from an anecdote.
+    must_include:
+      - tbuk eval
+      - --baseline
 
   # ------------------------------------------------------------------ follow-ups
   # The measurement. Each is an elliptical question that reaches nothing on its
@@ -128,6 +238,12 @@ cases:
       - path: docs/user-guide.md
         contains: skips the language model entirely
         grade: 2
+    answer: >-
+      `tbuk search` skips the language model entirely and returns the matching
+      chunks themselves. Hybrid mode is the default and generally best; `--mode
+      keyword` is exact-word only and needs no embedding call at all.
+    must_include:
+      - tbuk search
 
   - id: restore-followup
     thread:
@@ -139,6 +255,15 @@ cases:
       - path: README.md
         contains: untar it over the root
         grade: 2
+    answer: >-
+      There is no restore command. To roll your own machine back to a snapshot —
+      where the config has not changed and the vectors are yours — untar the archive
+      over the root, for example `tar -xf ~/backups/kb.tar -C ~/.tbuk`. To bring an
+      archive from another machine, `tbuk import` takes its documents and templates
+      and re-indexes them with this machine's config.
+    must_include:
+      - tar
+      - tbuk import
 
   - id: reembed-followup
     thread:
@@ -150,6 +275,13 @@ cases:
       - path: README.md
         contains: changes the vector dimension
         grade: 2
+    answer: >-
+      Yes. Changing the embedding model changes the vector dimension, and the chunks
+      already indexed stay at the old one, so searches refuse to run against them.
+      Run `tbuk reindex` to re-embed every document from the raw archive.
+    must_include:
+      - tbuk reindex
+      - dimension
 
   - id: context-window-followup
     thread:
@@ -161,6 +293,13 @@ cases:
       - path: README.md
         contains: turns the guard off
         grade: 2
+    answer: >-
+      Raise `llm.context_tokens` in `config.yaml` — the default is 8192, and 0 turns
+      the guard off entirely. A template that pins a model with a different window
+      can pin the window too, with a top-level `context_tokens` in its
+      `manifest.yaml`.
+    must_include:
+      - context_tokens
 
   - id: folder-ingest-followup
     thread:
@@ -172,6 +311,13 @@ cases:
       - path: docs/user-guide.md
         contains: including subfolders
         grade: 2
+    answer: >-
+      `tbuk ingest ~/notes/` processes every supported file (.md, .txt, .pdf, .html,
+      .htm) in the folder, including subfolders. Files that have not changed since
+      the last ingest are skipped automatically.
+    must_include:
+      - tbuk ingest
+      - subfolders
 
   - id: custom-template-followup
     thread:
@@ -184,6 +330,14 @@ cases:
         contains: prompt templates
       - path: README.md
         contains: manifest.yaml
+    answer: >-
+      Make a folder under `~/.tbuk/prompts/<name>/` holding three files:
+      `manifest.yaml` (the name, the model, `temperature`, `max_tokens` and a
+      `retrieval.top_k`), `system.tmpl` with the instructions to the model, and
+      `user.tmpl` with the question format. Use it with `tbuk ask -t <name>`.
+    must_include:
+      - manifest.yaml
+      - system.tmpl
 
   - id: conversation-followup
     thread:
@@ -195,6 +349,14 @@ cases:
       - path: README.md
         contains: picks up the most recently used
         grade: 2
+    answer: >-
+      `tbuk ask --session NAME` makes the turn part of a named thread instead of a
+      single-shot question, and `-c` / `--continue` picks up the most recently used
+      one. An unknown name creates the thread. `tbuk chat --session NAME` is the
+      same thread interactively.
+    must_include:
+      - --session
+      - --continue
 
   - id: bare-followup-warning
     thread:
@@ -206,6 +368,12 @@ cases:
       - path: docs/user-guide.md
         contains: it has no idea what came before
         grade: 2
+    answer: >-
+      `tbuk ask "and maps?"` on its own searches for the words "and maps" and
+      nothing else — it has no idea what came before. Use `--session` / `-c`, or
+      `tbuk chat`, for anything conversational.
+    must_include:
+      - --session
 
   - id: unnamed-chat-followup
     thread:
@@ -217,6 +385,13 @@ cases:
       - path: docs/user-guide.md
         contains: a chat is not saved, by design
         grade: 2
+    answer: >-
+      No. Without `--session` a chat is not saved, by design; when you leave it, it
+      is gone. `/new NAME` part-way through starts recording from there, but does
+      not go back for what came before.
+    must_include:
+      - --session
+      - /new
 
   - id: batch-size-followup
     thread:
@@ -228,6 +403,13 @@ cases:
       - path: docs/user-guide.md
         contains: below the server's physical batch size
         grade: 2
+    answer: >-
+      With llama.cpp, keep `chunking.size` below the server's physical batch size,
+      which defaults to 512 tokens. To go higher, raise `-b` and `-ub` at server
+      startup.
+    must_include:
+      - '512'
+      - chunking.size
 
   - id: stale-docs-followup
     thread:
@@ -239,3 +421,9 @@ cases:
       - path: docs/user-guide.md
         contains: after updating your documents
         grade: 2
+    answer: >-
+      The knowledge base knows only what you have ingested, so run `tbuk ingest`
+      again after updating your documents. Files that have not changed are skipped
+      automatically.
+    must_include:
+      - tbuk ingest
