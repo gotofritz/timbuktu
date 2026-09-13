@@ -11,7 +11,7 @@ timbuktu-docs — 3 runs, 24 cases each
   precision@5        0.083   0.083   0.083    0.000    0.000
   mrr                0.238   0.238   0.238    0.000    0.000
   ndcg@5             0.264   0.264   0.264    0.000    0.000
-  latency median       411     409     413        2        4   ms
+  latency median       410     408     413        3        5   ms
   planning median        0       0       0        0        0   ms
 
   generation
@@ -19,7 +19,7 @@ timbuktu-docs — 3 runs, 24 cases each
   citations          0.000   0.000   0.000    0.000    0.000
   groundedness       0.685   0.685   0.685    0.000    0.000
   correctness        0.438   0.438   0.438    0.000    0.000
-  latency median      8332    8309    8373       36       64   ms
+  latency median      8337    8263    8438       90      175   ms
   judged                24      24      24        0        0   answers
 
   note: 24 cases, so one case moving is ±0.042 on hit
