@@ -1,5 +1,14 @@
 # Subplan 05: Conversational context — multi-turn `ask`, query planning, iterative retrieval
 
+> **Archived 2026-09-13.** Every milestone is resolved: 1–4 shipped
+> ([#157](../../../../issues/157), [#158](../../../../issues/158),
+> [#159](../../../../issues/159), [#160](../../../../issues/160)) and 5
+> ([#161](../../../../issues/161)) was built, measured against its own kill
+> criterion, and removed — see D12 below and `docs/eval/README.md`. Two of the
+> three defaults this plan introduced stay off on the evidence recorded there;
+> the third, `window`, was always the default.
+
+
 Lands roadmap **#5** (conversational context / multi-turn `ask`,
 [#145](../../../../issues/145)) from `docs/plans/next-steps.md`, together with
 the cluster-mates that roadmap entry names as belonging with it — **#24 query
