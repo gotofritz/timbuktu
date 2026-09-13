@@ -811,3 +811,33 @@ func TestReportWriteText_noPlanningSectionWhenNothingWasRewritten(t *testing.T) 
 		t.Errorf("nothing was rewritten, so there is no planning section to print:\n%s", b.String())
 	}
 }
+
+// A judged number is only comparable to one graded by the same rubric. The
+// model name does not carry that: one model under two rubrics is two
+// instruments, and it took a 0.34 swing on identical answers to notice.
+func TestDiff_rubricChangeWarnsEvenUnderOneJudgeModel(t *testing.T) {
+	run := eval.Run{Mode: "hybrid", TopK: 5, Judge: "mlx/qwen", JudgeRubric: "aaaa1111"}
+	other := run
+	other.JudgeRubric = "bbbb2222"
+
+	judged := []eval.CaseResult{{
+		ID: "a", Metrics: eval.Metrics{Hit: 1, Cases: 1},
+		Generation: &eval.GenMetrics{Cases: 1, Correctness: 1, Judged: 1},
+	}}
+	d, err := eval.Diff(eval.NewReport("go-docs", other, judged), eval.NewReport("go-docs", run, judged))
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !containsSubstring(d.Warnings, "rubric") {
+		t.Errorf("warnings = %v, want one naming the rubric", d.Warnings)
+	}
+
+	// The same rubric either side is the normal case and says nothing.
+	same, err := eval.Diff(eval.NewReport("go-docs", run, judged), eval.NewReport("go-docs", run, judged))
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if containsSubstring(same.Warnings, "rubric") {
+		t.Errorf("warnings = %v, want none", same.Warnings)
+	}
+}

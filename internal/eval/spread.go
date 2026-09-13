@@ -316,6 +316,12 @@ func spreadWarnings(reports []Report) []string {
 				"run %d used a different model (%s, was %s): this is a spread over two instruments",
 				n, orNone(r.Run.LLM), orNone(first.Run.LLM)))
 		}
+		if r.Run.JudgeRubric != first.Run.JudgeRubric {
+			out = append(out, fmt.Sprintf(
+				"run %d was judged under a different rubric (%s, was %s): the grading instructions "+
+					"are part of the instrument, and this is a spread over two of them",
+				n, orNone(r.Run.JudgeRubric), orNone(first.Run.JudgeRubric)))
+		}
 		if r.Run.Host != first.Run.Host {
 			out = append(out, fmt.Sprintf(
 				"run %d ran on a different machine (%s, was %s): the quality numbers still compare, the latencies do not",
@@ -394,7 +400,7 @@ func (s Spread) WriteText(w io.Writer) error {
 		fmt.Fprintf(&b, "  llm %s\n", s.Run.LLM)
 	}
 	if s.Run.Judge != "" {
-		fmt.Fprintf(&b, "  judge %s\n", s.Run.Judge)
+		fmt.Fprintf(&b, "  judge %s%s\n", s.Run.Judge, rubricSuffix(s.Run.JudgeRubric))
 	}
 	if s.Run.Host != "" {
 		fmt.Fprintf(&b, "  host %s\n", s.Run.Host)
