@@ -347,6 +347,26 @@ correctness moved +0.00 between them — so the loop was killed on a valid
 comparison. But `0.783` is not comparable to anything measured now, and the
 current baseline for judged correctness on this corpus is **0.438**.
 
+**Corroborated.** That figure comes from two independent three-run sweeps on
+separate days — six runs — each reporting `span 0.000` on every quality metric,
+`judged 24` every time, and `correctness 0.438` to the digit. The judge is as
+deterministic at this temperature as `condense` turned out to be, so a single
+judged run of *one rubric* is reproducible; it is only across a rubric edit that
+the number moves. `results/generation-spread.txt` is the second of the two, and
+the first to carry `(rubric 3ce9d82f)` in its header.
+
+The two sweeps also differ in every latency figure and in nothing else —
+generation median 8337ms then 6278ms, retrieval 410ms then 378ms, sixteen
+minutes of wall clock then twelve — which is this directory's standing claim
+about latency demonstrated rather than asserted: it moves with the machine, and
+the quality numbers do not move with it.
+
+One gap worth knowing: `results/generation.json`, the single-run baseline, was
+produced before the fingerprint existed and so records no `judge_rubric`. It
+was in fact scored by `3ce9d82f` — its `correctness 0.4375` matches both sweeps
+— but the file cannot say so itself. Re-run `make eval-generation` if you want a
+baseline that names its own instrument.
+
 **The deterministic scores did not move at all**, which is the argument for
 having them. `includes` and `groundedness` were identical across a judge change
 that halved the judged number, and that is the whole reason this harness scores
