@@ -1,8 +1,9 @@
 # Subplan 14: HTTP ingest server + browser clipper
 
-Lands roadmap **#14** (web / server mode) from `docs/plans/next-steps.md` —
-which is listed there as a money pit, "only revisit on a deliberate scope
-change". This is that change, and it is narrower than the item it reverses.
+Lands roadmap **#14** (web / server mode) from `docs/plans/next-steps.md`,
+tracked as [#177](../../../../issues/177). The roadmap lists that item as a
+money pit, "only revisit on a deliberate scope change". This is that change,
+and it is narrower than the item it reverses.
 
 The driving use case is one gesture: **select text on a web page and get it
 into the knowledge base**, optionally translated, summarised, or stripped of
