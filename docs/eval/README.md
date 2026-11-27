@@ -397,7 +397,9 @@ a dead A/B it was and nothing reproducible — the JSON itself never carried the
 hop count, since zero is omitted. Its `faithfulness: 0.413` is the axis that was
 removed on this run's own evidence. And its `citations: 0` over eight emitted is
 not a citation failure: every one of the eight was a config key or a dotted
-identifier, which is [#174](../../../../issues/174). What the file is still good
+identifier, which is [#174](../../../../issues/174): those no longer count as
+citations, and under the `qa` template, which never asks for one, the rate
+now prints `—`. What the file is still good
 for is what it was: the generation stage running end to end over this corpus,
 and the `correctness` and latency the criterion turned on. It also still works
 as a `--baseline`, since an unknown field is ignored on the way in.

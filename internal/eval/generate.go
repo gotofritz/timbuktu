@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -133,6 +134,16 @@ func mean(total float64, n int) float64 {
 	return total / float64(n)
 }
 
+// WithoutCitations drops the citations rate, for a template that never asked
+// the model to cite (#174). Its denominator would be whatever filenames the
+// answer happened to mention, and its numerator structurally zero: a number
+// that reads as "every citation was hallucinated" when none was ever made.
+func (m GenMetrics) WithoutCitations() GenMetrics {
+	m.Citations = 0
+	m.WithCitations = 0
+	return m
+}
+
 // ResolveCitations splits the documents an answer named into those the index
 // holds and those it does not.
 //
@@ -141,7 +152,7 @@ func mean(total float64, n int) float64 {
 // hallucinated source and a filename mentioned in passing look identical as a
 // number and nothing alike as a list.
 func ResolveCitations(text string, indexed []string) (resolved, unresolved []string) {
-	for _, cite := range ExtractCitations(text) {
+	for _, cite := range ExtractCitations(text, indexed) {
 		found := false
 		for _, doc := range indexed {
 			if MatchesPath(cite, doc) {
@@ -161,24 +172,31 @@ func ResolveCitations(text string, indexed []string) (resolved, unresolved []str
 // ExtractCitations returns the documents an answer named, deduplicated and in
 // the order it named them.
 //
-// A citation is a filename-shaped token: something with a two-to-eight
-// character extension carrying a letter, on a base of at least two characters.
-// That deliberately excludes `e.g.`, `i.e.` and version numbers, and just as
-// deliberately keeps a bare `notes.md` — a model shown `Source: path §index`
-// cites by path, sometimes with the marker and sometimes without.
+// A citation is a filename-shaped token — a base of at least two characters
+// carrying a letter, a dot, an extension — whose extension is one a document
+// has: one of the indexed documents' own, or a document, config or manifest
+// format (documentExts). That excludes `e.g.`, `i.e.` and version numbers, and
+// keeps a bare `notes.md` — a model shown `Source: path §index` cites by path,
+// sometimes with the marker and sometimes without.
 //
-// It is a heuristic and it says so: prose naming a file the corpus does not
-// hold ("edit your go.mod") reads as an unresolved citation. --verbose prints
-// what was counted, so a surprising number can be traced rather than argued
-// with.
-func ExtractCitations(text string) []string {
+// Checking the extension is what keeps a corpus that documents software from
+// reading as a citation every config key (`embedding.model`), identifier
+// (`fmt.Errorf`) and product name (`llama.cpp`) an answer mentions (#174):
+// none of those ends in an extension a document has.
+//
+// It is still a heuristic and it says so: prose naming a file the corpus does
+// not hold ("edit your go.mod") reads as an unresolved citation. --verbose
+// prints what was counted, so a surprising number can be traced rather than
+// argued with.
+func ExtractCitations(text string, indexed []string) []string {
 	var (
 		out  []string
 		seen = map[string]bool{}
+		exts = indexedExts(indexed)
 	)
 	for _, tok := range strings.FieldsFunc(text, isCitationBreak) {
 		tok = strings.Trim(tok, `.,;:!?"'`+"`*([{<>}])")
-		if !looksLikeCitation(tok) {
+		if !looksLikeCitation(tok, exts) {
 			continue
 		}
 		key := normPath(tok)
@@ -197,25 +215,42 @@ func isCitationBreak(r rune) bool {
 	return unicode.IsSpace(r) || strings.ContainsRune("§,;()[]{}<>\"'`|", r)
 }
 
-// looksLikeCitation reports whether tok has the shape of a document reference.
-func looksLikeCitation(tok string) bool {
+// documentExts are the extensions a citation may carry whatever the index
+// holds: the formats a document is written in, and the config and manifest
+// files documentation names. Never a programming language's: `llama.cpp`,
+// `node.js` and `socket.io` are product names, and in a corpus about software
+// they outnumber the source files an answer would cite.
+var documentExts = map[string]bool{
+	"md": true, "markdown": true, "txt": true, "pdf": true, "html": true, "htm": true,
+	"rst": true, "adoc": true, "org": true,
+	"yaml": true, "yml": true, "json": true, "toml": true, "ini": true, "cfg": true,
+	"conf": true, "xml": true, "csv": true, "tsv": true, "tmpl": true,
+	"mod": true, "sum": true, "lock": true,
+}
+
+// indexedExts are the extensions the indexed documents carry, lowercased.
+func indexedExts(indexed []string) map[string]bool {
+	exts := make(map[string]bool, len(indexed))
+	for _, doc := range indexed {
+		if ext := strings.TrimPrefix(filepath.Ext(doc), "."); ext != "" {
+			exts[strings.ToLower(ext)] = true
+		}
+	}
+	return exts
+}
+
+// looksLikeCitation reports whether tok has the shape of a document reference,
+// with an extension a document has: a known format, or one of exts.
+func looksLikeCitation(tok string, exts map[string]bool) bool {
 	dot := strings.LastIndexByte(tok, '.')
 	if dot <= 0 || dot == len(tok)-1 {
 		return false
 	}
-	base, ext := tok[:dot], tok[dot+1:]
+	base, ext := tok[:dot], strings.ToLower(tok[dot+1:])
 	if len(base) < 2 || !strings.ContainsFunc(base, unicode.IsLetter) {
 		return false
 	}
-	if len(ext) < 2 || len(ext) > 8 || !strings.ContainsFunc(ext, unicode.IsLetter) {
-		return false
-	}
-	for _, r := range ext {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			return false
-		}
-	}
-	return true
+	return documentExts[ext] || exts[ext]
 }
 
 // contentWords reduces text to the distinct words that carry what it claims,

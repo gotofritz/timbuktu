@@ -504,3 +504,30 @@ func TestLoad_rejectsBadRewrite(t *testing.T) {
 		})
 	}
 }
+
+// #174: a template says whether it asks the model to cite its sources, and
+// eval scores citations only for one that does. Off unless it says so.
+func TestManifest_citations(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "cited", map[string]string{
+		"manifest.yaml": "name: cited\ncitations: true\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+	writeTemplate(t, dir, "plain", map[string]string{
+		"manifest.yaml": "name: plain\n",
+		"system.tmpl":   "sys",
+		"user.tmpl":     "usr",
+	})
+
+	td := prompts.NewTemplateDir(dir)
+	for name, want := range map[string]bool{"cited": true, "plain": false} {
+		tmpl, err := td.Load(name)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", name, err)
+		}
+		if got := tmpl.Manifest().Citations; got != want {
+			t.Errorf("%s citations = %v, want %v", name, got, want)
+		}
+	}
+}

@@ -64,6 +64,10 @@ type EvalOptions struct {
 	// Indexed is every document path the knowledge base holds, for resolving
 	// the citations an answer emitted.
 	Indexed []string
+	// Citations scores the citations an answer emitted. It is the template's
+	// `citations:` (#174): an answer nobody asked to cite has no citations to
+	// score, only filenames it mentioned.
+	Citations bool
 	// Embedding, LLM and JudgeModel name the models that answered, for the
 	// report's instrument block: two runs are comparable only as far as that
 	// matches.
@@ -334,7 +338,11 @@ func scoreAnswer(ctx context.Context, row *eval.CaseResult, c eval.Case,
 
 	answer := eval.Answer{Text: text, Passages: evalResults(used)}
 	metrics := eval.ScoreAnswer(answer, c, opts.Indexed)
-	_, row.UnresolvedCitations = eval.ResolveCitations(text, opts.Indexed)
+	if opts.Citations {
+		_, row.UnresolvedCitations = eval.ResolveCitations(text, opts.Indexed)
+	} else {
+		metrics = metrics.WithoutCitations()
+	}
 
 	if opts.Judge != nil {
 		verdict, err := opts.Judge.Judge(ctx, c, answer)
@@ -913,6 +921,7 @@ configurable, so two runs cannot be scored by two different instruments;
 					return err
 				}
 				runOpts.Answer = EvalAnswerFn(tmpl, l.Chat, cfg.LLM.ContextTokens, cfg.LLM.MaxTokens)
+				runOpts.Citations = tmpl.Manifest().Citations
 				runOpts.LLM = modelLabel(cfg.LLM.Provider, cfg.LLM.Model)
 
 				if judgeFlag {

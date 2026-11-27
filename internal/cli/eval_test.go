@@ -709,8 +709,9 @@ cases:
 		recordingRetriever(nil, &seen),
 		cli.EvalOptions{
 			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
-			Answer:  fixedAnswer("See go/slices.md and go/generics.md."),
-			Indexed: []string{"/n/go/slices.md"},
+			Answer:    fixedAnswer("See go/slices.md and go/generics.md."),
+			Indexed:   []string{"/n/go/slices.md"},
+			Citations: true,
 		})
 	if err != nil {
 		t.Fatalf("RunEval: %v", err)
@@ -720,6 +721,44 @@ cases:
 	}
 	if got := report.Generation.Overall.Citations; got != 0.5 {
 		t.Errorf("citations = %.2f, want 0.50", got)
+	}
+}
+
+// #174: under a template that never asked for citations, the filenames an
+// answer mentions are not scored as citations, and the report says so with a
+// dash rather than a rate over things nobody cited.
+func TestRunEval_citationsAreNotScoredUnlessTheTemplateAsks(t *testing.T) {
+	set := evalSet(t, `
+version: 1
+name: go-docs
+cases:
+  - id: a
+    query: q
+    answer: a reference
+`)
+	var seen [][]string
+	report, err := cli.RunEval(context.Background(), set,
+		recordingRetriever(nil, &seen),
+		cli.EvalOptions{
+			Mode: "hybrid", TopK: 5, Stage: eval.StageGeneration,
+			Answer:  fixedAnswer("Set embedding.model in ~/.tbuk/config.yaml, then see go/generics.md."),
+			Indexed: []string{"/n/go/slices.md"},
+		})
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if got := report.Cases[0].UnresolvedCitations; got != nil {
+		t.Errorf("unresolved citations = %v, want none: nothing asked for them", got)
+	}
+	if g := report.Generation.Overall; g.WithCitations != 0 {
+		t.Errorf("citations scored over %d answers, want 0", g.WithCitations)
+	}
+	var out strings.Builder
+	if err := cli.EvalOutput(&out, report, nil, "text", false); err != nil {
+		t.Fatalf("EvalOutput: %v", err)
+	}
+	if !strings.Contains(out.String(), "citations    —") {
+		t.Errorf("report does not print citations as a dash:\n%s", out.String())
 	}
 }
 
