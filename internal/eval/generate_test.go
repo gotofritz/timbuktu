@@ -105,6 +105,7 @@ func TestScoreAnswer_citations(t *testing.T) {
 }
 
 func TestExtractCitations(t *testing.T) {
+	indexed := []string{"/n/go/slices.md", "/n/go/notes.md"}
 	tests := []struct {
 		name string
 		text string
@@ -116,10 +117,20 @@ func TestExtractCitations(t *testing.T) {
 		{"prose abbreviations are not citations", "e.g. this, i.e. that", nil},
 		{"version numbers are not citations", "go 1.26.2 and pi is 3.14", nil},
 		{"no citation at all", "append reallocates when len == cap", nil},
+		// #174: on a corpus that documents software, every dotted token in an
+		// answer was a config key, an identifier or a product name.
+		{
+			"config keys, identifiers and product names are not citations",
+			"Set embedding.model and chunking.size, wrap with fmt.Errorf, or run llama.cpp and node.js.",
+			nil,
+		},
+		{"a source and a note", "As slices.md §3 says, and notes.md agrees.", []string{"slices.md", "notes.md"}},
+		{"a file the corpus does not hold, of a known kind", "then edit your go.mod", []string{"go.mod"}},
+		{"a config file named in passing", "in ~/.tbuk/config.yaml", []string{"~/.tbuk/config.yaml"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := eval.ExtractCitations(tt.text)
+			got := eval.ExtractCitations(tt.text, indexed)
 			if len(got) != len(tt.want) {
 				t.Fatalf("ExtractCitations(%q) = %v, want %v", tt.text, got, tt.want)
 			}
@@ -129,6 +140,42 @@ func TestExtractCitations(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An extension the index holds is a citation, whatever it is: a corpus of
+// .note files cites them.
+func TestExtractCitations_extensionsTheIndexHolds(t *testing.T) {
+	got := eval.ExtractCitations("see design.note and run.model", []string{"/k/design.note"})
+	if len(got) != 1 || got[0] != "design.note" {
+		t.Fatalf("ExtractCitations = %v, want [design.note]", got)
+	}
+}
+
+// #174 acceptance: slices.md §3 and notes.md are both extracted, and the one
+// the index holds resolves; go.mod over a corpus with no .mod stays unresolved.
+func TestResolveCitations_issue174(t *testing.T) {
+	resolved, unresolved := eval.ResolveCitations(
+		"slices.md §3 says so; notes.md too. Then edit your go.mod.",
+		[]string{"/n/go/slices.md"})
+	if len(resolved) != 1 || resolved[0] != "slices.md" {
+		t.Errorf("resolved = %v, want [slices.md]", resolved)
+	}
+	if len(unresolved) != 2 || unresolved[0] != "notes.md" || unresolved[1] != "go.mod" {
+		t.Errorf("unresolved = %v, want [notes.md go.mod]", unresolved)
+	}
+}
+
+// #174: a template that never asked for a citation reports none, rather than
+// a rate over things that were never citations.
+func TestGenMetrics_withoutCitations(t *testing.T) {
+	m := eval.ScoreAnswer(eval.Answer{Text: "See go/slices.md and go/generics.md."},
+		eval.Case{}, []string{"/n/go/slices.md"}).WithoutCitations()
+	if m.Citations != 0 || m.WithCitations != 0 {
+		t.Errorf("Citations = %.2f over %d, want nothing over nothing", m.Citations, m.WithCitations)
+	}
+	if m.Cases != 1 || m.WithWords != 1 {
+		t.Errorf("the other metrics changed: %+v", m)
 	}
 }
 

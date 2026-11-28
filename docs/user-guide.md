@@ -1393,7 +1393,9 @@ run, and `tbuk doctor` names the templates that condense or expand. See
 for](#choosing-how-the-follow-up-is-searched-for) and [Searching for the same
 thing in several ways](#searching-for-the-same-thing-in-several-ways).
 
-A manifest may also set `max_tokens` (how long the answer may get) and
+A manifest may also set `citations: true` when the template asks the model to
+cite its sources, so `tbuk eval` scores the citations its answers emit (see
+[Scoring the answers, not just the search](#scoring-the-answers-not-just-the-search)), `max_tokens` (how long the answer may get) and
 `context_tokens` (the window of the model this template runs on, overriding
 `llm.context_tokens` in the config — useful when the template pins a `model:`
 of its own with a bigger or smaller window). See [Fitting the model's context
@@ -2330,6 +2332,14 @@ Three numbers, none of which needs an AI grader:
 is not in your knowledge base is the classic failure, and this catches it for
 free. `--verbose` lists the names that resolved to nothing, so you can see
 whether it was a made-up source or just a filename mentioned in passing.
+
+It is only scored for a template that asks the model to cite its sources, which
+says so with `citations: true` in its `manifest.yaml`. The built-in `qa` does
+not, so under it `citations` prints `—`: an answer nobody asked to cite has no
+citations to score, only filenames it happened to mention. A citation is a
+filename with an extension a document has — one your indexed files carry, or a
+document or config format such as `.md`, `.pdf` or `.yaml` — so a config key
+like `embedding.model` or a name like `llama.cpp` is never counted as one.
 
 `groundedness` is crude on purpose — it is word overlap, so an answer that
 quotes scores well and an answer that paraphrases well scores lower than it

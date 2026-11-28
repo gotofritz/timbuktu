@@ -109,8 +109,10 @@ func TestEvalCommand_stageBothWithJudge(t *testing.T) {
 	if g.Includes != 1 {
 		t.Errorf("includes = %.2f, want 1.00 — the answer carries both required substrings", g.Includes)
 	}
-	if g.Citations != 1 {
-		t.Errorf("citations = %.2f, want 1.00 — go.md is indexed", g.Citations)
+	// The built-in qa template never asks the model to cite (#174), so the
+	// go.md the answer names is not scored as a citation.
+	if g.WithCitations != 0 {
+		t.Errorf("citations scored over %d answers, want 0 — qa does not ask for them", g.WithCitations)
 	}
 	if g.Groundedness <= 0 {
 		t.Errorf("groundedness = %.2f, want more than 0 — the answer quotes the passage", g.Groundedness)

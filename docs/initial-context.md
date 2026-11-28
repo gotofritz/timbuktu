@@ -1199,7 +1199,7 @@ everything it was asked for.
 | Metric | Definition |
 |---|---|
 | includes | `must_include` substrings present ÷ required (folded like `contains`) |
-| citations | citations the answer emitted that resolve to an indexed document ÷ emitted |
+| citations | citations the answer emitted that resolve to an indexed document ÷ emitted; only under a template with `citations: true` |
 | groundedness | distinct content words of the answer appearing in the passages |
 | correctness | judge, 0–2 against `answer:`, rescaled (needs `--judge`) — the only judged axis |
 
@@ -1210,10 +1210,19 @@ rather than on support, which `JudgeSystem` forbids explicitly. `groundedness`
 answers the same question deterministically, so the axis bought nothing a small
 judge could be trusted to say. `docs/eval/README.md` records the run.
 
-`ExtractCitations` reads a citation as a filename-shaped token — a two-to-eight
-character extension carrying a letter, on a base of at least two — which
-excludes `e.g.` and version numbers and keeps a bare `notes.md`, since a model
-shown `Source: path §index` cites by path with the marker and without.
+`ExtractCitations` reads a citation as a filename-shaped token whose extension
+is one a document has — one the indexed documents carry, or a document, config
+or manifest format (`documentExts`: `md`, `pdf`, `yaml`, `mod`…, never a
+programming language's) — on a base of at least two characters. That excludes
+`e.g.`, version numbers, config keys (`embedding.model`), identifiers
+(`fmt.Errorf`) and product names (`llama.cpp`), and keeps a bare `notes.md`,
+since a model shown `Source: path §index` cites by path with the marker and
+without (#174). Citations are scored only for a template whose manifest says
+`citations: true`, the one place that knows whether the prompt asks for them:
+inferring it from the rendered prompt would be a second heuristic stacked on
+the first. Under any other template the rate is dropped
+(`GenMetrics.WithoutCitations`) and the report prints `—`, as for any rate over
+nothing.
 `ResolveCitations` splits them into resolved and unresolved, and `--verbose`
 prints the unresolved ones: a hallucinated source and a filename mentioned in
 passing are identical as a number and nothing alike as a list.

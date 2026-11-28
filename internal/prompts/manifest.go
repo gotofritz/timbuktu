@@ -52,6 +52,11 @@ type Manifest struct {
 	// Normalize repairs model output that drifted from the shape system.tmpl
 	// asked for. Empty means the completion is passed through untouched.
 	Normalize normalize.Config `yaml:"normalize"`
+	// Citations says the template asks the model to cite its sources, so
+	// `tbuk eval` scores the citations its answers emit. Off, a template that
+	// never asked would score whatever filenames an answer mentions as
+	// hallucinated sources (#174).
+	Citations bool `yaml:"citations"`
 }
 
 func loadManifest(path string) (Manifest, error) {
