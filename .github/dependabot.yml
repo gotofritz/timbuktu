@@ -1,13 +1,17 @@
 version: 2
 updates:
+  # Minor and patch bumps come as one PR per ecosystem; a major bump gets its
+  # own PR, because it may need code changes.
   - package-ecosystem: gomod
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
     groups:
-      # modernc.org/* (pure-Go SQLite stack) release together; group their
-      # bumps into one PR to avoid churn
+      go-minor-patch:
+        update-types: [minor, patch]
+      # modernc.org/* (pure-Go SQLite stack) release together; keep a major
+      # bump of theirs in one PR too
       modernc:
         patterns:
           - "modernc.org/*"
@@ -17,3 +21,6 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
